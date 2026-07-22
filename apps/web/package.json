@@ -1,0 +1,23 @@
+{
+  "name": "api-marketplace-ui-preview",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test:ui": "node scripts/ui-smoke.mjs",
+    "capture": "node scripts/capture.mjs"
+  },
+  "dependencies": {
+    "@lobehub/icons": "^2.24.0",
+    "lucide-react": "^0.468.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "playwright-core": "^1.49.1",
+    "vite": "^6.0.5"
+  }
+}

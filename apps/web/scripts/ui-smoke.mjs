@@ -102,6 +102,24 @@ async function mockAdminAPI(targetPage, state) {
       state.healthResetCalls += 1;
       return json({ success: true, data: { channel_id: 52, health_state: 'pending' } });
     }
+    if (url.pathname === '/api/admin/payment-settings' && request.method() === 'GET') {
+      return json({ success: true, data: { id: 11, version: 3, gateway_url: 'https://zpayz.cn', merchant_pid_masked: '202***********878', key_configured: true, payment_methods: ['alipay', 'wxpay'], minimum_usd_cents: 1000, maximum_usd_cents: 2000000, exchange_rate_cny_cents_per_usd: 720, enabled: true, notify_url: 'https://aggregate.lwylink.xyz/api/payments/easypay/notify', return_url: 'https://aggregate.lwylink.xyz/payments/return', created_at: '2026-07-22T09:00:00Z' } });
+    }
+    if (url.pathname === '/api/admin/payment-settings' && request.method() === 'PUT') {
+      state.paymentSettingCalls += 1;
+      state.paymentSettingBody = request.postDataJSON();
+      return json({ success: true, data: { id: 12, version: 4, gateway_url: state.paymentSettingBody.gateway_url, merchant_pid_masked: '202***********878', key_configured: true, payment_methods: state.paymentSettingBody.payment_methods, minimum_usd_cents: state.paymentSettingBody.minimum_usd_cents, maximum_usd_cents: state.paymentSettingBody.maximum_usd_cents, exchange_rate_cny_cents_per_usd: state.paymentSettingBody.exchange_rate_cny_cents_per_usd, enabled: state.paymentSettingBody.enabled, notify_url: 'https://aggregate.lwylink.xyz/api/payments/easypay/notify', return_url: 'https://aggregate.lwylink.xyz/payments/return', created_at: '2026-07-22T10:00:00Z' } }, 201);
+    }
+    if (url.pathname === '/api/admin/payment-orders' && request.method() === 'GET') {
+      return json({ success: true, data: { page: 1, page_size: 50, total: 2, items: [
+        { id: 21, order_no: 'MR202607220001', user_id: 7, payment_type: 'alipay', usd_cents: 10000, cny_cents: 72000, exchange_rate_cny_cents_per_usd: 720, newapi_quota: 50000000, payment_status: 'paid', credit_status: 'succeeded', third_party_trade_no: 'EP202607220009', paid_at: '2026-07-22T09:05:00Z', credited_at: '2026-07-22T09:05:10Z', created_at: '2026-07-22T09:00:00Z' },
+        { id: 22, order_no: 'MR202607220002', user_id: 8, payment_type: 'wxpay', usd_cents: 5000, cny_cents: 36000, exchange_rate_cny_cents_per_usd: 720, newapi_quota: 25000000, payment_status: 'paid', credit_status: 'failed', third_party_trade_no: 'EP202607220010', paid_at: '2026-07-22T09:15:00Z', created_at: '2026-07-22T09:10:00Z' },
+      ] } });
+    }
+    if (url.pathname === '/api/admin/payment-orders/22/credit/retry' && request.method() === 'POST') {
+      state.paymentRetryCalls += 1;
+      return json({ success: true, data: null });
+    }
     if (url.pathname === '/api/admin/channel-reviews/22/verify' && request.method() === 'POST') {
       state.channelVerifyCalls += 1;
       return json({ success: true, data: { review_id: 22, models: ['claude-sonnet-4-5'] } });
@@ -126,7 +144,7 @@ try {
     revealCalls: 0, merchantVerifyCalls: 0, channelVerifyCalls: 0,
     routeSaveCalls: 0, routeSaveBody: null, offerCreateCalls: 0, offerCreateBody: null,
     modelCreateCalls: 0, modelCreateBody: null, pricePublishCalls: 0, pricePublishBody: null,
-    healthResetCalls: 0,
+    healthResetCalls: 0, paymentSettingCalls: 0, paymentSettingBody: null, paymentRetryCalls: 0,
   };
   await mockAdminAPI(page, adminMockState);
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
@@ -215,18 +233,27 @@ try {
   await page.getByRole('button', { name: '支付与充值' }).click();
   await page.getByRole('heading', { name: '易支付设置' }).waitFor();
   assert(
-    await page.getByText('https://zpayz.cn/').isVisible(),
+    await page.getByText('https://zpayz.cn').isVisible(),
     '易支付网关未显示',
   );
   const bodyText = await page.locator('body').innerText();
   assert(!/KEY[^\n]{0,24}[A-Za-z0-9]{24,}/.test(bodyText), '页面疑似显示了完整支付密钥');
-  await page.getByRole('button', { name: '测试连接' }).click();
-  await page.getByText('网关连接正常').waitFor();
+  await page.getByText('MR202607220002').waitFor();
+  await page.getByRole('button', { name: '编辑配置' }).click();
+  const paymentDialog = page.getByRole('dialog', { name: '编辑易支付配置' });
+  await paymentDialog.getByLabel('人民币兑美元汇率').fill('7.25');
+  await paymentDialog.getByRole('button', { name: '保存支付配置' }).click();
+  assert(adminMockState.paymentSettingCalls === 1, '支付配置没有调用真实接口');
+  assert(adminMockState.paymentSettingBody.exchange_rate_cny_cents_per_usd === 725, '充值汇率没有转换为整数人民币分');
+  await page.getByRole('button', { name: '重试入账' }).click();
+  await page.getByText('入账任务已重新排队').waitFor();
+  assert(adminMockState.paymentRetryCalls === 1, '失败入账没有调用重试接口');
 
   const anonymousPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
   let anonymousLoggedIn = false;
   let merchantApplication = null;
   let merchantApplicationCalls = 0;
+  let paymentOrderCalls = 0;
   await anonymousPage.route('**/api/**', (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -240,6 +267,12 @@ try {
       return fulfill({ success: true, data: { id: 7, username: 'alice', display_name: 'Alice', role: 1, status: 1, group: 'default' } });
     }
     if (url.pathname === '/api/keys') return fulfill({ success: true, data: { page: 1, page_size: 20, total: 0, items: [] } });
+    if (url.pathname === '/api/payment-settings') return fulfill({ success: true, data: { version: 3, payment_methods: ['alipay', 'wxpay'], minimum_usd_cents: 1000, maximum_usd_cents: 2000000, exchange_rate_cny_cents_per_usd: 720, enabled: true } });
+    if (url.pathname === '/api/payment-orders' && request.method() === 'GET') return fulfill({ success: true, data: { page: 1, page_size: 20, total: 0, items: [] } });
+    if (url.pathname === '/api/payment-orders' && request.method() === 'POST') {
+      paymentOrderCalls += 1;
+      return fulfill({ success: true, data: { order: { id: 31, order_no: 'MR-USER-1', usd_cents: 10000, cny_cents: 72000, payment_status: 'pending', credit_status: 'pending' }, payment_url: `${baseUrl}/payment-target` } }, 201);
+    }
     if (url.pathname === '/api/merchant/application' && request.method() === 'GET') return fulfill({ success: true, data: merchantApplication });
     if (url.pathname === '/api/merchant/application' && request.method() === 'POST') {
       merchantApplicationCalls += 1;
@@ -274,7 +307,34 @@ try {
   await anonymousPage.getByText('商户申请已提交').waitFor();
   assert(merchantApplicationCalls === 1, '商户申请没有调用平台接口');
   await anonymousPage.getByText('等待管理员审核').waitFor();
+  await anonymousPage.getByRole('button', { name: '立即充值' }).click();
+  const rechargeDialog = anonymousPage.getByRole('dialog', { name: '账户充值' });
+  await rechargeDialog.getByLabel('充值额度（美元）').fill('100');
+  await rechargeDialog.getByText('¥720.00').waitFor();
+  await rechargeDialog.getByRole('button', { name: '前往支付' }).click();
+  await anonymousPage.waitForURL('**/payment-target');
+  assert(paymentOrderCalls === 1, '充值订单没有调用平台接口');
   await anonymousPage.close();
+
+  const returnPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const returnMethods = [];
+  await returnPage.route('**/api/**', (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    returnMethods.push(`${request.method()} ${url.pathname}`);
+    const fulfill = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(data) });
+    if (url.pathname === '/api/me') return fulfill({ success: true, data: { id: 7, username: 'alice', display_name: 'Alice', role: 1, status: 1, quota: 500000 } });
+    if (url.pathname === '/api/models') return fulfill({ success: true, data: [] });
+    if (url.pathname === '/api/offers') return fulfill({ success: true, data: [] });
+    if (url.pathname === '/api/payment-orders/MR-RETURN') return fulfill({ success: true, data: { id: 31, order_no: 'MR-RETURN', user_id: 7, usd_cents: 10000, cny_cents: 72000, payment_status: 'paid', credit_status: 'pending', paid_at: '2026-07-22T10:00:00Z' } });
+    return fulfill({ success: false, error: { code: 'not_mocked', message: url.pathname } }, 404);
+  });
+  await returnPage.goto(`${baseUrl}/payments/return?out_trade_no=MR-RETURN`, { waitUntil: 'networkidle' });
+  await returnPage.getByRole('heading', { name: '支付结果' }).waitFor();
+  await returnPage.getByText('已支付', { exact: true }).waitFor();
+  await returnPage.getByText('等待入账', { exact: true }).waitFor();
+  assert(returnMethods.every((item) => item.startsWith('GET ')), `支付返回页触发了写操作：${returnMethods.join(', ')}`);
+  await returnPage.close();
 
   const resetPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await resetPage.route('**/api/**', (route) => {

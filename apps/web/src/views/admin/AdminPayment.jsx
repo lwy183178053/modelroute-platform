@@ -1,63 +1,105 @@
+import { useCallback, useEffect, useState } from 'react';
 import {
-  Ban,
   CheckCircle2,
-  Download,
-  FileClock,
   KeyRound,
-  Link2,
   Pencil,
   RefreshCw,
   RotateCcw,
-  ShieldCheck,
   WalletCards,
 } from 'lucide-react';
-import { paymentOrders } from '../../data';
+import { apiRequest } from '../../api';
 import { Button, InlineNotice, Section, Status } from '../../ui';
 
+const paymentMethodNames = { alipay: '支付宝', wxpay: '微信', qqpay: 'QQ 钱包' };
+const paymentStatusNames = { pending: '待支付', paid: '已支付', closed: '已关闭' };
+const creditStatusNames = { pending: '等待入账', processing: '入账中', succeeded: '已入账', failed: '入账异常', unknown: '结果未知' };
+
+function formatUSDCents(value) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value || 0) / 100);
+}
+
+function formatCNYCents(value) {
+  return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(Number(value || 0) / 100);
+}
+
+function formatTime(value) {
+  if (!value) return '-';
+  return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'medium', hour12: false }).format(new Date(value));
+}
+
 export default function AdminPayment({ notify, openModal }) {
+  const [setting, setSetting] = useState(null);
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const [settingData, orderData] = await Promise.all([
+        apiRequest('/api/admin/payment-settings'),
+        apiRequest('/api/admin/payment-orders?p=1&page_size=50'),
+      ]);
+      setSetting(settingData);
+      setOrders(orderData?.items || []);
+    } catch (requestError) {
+      setError(requestError.message || '读取支付数据失败');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const retryCredit = async (order) => {
+    try {
+      await apiRequest(`/api/admin/payment-orders/${order.id}/credit/retry`, { method: 'POST', body: {} });
+      notify('入账任务已重新排队');
+      await load();
+    } catch (requestError) {
+      notify(requestError.message || '重新排队失败');
+    }
+  };
+
   return (
     <div className="admin-payment">
       <Section
         title="易支付设置"
-        description="充值订单、签名、回调验签、幂等和对账均由外围平台处理"
-        actions={<><Button icon={Link2} onClick={() => notify('网关连接正常')}>测试连接</Button><Button icon={Pencil} variant="primary" onClick={() => openModal('payment')}>编辑配置</Button></>}
+        description="充值订单、签名、回调验签和 New API 额度入账均由外围平台处理"
+        actions={<><Button disabled={loading} icon={RefreshCw} onClick={load}>刷新</Button><Button icon={Pencil} variant="primary" onClick={() => openModal({ type: 'payment', setting, onSaved: load })}>编辑配置</Button></>}
       >
-        <div className="payment-config">
-          <div className="payment-state"><span className="payment-mark"><WalletCards size={24} /></span><div><strong>易支付 · 生产配置</strong><span>配置版本 v12 · 更新于 2026-07-22 08:40</span></div><Status>已开通</Status></div>
+        {error && <InlineNotice tone="danger">{error}</InlineNotice>}
+        {setting && <div className="payment-config">
+          <div className="payment-state"><span className="payment-mark"><WalletCards size={24} /></span><div><strong>易支付 · 当前配置</strong><span>配置版本 v{setting.version} · 更新于 {formatTime(setting.created_at)}</span></div><Status>{setting.enabled ? '已开通' : '停用'}</Status></div>
           <div className="config-grid">
-            <div><span>网关地址</span><strong>https://zpayz.cn/</strong></div>
-            <div><span>商户编号 PID</span><strong>2026********1878</strong></div>
-            <div><span>商户密钥 KEY</span><strong>已配置 · ••••••••••••••••••••••••••••••••</strong></div>
-            <div><span>支付方式</span><strong>支付宝、微信、QQ 钱包</strong></div>
-            <div><span>充值限额</span><strong>¥10.00 - ¥20,000.00</strong></div>
-            <div><span>异步回调</span><strong>https://api.modelroute.cn/payment/notify</strong></div>
+            <div><span>网关地址</span><strong>{setting.gateway_url}</strong></div>
+            <div><span>商户编号 PID</span><strong>{setting.merchant_pid_masked}</strong></div>
+            <div><span>商户密钥 KEY</span><strong>{setting.key_configured ? '已配置 · 不回显' : '未配置'}</strong></div>
+            <div><span>支付方式</span><strong>{setting.payment_methods.map((method) => paymentMethodNames[method] || method).join('、')}</strong></div>
+            <div><span>美元额度范围</span><strong>{formatUSDCents(setting.minimum_usd_cents)} - {formatUSDCents(setting.maximum_usd_cents)}</strong></div>
+            <div><span>人民币兑美元汇率</span><strong>¥{(Number(setting.exchange_rate_cny_cents_per_usd) / 100).toFixed(2)} / $1.00</strong></div>
+            <div><span>异步回调</span><strong>{setting.notify_url}</strong></div>
+            <div><span>浏览器返回页</span><strong>{setting.return_url}</strong></div>
           </div>
           <div className="config-actions">
-            <Button icon={ShieldCheck} onClick={() => notify('回调签名自检通过')}>验签自检</Button>
-            <Button icon={FileClock} onClick={() => notify('已打开最近 24 小时回调日志')}>查看回调日志</Button>
-            <Button icon={KeyRound} onClick={() => openModal('payment')}>轮换密钥</Button>
-            <Button icon={Ban} variant="danger" onClick={() => notify('演示状态：支付配置未实际停用')}>停用支付</Button>
+            <Button icon={KeyRound} onClick={() => openModal({ type: 'payment', setting, onSaved: load })}>轮换密钥</Button>
           </div>
-        </div>
-        <InlineNotice tone="success"><CheckCircle2 size={16} />完整 KEY 只在服务端解密用于签名，保存后管理员页面也只显示配置状态和掩码。</InlineNotice>
+        </div>}
+        {!setting && !loading && !error && <InlineNotice tone="warning">尚未创建支付配置</InlineNotice>}
+        <InlineNotice tone="success"><CheckCircle2 size={16} />完整 KEY 只在服务端解密用于签名；配置页只显示状态和 PID 掩码。</InlineNotice>
       </Section>
 
       <Section
         title="充值订单与入账"
-        description="支付成功与 New API 额度入账分别使用幂等键，入账失败不改变已支付状态"
-        actions={<><Button icon={RefreshCw} onClick={() => notify('订单状态已刷新')}>刷新订单</Button><Button icon={RotateCcw} onClick={() => notify('已完成订单对账')}>订单对账</Button><Button icon={Download}>导出订单</Button></>}
+        description="支付成功与 New API 额度入账分别使用幂等键；结果未知的操作必须先人工核对"
+        actions={<Button disabled={loading} icon={RefreshCw} onClick={load}>刷新订单</Button>}
       >
-        <div className="table-wrap"><table className="data-table"><thead><tr><th>平台订单号</th><th>用户</th><th>金额</th><th>支付方式</th><th>第三方交易号</th><th>支付时间</th><th>支付状态</th><th>额度入账</th><th>操作</th></tr></thead><tbody>
-          {paymentOrders.map((order) => <tr key={order.id}><td><code>{order.id}</code></td><td>{order.user}</td><td><strong>{order.amount}</strong></td><td>{order.method}</td><td>{order.trade}</td><td>{order.paid}</td><td><Status>{order.state}</Status></td><td><Status>{order.credit}</Status></td><td><div className="row-actions"><Button variant="ghost">详情</Button>{order.credit === '入账异常' && <Button variant="ghost" onClick={() => notify(`${order.id} 已重新提交入账`)}>重试入账</Button>}{order.state === '待支付' && <Button variant="danger" onClick={() => notify(`${order.id} 已关闭`)}>关闭异常订单</Button>}</div></td></tr>)}
+        <div className="table-wrap"><table className="data-table"><thead><tr><th>平台订单号</th><th>用户</th><th>美元额度</th><th>人民币实付</th><th>方式</th><th>第三方交易号</th><th>支付时间</th><th>支付状态</th><th>额度入账</th><th>操作</th></tr></thead><tbody>
+          {orders.map((order) => <tr key={order.id}><td><code>{order.order_no}</code></td><td>UID {order.user_id}</td><td><strong>{formatUSDCents(order.usd_cents)}</strong></td><td>{formatCNYCents(order.cny_cents)}</td><td>{paymentMethodNames[order.payment_type] || order.payment_type}</td><td>{order.third_party_trade_no || '-'}</td><td>{formatTime(order.paid_at)}</td><td><Status>{paymentStatusNames[order.payment_status] || order.payment_status}</Status></td><td><Status>{creditStatusNames[order.credit_status] || order.credit_status}</Status></td><td><div className="row-actions">{order.credit_status === 'failed' && <Button icon={RotateCcw} variant="ghost" onClick={() => retryCredit(order)}>重试入账</Button>}{order.credit_status === 'unknown' && <><Button variant="ghost" onClick={() => openModal({ type: 'creditResolve', action: 'credited', order, onSaved: load })}>确认已入账</Button><Button icon={RotateCcw} variant="ghost" onClick={() => openModal({ type: 'creditResolve', action: 'retry', order, onSaved: load })}>核对后重试</Button></>}</div></td></tr>)}
+          {!loading && orders.length === 0 && <tr><td className="table-message" colSpan="10">暂无充值订单</td></tr>}
+          {loading && <tr><td className="table-message" colSpan="10">正在读取充值订单</td></tr>}
         </tbody></table></div>
-      </Section>
-
-      <Section title="最近回调" description="回调正文仅保留摘要，原始密钥及完整敏感字段不进入日志" actions={<Button variant="ghost">全部回调日志</Button>}>
-        <div className="callback-list">
-          <div><Status>成功</Status><code>notify_8fd1c2</code><span>订单 CZ202607220184 · 验签通过 · 已完成</span><small>09:36:19</small></div>
-          <div><Status>成功</Status><code>notify_70a8b4</code><span>订单 CZ202607220179 · 验签通过 · 等待重试入账</span><small>09:22:08</small></div>
-          <div><Status>验证失败</Status><code>notify_2c91f7</code><span>未知订单 · 金额不一致 · 已拦截</span><small>08:48:31</small></div>
-        </div>
       </Section>
     </div>
   );

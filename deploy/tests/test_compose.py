@@ -84,6 +84,14 @@ class ComposeIsolationTest(unittest.TestCase):
         self.assertIn('"code":"invalid_api_key"', verifier)
         self.assertNotIn('"code":"service_not_ready"', verifier)
 
+    def test_payment_verifier_covers_auth_and_invalid_callback(self):
+        verifier = (ROOT / "deploy" / "scripts" / "verify-payments.sh").read_text(encoding="utf-8")
+        self.assertIn("/api/payment-settings", verifier)
+        self.assertIn("/api/admin/payment-settings", verifier)
+        self.assertIn("/api/payments/easypay/notify", verifier)
+        self.assertIn('test "$status" = "400"', verifier)
+        self.assertNotIn("merchant_key", verifier)
+
 
 if __name__ == "__main__":
     unittest.main()

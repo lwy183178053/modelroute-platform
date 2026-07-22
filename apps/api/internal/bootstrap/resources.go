@@ -79,6 +79,7 @@ func buildHTTPServices(database *sql.DB, redisClient *redis.Client, cfg config.C
 	newAPIClient := newapi.NewClient(cfg.NewAPIBaseURL, cfg.NewAPIRequestTimeout)
 	adminNewAPI := newapi.NewServiceAccount(newAPIClient, cfg.NewAPIAdminUsername, cfg.NewAPIAdminPassword)
 	routing := httpapi.NewSQLRoutingStore(database)
+	payments := httpapi.NewSQLPaymentStore(database)
 	services := httpapi.Services{
 		Sessions:    platformauth.NewStore(redisClient, cfg.SessionTTL),
 		NewAPI:      newAPIClient,
@@ -88,6 +89,7 @@ func buildHTTPServices(database *sql.DB, redisClient *redis.Client, cfg config.C
 		Credentials: credentials,
 		Routing:     routing,
 		OfferSync:   httpapi.NewPriceSynchronizer(routing, adminNewAPI),
+		Payments:    payments,
 		Cookie: httpapi.CookieConfig{
 			Name:         cfg.SessionCookieName,
 			Secure:       cfg.SessionCookieSecure,
@@ -96,6 +98,7 @@ func buildHTTPServices(database *sql.DB, redisClient *redis.Client, cfg config.C
 		},
 	}
 	services.Health = httpapi.NewHealthRunner(routing, adminNewAPI, newAPIClient, adminNewAPI)
+	services.PaymentCredit = httpapi.NewPaymentCreditRunner(payments, adminNewAPI)
 	return services, nil
 }
 

@@ -56,16 +56,18 @@ type CookieConfig struct {
 }
 
 type Services struct {
-	Sessions    SessionManager
-	NewAPI      NewAPIClient
-	AdminNewAPI AdminNewAPI
-	Audit       AuditRecorder
-	Merchants   MerchantRepository
-	Credentials CredentialProtector
-	Routing     RoutingRepository
-	OfferSync   OfferSynchronizer
-	Health      HealthCycleRunner
-	Cookie      CookieConfig
+	Sessions      SessionManager
+	NewAPI        NewAPIClient
+	AdminNewAPI   AdminNewAPI
+	Audit         AuditRecorder
+	Merchants     MerchantRepository
+	Credentials   CredentialProtector
+	Routing       RoutingRepository
+	OfferSync     OfferSynchronizer
+	Health        HealthCycleRunner
+	Payments      PaymentRepository
+	PaymentCredit HealthCycleRunner
+	Cookie        CookieConfig
 }
 
 type HealthCycleRunner interface {

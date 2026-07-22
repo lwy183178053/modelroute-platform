@@ -25,6 +25,15 @@ func TestSQLRoutingStoreAgainstPostgres(t *testing.T) {
 	if err := migrations.Up(ctx, database); err != nil {
 		t.Fatalf("执行迁移：%v", err)
 	}
+	if _, err := database.ExecContext(ctx, `
+TRUNCATE channel_health_events, performance_rollups, routing_decisions,
+         routing_policy_merchants, routing_policies, token_bindings,
+         channel_model_health, offer_versions, official_price_versions,
+         canonical_models, merchant_channels, merchant_channel_reviews,
+         merchant_profiles, merchant_applications RESTART IDENTITY CASCADE
+`); err != nil {
+		t.Fatalf("清理路由测试表：%v", err)
+	}
 
 	var applicationID, merchantID, reviewID, channelID int64
 	err = database.QueryRowContext(ctx, `

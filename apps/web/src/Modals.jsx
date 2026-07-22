@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Check, CreditCard, KeyRound, Landmark, LockKeyhole, Plus, Send, ShieldCheck, Store } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Check, CreditCard, KeyRound, Landmark, LockKeyhole, Plus, RotateCcw, Send, ShieldCheck, Store } from 'lucide-react';
 import AuthModal from './AuthModal';
 import { apiRequest } from './api';
 import { Button, Field, InlineNotice, Modal, Select, TextInput } from './ui';
@@ -127,31 +127,130 @@ function QuoteModal({ close, config, notify }) {
   );
 }
 
-function PaymentModal({ close, notify }) {
+function PaymentModal({ close, config, notify }) {
+  const setting = config.setting || {};
+  const [gatewayURL, setGatewayURL] = useState(setting.gateway_url || 'https://zpayz.cn');
+  const [merchantPID, setMerchantPID] = useState('');
+  const [merchantKey, setMerchantKey] = useState('');
+  const [enabled, setEnabled] = useState(setting.enabled ?? true);
+  const [methods, setMethods] = useState(setting.payment_methods || ['alipay', 'wxpay']);
+  const [minimumUSD, setMinimumUSD] = useState(String(Number(setting.minimum_usd_cents || 1000) / 100));
+  const [maximumUSD, setMaximumUSD] = useState(String(Number(setting.maximum_usd_cents || 2000000) / 100));
+  const [rate, setRate] = useState(String(Number(setting.exchange_rate_cny_cents_per_usd || 720) / 100));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const toggleMethod = (method) => setMethods((current) => current.includes(method) ? current.filter((item) => item !== method) : [...current, method]);
+  const submit = async () => {
+    const minimumUSDCents = Math.round(Number(minimumUSD) * 100);
+    const maximumUSDCents = Math.round(Number(maximumUSD) * 100);
+    const exchangeRate = Math.round(Number(rate) * 100);
+    if (!gatewayURL.trim() || methods.length === 0 || !Number.isInteger(minimumUSDCents) || !Number.isInteger(maximumUSDCents) || !Number.isInteger(exchangeRate) || minimumUSDCents <= 0 || maximumUSDCents < minimumUSDCents || exchangeRate <= 0) {
+      setError('请检查网关、支付方式、额度范围和汇率');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await apiRequest('/api/admin/payment-settings', { method: 'PUT', body: {
+        gateway_url: gatewayURL.trim(), merchant_pid: merchantPID.trim(), merchant_key: merchantKey,
+        enabled, payment_methods: methods, minimum_usd_cents: minimumUSDCents,
+        maximum_usd_cents: maximumUSDCents, exchange_rate_cny_cents_per_usd: exchangeRate,
+      } });
+      await config.onSaved?.();
+      notify('支付配置已保存为新版本');
+      close();
+    } catch (requestError) {
+      setError(requestError.message || '保存支付配置失败');
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <Modal title="编辑易支付配置" description="保存后生成新配置版本，完整 KEY 不再回显。" onClose={close} footer={<Footer cancel={close} submitText="保存支付配置" submit={() => { close(); notify('易支付配置已保存为新版本'); }} icon={CreditCard} />} wide>
+    <Modal title="编辑易支付配置" description="保存后生成新配置版本，完整 KEY 不再回显。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy} icon={CreditCard} variant="primary" onClick={submit}>{busy ? '保存中' : '保存支付配置'}</Button></>} wide>
+      {error && <InlineNotice tone="danger">{error}</InlineNotice>}
       <div className="form-grid two-column">
-        <Field label="网关地址"><TextInput defaultValue="https://zpayz.cn/" /></Field>
-        <Field label="商户编号 PID"><TextInput defaultValue="2026********1878" /></Field>
-        <Field label="商户密钥 KEY" hint="留空代表保持当前密钥；输入新值将轮换密钥"><TextInput placeholder="输入新的商户密钥" type="password" /></Field>
-        <Field label="支付状态"><Select defaultValue="启用"><option>启用</option><option>停用</option></Select></Field>
-        <Field label="最低充值金额"><TextInput defaultValue="10.00" type="number" /></Field>
-        <Field label="最高充值金额"><TextInput defaultValue="20000.00" type="number" /></Field>
+        <Field label="网关地址"><TextInput onChange={(event) => setGatewayURL(event.target.value)} value={gatewayURL} /></Field>
+        <Field label="商户编号 PID" hint={setting.merchant_pid_masked ? `留空保持 ${setting.merchant_pid_masked}` : '首次配置必须填写'}><TextInput onChange={(event) => setMerchantPID(event.target.value)} placeholder={setting.merchant_pid_masked || '输入 PID'} value={merchantPID} /></Field>
+        <Field label="商户密钥 KEY" hint="留空保持当前密钥；输入新值将轮换"><TextInput onChange={(event) => setMerchantKey(event.target.value)} placeholder={setting.key_configured ? '已配置，留空保持' : '输入 KEY'} type="password" value={merchantKey} /></Field>
+        <Field label="支付状态"><Select onChange={(event) => setEnabled(event.target.value === 'enabled')} value={enabled ? 'enabled' : 'disabled'}><option value="enabled">启用</option><option value="disabled">停用</option></Select></Field>
+        <Field label="最低充值额度（美元）"><TextInput min="0.01" onChange={(event) => setMinimumUSD(event.target.value)} step="0.01" type="number" value={minimumUSD} /></Field>
+        <Field label="最高充值额度（美元）"><TextInput min="0.01" onChange={(event) => setMaximumUSD(event.target.value)} step="0.01" type="number" value={maximumUSD} /></Field>
+        <Field label="人民币兑美元汇率" hint="填写 1 美元对应的人民币金额"><TextInput min="0.01" onChange={(event) => setRate(event.target.value)} step="0.01" type="number" value={rate} /></Field>
       </div>
-      <Field label="已启用支付方式"><div className="checkbox-line"><label><input defaultChecked type="checkbox" />支付宝</label><label><input defaultChecked type="checkbox" />微信</label><label><input defaultChecked type="checkbox" />QQ 钱包</label></div></Field>
-      <InlineNotice tone="warning">配置保存后应再次执行“测试连接”和“验签自检”，再用于生产充值。</InlineNotice>
+      <Field label="已启用支付方式"><div className="checkbox-line">{[['alipay', '支付宝'], ['wxpay', '微信'], ['qqpay', 'QQ 钱包']].map(([value, label]) => <label key={value}><input checked={methods.includes(value)} onChange={() => toggleMethod(value)} type="checkbox" />{label}</label>)}</div></Field>
+      <InlineNotice tone="warning">保存会锁定为新配置版本；已创建订单继续使用原版本验签和金额。</InlineNotice>
     </Modal>
   );
 }
 
-function RechargeModal({ close, notify }) {
+function RechargeModal({ close, config, notify }) {
+  const [setting, setSetting] = useState(null);
+  const [usd, setUSD] = useState('');
+  const [paymentType, setPaymentType] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    apiRequest('/api/payment-settings').then((data) => {
+      setSetting(data);
+      setUSD(String(Number(data.minimum_usd_cents || 1000) / 100));
+      setPaymentType(data.payment_methods?.[0] || '');
+    }).catch((requestError) => setError(requestError.message || '读取充值配置失败'));
+  }, []);
+  const usdCents = Math.round(Number(usd) * 100);
+  const cnyCents = setting && Number.isInteger(usdCents) ? Math.round(usdCents * Number(setting.exchange_rate_cny_cents_per_usd) / 100) : 0;
+  const submit = async () => {
+    if (!setting || !Number.isInteger(usdCents) || usdCents < setting.minimum_usd_cents || usdCents > setting.maximum_usd_cents || !paymentType) {
+      setError('充值额度或支付方式不在允许范围');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const data = await apiRequest('/api/payment-orders', { method: 'POST', body: { usd_cents: usdCents, payment_type: paymentType } });
+      await config.onSaved?.(data.order);
+      notify('充值订单已创建，正在进入支付页');
+      window.location.assign(data.payment_url);
+    } catch (requestError) {
+      setError(requestError.message || '创建充值订单失败');
+      setBusy(false);
+    }
+  };
+  const presets = setting ? [...new Set([setting.minimum_usd_cents, 5000, 10000, 50000])].filter((value) => value >= setting.minimum_usd_cents && value <= setting.maximum_usd_cents) : [];
   return (
-    <Modal title="账户充值" description="支付成功后等待服务端回调验签和 New API 额度入账。" onClose={close} footer={<Footer cancel={close} submitText="前往支付" submit={() => { close(); notify('演示订单已创建'); }} icon={CreditCard} />}>
-      <Field label="充值金额"><div className="prefix-input"><span>¥</span><TextInput defaultValue="500.00" type="number" /></div></Field>
-      <div className="amount-presets">{['¥50', '¥100', '¥500', '¥1,000'].map((item) => <button className={item === '¥500' ? 'active' : ''} key={item} type="button">{item}</button>)}</div>
-      <Field label="支付方式"><div className="payment-methods"><label><input defaultChecked name="payment-method" type="radio" />支付宝</label><label><input name="payment-method" type="radio" />微信</label><label><input name="payment-method" type="radio" />QQ 钱包</label></div></Field>
+    <Modal title="账户充值" description="选择美元额度，订单创建时锁定汇率和人民币应付金额。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !setting} icon={CreditCard} variant="primary" onClick={submit}>{busy ? '创建中' : '前往支付'}</Button></>}>
+      {error && <InlineNotice tone="danger">{error}</InlineNotice>}
+      <Field label="充值额度（美元）"><div className="prefix-input"><span>$</span><TextInput min={Number(setting?.minimum_usd_cents || 1) / 100} max={Number(setting?.maximum_usd_cents || 1) / 100} onChange={(event) => setUSD(event.target.value)} step="0.01" type="number" value={usd} /></div></Field>
+      <div className="amount-presets">{presets.map((value) => <button className={value === usdCents ? 'active' : ''} key={value} onClick={() => setUSD(String(value / 100))} type="button">${(value / 100).toLocaleString('en-US')}</button>)}</div>
+      {setting && <div className="quote-summary"><div><span>当前汇率</span><strong>¥{(Number(setting.exchange_rate_cny_cents_per_usd) / 100).toFixed(2)} / $1</strong></div><div><span>人民币应付</span><strong>¥{(cnyCents / 100).toFixed(2)}</strong></div></div>}
+      <Field label="支付方式"><div className="payment-methods">{(setting?.payment_methods || []).map((method) => <label key={method}><input checked={paymentType === method} name="payment-method" onChange={() => setPaymentType(method)} type="radio" />{{ alipay: '支付宝', wxpay: '微信', qqpay: 'QQ 钱包' }[method] || method}</label>)}</div></Field>
+      <InlineNotice>浏览器返回页只显示订单状态，额度入账只由已验签的异步回调触发。</InlineNotice>
     </Modal>
   );
+}
+
+function CreditResolveModal({ close, config, notify }) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const submit = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await apiRequest(`/api/admin/payment-orders/${config.order.id}/credit/resolve`, { method: 'POST', body: { action: config.action, reason: reason.trim() } });
+      await config.onSaved?.();
+      notify(config.action === 'credited' ? '已确认该订单完成入账' : '已根据核对结果重新排队');
+      close();
+    } catch (requestError) {
+      setError(requestError.message || '提交核对结果失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <Modal title={config.action === 'credited' ? '确认已完成入账' : '核对后重新入账'} description={`订单 ${config.order.order_no} · 此操作只用于结果未知的入账任务`} onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || reason.trim().length < 3} icon={RotateCcw} variant="primary" onClick={submit}>{busy ? '提交中' : '确认处置'}</Button></>}>
+    {error && <InlineNotice tone="danger">{error}</InlineNotice>}
+    <Field label="核对原因"><textarea className="textarea" onChange={(event) => setReason(event.target.value)} placeholder="填写已核对的 New API 审计或余额依据" rows="4" value={reason} /></Field>
+    <InlineNotice tone="warning">选择重新入账前，必须确认此前请求没有增加用户额度。</InlineNotice>
+  </Modal>;
 }
 
 function MerchantApplyModal({ close, config, notify }) {
@@ -326,8 +425,9 @@ export default function Modals({ modal, close, notify, onAuthenticated, setModal
   if (type === 'adminQuota' || type === 'adminPassword') return <AdminUserModal close={close} config={modal} notify={notify} />;
   if (type === 'route') return <RouteModal close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
   if (type === 'quote') return <QuoteModal close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
-  if (type === 'payment') return <PaymentModal close={close} notify={notify} />;
-  if (type === 'recharge') return <RechargeModal close={close} notify={notify} />;
+  if (type === 'payment') return <PaymentModal close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
+  if (type === 'recharge') return <RechargeModal close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
+  if (type === 'creditResolve') return <CreditResolveModal close={close} config={modal} notify={notify} />;
   if (type === 'merchantApply') return <MerchantApplyModal close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
   if (type === 'withdraw' || type === 'channel') return <SimpleMerchantModal type={type} close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
   return null;

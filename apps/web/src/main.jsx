@@ -19,6 +19,7 @@ import AdminView from './views/AdminView';
 import ConsoleView from './views/ConsoleView';
 import MarketView from './views/MarketView';
 import MerchantView from './views/MerchantView';
+import PaymentReturnView from './views/PaymentReturnView';
 import Modals from './Modals';
 import { Button, IconButton } from './ui';
 import './styles.css';
@@ -66,7 +67,7 @@ function Topbar({ account, active, navigate, onLogin, onLogout }) {
 }
 
 function App() {
-  const [view, setView] = useState('market');
+  const [view, setView] = useState(() => window.location.pathname === '/payments/return' ? 'paymentReturn' : 'market');
   const [modal, setModal] = useState(null);
   const [adminSection, setAdminSection] = useState('overview');
   const [toast, setToast] = useState('');
@@ -104,6 +105,9 @@ function App() {
       setView('market');
       return;
     }
+    if (window.location.pathname === '/payments/return') {
+      window.history.replaceState(null, '', '/');
+    }
     setView(nextView);
     window.scrollTo({ top: 0, behavior: 'instant' });
   };
@@ -124,6 +128,7 @@ function App() {
     <div className="app-shell">
       <Topbar account={account} active={view} navigate={navigate} onLogin={() => setModal('login')} onLogout={logout} />
       <main>
+        {view === 'paymentReturn' && <PaymentReturnView navigate={navigate} />}
         {view === 'market' && <MarketView navigate={navigate} />}
         {view === 'console' && account && <ConsoleView account={account} navigate={navigate} notify={notify} openModal={setModal} />}
         {view === 'merchant' && (account?.is_merchant || Number(account?.role) >= 10) && <MerchantView account={account} notify={notify} openModal={setModal} />}

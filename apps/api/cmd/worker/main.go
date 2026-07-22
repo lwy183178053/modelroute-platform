@@ -33,6 +33,7 @@ func main() {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 	runHealthCycle(ctx, resources)
+	runPaymentCreditCycle(ctx, resources)
 	ticks := 0
 
 	for {
@@ -42,6 +43,7 @@ func main() {
 		case <-ticker.C:
 			ticks++
 			runHealthCycle(ctx, resources)
+			runPaymentCreditCycle(ctx, resources)
 			if ticks%3 != 0 {
 				continue
 			}
@@ -61,6 +63,17 @@ func main() {
 				log.Printf("依赖检查异常数量：%d", errors)
 			}
 		}
+	}
+}
+
+func runPaymentCreditCycle(ctx context.Context, resources *bootstrap.Resources) {
+	if resources.Services.PaymentCredit == nil {
+		return
+	}
+	cycleContext, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := resources.Services.PaymentCredit.RunCycle(cycleContext, time.Now().UTC()); err != nil {
+		log.Printf("充值入账周期异常：%v", err)
 	}
 }
 

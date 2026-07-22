@@ -10,7 +10,7 @@ func TestEmbeddedMigrationsAreOrdered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Files() 返回错误：%v", err)
 	}
-	if len(files) != 3 {
+	if len(files) != 4 {
 		t.Fatalf("迁移文件数量 = %d", len(files))
 	}
 	if files[0].Version != 1 || files[0].Name != "000001_foundation.sql" {
@@ -25,6 +25,9 @@ func TestEmbeddedMigrationsAreOrdered(t *testing.T) {
 	if files[2].Version != 3 || files[2].Name != "000003_routing.sql" {
 		t.Fatalf("路由迁移不符合预期：%+v", files[2])
 	}
+	if files[3].Version != 4 || files[3].Name != "000004_payments.sql" {
+		t.Fatalf("支付迁移不符合预期：%+v", files[3])
+	}
 	for _, table := range []string{"merchant_applications", "merchant_profiles", "merchant_channel_reviews", "merchant_channels"} {
 		if !strings.Contains(files[1].SQL, "CREATE TABLE "+table) {
 			t.Fatalf("商户迁移缺少表 %s", table)
@@ -33,6 +36,11 @@ func TestEmbeddedMigrationsAreOrdered(t *testing.T) {
 	for _, table := range []string{"canonical_models", "official_price_versions", "offer_versions", "token_bindings", "routing_policies", "channel_model_health", "routing_decisions", "channel_health_events"} {
 		if !strings.Contains(files[2].SQL, "CREATE TABLE "+table) {
 			t.Fatalf("路由迁移缺少表 %s", table)
+		}
+	}
+	for _, table := range []string{"payment_setting_versions", "payment_orders", "payment_callback_events", "newapi_credit_operations"} {
+		if !strings.Contains(files[3].SQL, "CREATE TABLE "+table) {
+			t.Fatalf("支付迁移缺少表 %s", table)
 		}
 	}
 }

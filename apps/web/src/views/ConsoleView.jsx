@@ -51,6 +51,7 @@ export default function ConsoleView({ account, openModal, notify, navigate }) {
   const [keyError, setKeyError] = useState('');
   const [merchants, setMerchants] = useState([]);
   const [merchantApplication, setMerchantApplication] = useState(undefined);
+  const [paymentOrders, setPaymentOrders] = useState([]);
   const displayName = account.display_name || account.username;
 
   const loadKeys = useCallback(async () => {
@@ -86,6 +87,17 @@ export default function ConsoleView({ account, openModal, notify, navigate }) {
   }, []);
 
   useEffect(() => { loadMerchantApplication(); }, [loadMerchantApplication]);
+
+  const loadPaymentOrders = useCallback(async () => {
+    try {
+      const data = await apiRequest('/api/payment-orders?p=1&page_size=10');
+      setPaymentOrders(data?.items || []);
+    } catch {
+      setPaymentOrders([]);
+    }
+  }, []);
+
+  useEffect(() => { loadPaymentOrders(); }, [loadPaymentOrders]);
 
   const fetchFullKey = async (key) => {
     if (revealed[key.id]) return revealed[key.id];
@@ -144,7 +156,7 @@ export default function ConsoleView({ account, openModal, notify, navigate }) {
         actions={(
           <>
             <Button icon={Settings2}>账单设置</Button>
-            <Button icon={Plus} variant="primary" onClick={() => openModal('recharge')}>立即充值</Button>
+            <Button icon={Plus} variant="primary" onClick={() => openModal({ type: 'recharge', onSaved: loadPaymentOrders })}>立即充值</Button>
           </>
         )}
       />
@@ -205,6 +217,13 @@ export default function ConsoleView({ account, openModal, notify, navigate }) {
             {keyLoading && <tr><td className="table-message" colSpan="7">正在读取 API 密钥</td></tr>}</tbody>
           </table>
         </div>
+      </Section>
+
+      <Section title="充值记录" description="美元额度、人民币实付和入账状态均来自锁定订单">
+        <div className="table-wrap"><table className="data-table"><thead><tr><th>订单号</th><th>美元额度</th><th>人民币实付</th><th>支付状态</th><th>额度入账</th><th>创建时间</th></tr></thead><tbody>
+          {paymentOrders.map((order) => <tr key={order.id}><td><code>{order.order_no}</code></td><td>${(Number(order.usd_cents || 0) / 100).toFixed(2)}</td><td>¥{(Number(order.cny_cents || 0) / 100).toFixed(2)}</td><td><Status>{{ pending: '待支付', paid: '已支付', closed: '已关闭' }[order.payment_status] || order.payment_status}</Status></td><td><Status>{{ pending: '等待入账', processing: '入账中', succeeded: '已入账', failed: '入账异常', unknown: '结果未知' }[order.credit_status] || order.credit_status}</Status></td><td>{order.created_at ? new Date(order.created_at).toLocaleString('zh-CN', { hour12: false }) : '-'}</td></tr>)}
+          {paymentOrders.length === 0 && <tr><td className="table-message" colSpan="6">暂无充值订单</td></tr>}
+        </tbody></table></div>
       </Section>
 
       <Section title="最近调用" description="金额、退款与缓存命中结果来自 New API 最终日志"><EmptyNotice title="暂无调用记录" description="路由开放后显示真实结算日志。" /></Section>

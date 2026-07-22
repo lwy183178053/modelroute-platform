@@ -26,7 +26,7 @@ const sections = [
   { id: 'merchants', label: '商户审核', icon: Building2, count: 3 },
   { id: 'models', label: '模型与定价', icon: BadgeDollarSign },
   { id: 'channels', label: '渠道与探活', icon: HeartPulse, count: 2 },
-  { id: 'payment', label: '支付与充值', icon: CreditCard, count: 1 },
+  { id: 'payment', label: '支付与充值', icon: CreditCard },
   { id: 'withdrawals', label: '提现审核', icon: Landmark, count: 2 },
   { id: 'settings', label: '平台设置', icon: Settings2 },
   { id: 'audit', label: '审计日志', icon: FileClock },
@@ -38,14 +38,13 @@ function AdminOverview({ setSection }) {
       <div className="metrics-grid admin-metrics">
         <Metric label="今日平台成交" value="¥42,684.20" hint="平台收入 ¥4,268.42" icon={BadgeDollarSign} />
         <Metric label="活跃渠道" value="86 / 92" hint="2 个冷却 · 4 个停用" icon={HeartPulse} tone="green" />
-        <Metric label="待处理事项" value="8" hint="含 1 笔入账异常" icon={ClipboardCheck} tone="amber" />
+        <Metric label="待处理事项" value="7" hint="审核、提现与渠道事项" icon={ClipboardCheck} tone="amber" />
         <Metric label="New API 同步" value="正常" hint="日志延迟 16 秒" icon={ShieldCheck} tone="blue" />
       </div>
 
       <div className="dashboard-grid admin-overview-grid">
         <Section title="待办事项" description="按业务风险和等待时间排序">
           <div className="task-list">
-            <button onClick={() => setSection('payment')} type="button"><span className="task-icon task-danger"><CreditCard size={17} /></span><span><strong>充值入账异常</strong><small>订单 CZ202607220179 已支付，New API 入账失败</small></span><Status>1 笔</Status></button>
             <button onClick={() => setSection('merchants')} type="button"><span className="task-icon task-warning"><Building2 size={17} /></span><span><strong>商户入驻待审核</strong><small>最长等待 2 小时 16 分钟</small></span><Status>3 项</Status></button>
             <button onClick={() => setSection('withdrawals')} type="button"><span className="task-icon task-blue"><Landmark size={17} /></span><span><strong>人工提现待处理</strong><small>申请总额 ¥13,000.00</small></span><Status>2 笔</Status></button>
             <button onClick={() => setSection('channels')} type="button"><span className="task-icon task-warning"><HeartPulse size={17} /></span><span><strong>渠道状态异常</strong><small>1 个冷却，1 个密钥余额不足</small></span><Status>2 项</Status></button>
@@ -57,7 +56,7 @@ function AdminOverview({ setSection }) {
             <div><span><i className="service-dot healthy" />外围路由网关</span><strong>正常</strong><small>18 ms</small></div>
             <div><span><i className="service-dot healthy" />New API 内部服务</span><strong>正常</strong><small>24 ms</small></div>
             <div><span><i className="service-dot healthy" />用量日志同步</span><strong>正常</strong><small>延迟 16 秒</small></div>
-            <div><span><i className="service-dot warning" />易支付网关</span><strong>需关注</strong><small>1 笔待入账</small></div>
+            <div><span><i className="service-dot" />易支付网关</span><strong>按配置状态</strong><small>见支付设置</small></div>
           </div>
         </Section>
       </div>

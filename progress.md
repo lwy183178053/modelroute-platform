@@ -561,3 +561,68 @@
 - 服务器 `/opt/modelroute-platform/releases/6dd0565`：保存第 5 阶段最终已验收运行发布。
 - 服务器 `/opt/modelroute-platform/shared/backups/20260722T082512Z`：保存发布前两个数据库、Compose、版本和修改前环境文件备份。
 - 回滚点：服务器将 `/opt/modelroute-platform/current` 原子切换到 `/opt/modelroute-platform/releases/192f31c` 并执行该目录的 `deploy/scripts/deploy.sh`；需要连数据库和环境文件回退时，使用上述发布前备份和 `restore.sh`，再恢复 `environment.before.env`。
+
+## 2026-07-22 - Task: 实现第 6 阶段易支付充值与 New API 额度入账
+
+### What was done
+
+- 建立不可变支付配置版本、充值订单、回调事件和 New API 入账操作四类数据，美元额度、人民币实付、汇率和 New API 额度全部使用整数保存与计算。
+- 实现易支付订单签名和 GET/POST 异步通知验签，逐项核对签名、PID、平台订单号、第三方交易号、人民币金额、支付方式和成功状态；浏览器返回页只查询当前用户订单。
+- 支付回调使用订单行锁、回调摘要、第三方交易号和单订单入账键控制重复与并发通知，只创建一条 New API 入账操作。
+- Worker 接入额度入账状态机：明确的 New API 错误进入有限重试，网络超时或处理中断进入结果未知并停止自动重试，管理员核对后才能确认或重新排队。
+- 管理员支付页接入真实配置、订单、失败重试和结果未知处置接口；用户充值弹窗按美元创建锁定订单，控制台展示真实充值记录，并新增支付结果页。
+- 清除旧充值演示订单和管理员概览中的虚假入账异常，统一本轮前端新增代码缩进，更新支付文档、部署验收脚本和桌面/移动端回归截图。
+
+### Testing
+
+- 使用本机 PostgreSQL 17 临时容器和 `MODELROUTE_TEST_DATABASE_URL` 执行 `go test ./...`，全部通过；真实 SQL 用例确认 8 个相同并发回调只生成 1 条回调事件和 1 条入账操作，两个并发 Worker 合计只领取 1 次。
+- 使用同一真实数据库执行 `go test -race ./...`，全部通过；执行 `go vet ./...` 和 `go build ./cmd/...`，退出码均为 `0`。
+- 执行 `npm.cmd run test:ui`，Vite 转换 `1609` 个模块，支付配置提交、失败入账重试、用户充值跳转和返回页只读契约通过。
+- 执行 `npm.cmd run capture`，更新管理员支付、配置弹窗、控制台及关联回归截图；人工检查桌面和移动端支付信息、表格滚动与弹窗布局。
+- 执行部署测试共 `8` 项，全部通过；8 个部署 Shell 脚本逐一通过 `sh -n` 语法检查。
+- 执行 `git diff --check`、未合并文件检查和聊天中出现过的 SSH、易支付敏感字面值扫描，均无异常；生产支付契约保留到本阶段提交部署后执行。
+
+### Notes
+
+- `apps/api/cmd/worker/main.go`：每 10 秒领取一次待处理支付入账操作。
+- `apps/api/internal/bootstrap/resources.go`：注入支付仓储和额度入账任务。
+- `apps/api/internal/bootstrap/resources_test.go`：验证支付依赖已完整注入。
+- `apps/api/internal/httpapi/routing_store_postgres_test.go`：补齐真实数据库路由测试的数据清理，避免与支付竞态套件互相污染。
+- `apps/api/internal/httpapi/server.go`：注册用户、管理员、回调和支付订单接口。
+- `apps/api/internal/httpapi/services.go`：增加支付仓储与入账周期依赖契约。
+- `apps/api/internal/httpapi/payment_credit.go`：实现 New API 额度入账、重试退避和结果未知分类。
+- `apps/api/internal/httpapi/payment_credit_test.go`：覆盖成功、明确失败、网络结果未知、过期处理中断和退避规则。
+- `apps/api/internal/httpapi/payment_domain.go`：实现整数金额换算、易支付签名、验签和网关金额解析。
+- `apps/api/internal/httpapi/payment_domain_test.go`：覆盖整数四舍五入、溢出、金额格式与 MD5 签名规则。
+- `apps/api/internal/httpapi/payment_handlers.go`：实现支付配置、订单、异步通知、管理员重试和人工核对处置。
+- `apps/api/internal/httpapi/payment_handlers_test.go`：覆盖权限、配置版本、订单锁价、签名篡改、返回页读取和管理员操作。
+- `apps/api/internal/httpapi/payment_store.go`：实现配置、订单、回调和入账操作的 PostgreSQL 事务与并发领取。
+- `apps/api/internal/httpapi/payment_store_postgres_test.go`：使用真实 PostgreSQL 验证并发回调、并发领取和结果未知重排。
+- `apps/api/internal/httpapi/payment_store_test.go`：覆盖 SQL 配置版本、订单金额锁定和回调幂等契约。
+- `apps/api/internal/httpapi/payment_types.go`：定义支付领域数据、命令和仓储接口。
+- `apps/api/internal/migrations/migrate_test.go`：验证第 4 份支付迁移顺序和关键表。
+- `apps/api/internal/migrations/sql/000004_payments.sql`：创建支付配置版本、订单、回调事件和入账操作表及唯一约束。
+- `apps/web/src/Modals.jsx`：实现真实支付配置、用户充值和结果未知处置弹窗。
+- `apps/web/src/data.js`：删除已由真实接口替代的充值演示订单。
+- `apps/web/src/main.jsx`：注册支付返回页并处理返回后的站内导航。
+- `apps/web/src/ui.jsx`：补齐支付与入账状态的视觉语义。
+- `apps/web/src/views/AdminView.jsx`：移除硬编码支付异常和虚假待办数量。
+- `apps/web/src/views/ConsoleView.jsx`：读取并展示当前用户真实充值订单。
+- `apps/web/src/views/PaymentReturnView.jsx`：新增仅查询订单状态的支付返回页。
+- `apps/web/src/views/admin/AdminPayment.jsx`：接入真实支付设置、订单、重试和人工处置接口。
+- `apps/web/scripts/ui-smoke.mjs`：覆盖支付配置、充值、管理员处置和返回页只读行为。
+- `apps/web/scripts/capture.mjs`：使用真实支付接口数据形状生成回归截图。
+- `apps/web/artifacts/admin-desktop.png`：更新管理员支付入口桌面回归图。
+- `apps/web/artifacts/admin-mobile.png`：更新管理员支付入口移动端回归图。
+- `apps/web/artifacts/console-desktop.png`：新增充值记录的控制台桌面回归图。
+- `apps/web/artifacts/console-mobile.png`：新增充值记录的控制台移动端回归图。
+- `apps/web/artifacts/payment-config-desktop.png`：更新真实支付配置桌面弹窗回归图。
+- `apps/web/artifacts/payment-config-mobile.png`：更新真实支付配置移动端弹窗回归图。
+- `apps/web/artifacts/route-modal-desktop.png`：随最新前端构建更新路由弹窗桌面回归图。
+- `apps/web/artifacts/route-modal-mobile.png`：随最新前端构建更新路由弹窗移动端回归图。
+- `deploy/scripts/verify-payments.sh`：增加生产支付权限、返回页和无效回调契约检查。
+- `deploy/tests/test_compose.py`：锁定支付验收脚本必须覆盖的安全边界。
+- `docs/易支付充值.md`：记录支付口径、版本、幂等、人工核对、接口、验证和回滚。
+- `docs/部署运行手册.md`：补充支付配置、发布与生产验收步骤。
+- `progress.md`：追加第 6 阶段本地实现、验证、文件清单和回滚点。
+- 回滚点：阶段标签 `phase-5-routing`；第 6 阶段提交后可执行 `git revert <第6阶段提交>` 生成代码回退改动。生产服务器在本轮记录时仍运行第 5 阶段发布 `6dd0565`，支付迁移尚未发布。

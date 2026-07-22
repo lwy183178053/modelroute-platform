@@ -16,8 +16,8 @@ status=$(curl -sS -o /tmp/modelroute-v1-check.json -w '%{http_code}' \
   -X POST "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
   --data '{"model":"foundation-check","messages":[]}')
-test "$status" = "503"
-grep -q '"code":"service_not_ready"' /tmp/modelroute-v1-check.json
+test "$status" = "401"
+grep -q '"code":"invalid_api_key"' /tmp/modelroute-v1-check.json
 rm -f /tmp/modelroute-v1-check.json
 
-echo "ModelRoute 部署验收通过：页面、存活、就绪和模型入口关闭状态正常。"
+echo "ModelRoute 部署验收通过：页面、存活、就绪和模型入口鉴权状态正常。"

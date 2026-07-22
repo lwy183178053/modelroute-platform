@@ -78,6 +78,12 @@ class ComposeIsolationTest(unittest.TestCase):
             self.assertEqual(environment["NEW_API_ADMIN_USERNAME"], "modelroute")
             self.assertEqual(environment["NEW_API_ADMIN_PASSWORD"], "CHANGE_TO_SERVER_ADMIN_PASSWORD")
 
+    def test_base_verifier_requires_api_key_from_enabled_model_route(self):
+        verifier = (ROOT / "deploy" / "scripts" / "verify.sh").read_text(encoding="utf-8")
+        self.assertIn('test "$status" = "401"', verifier)
+        self.assertIn('"code":"invalid_api_key"', verifier)
+        self.assertNotIn('"code":"service_not_ready"', verifier)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,6 @@
+aggregate.lwylink.xyz {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:28100 {
+		header_up X-Forwarded-Proto https
+	}
+}

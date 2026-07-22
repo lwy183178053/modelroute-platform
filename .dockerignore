@@ -1,0 +1,14 @@
+.git
+.worktrees
+.env
+.env.*
+!.env.example
+**/node_modules
+**/dist
+**/*.log
+artifacts
+backups
+certs
+data
+secrets
+ui-preview

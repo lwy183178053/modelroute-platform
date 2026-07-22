@@ -1,0 +1,145 @@
+name: ${COMPOSE_PROJECT_NAME:-modelroute}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_SUPERUSER}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPER_PASSWORD}
+      POSTGRES_DB: postgres
+      PLATFORM_DB_NAME: ${PLATFORM_DB_NAME}
+      PLATFORM_DB_USER: ${PLATFORM_DB_USER}
+      PLATFORM_DB_PASSWORD: ${PLATFORM_DB_PASSWORD}
+      NEWAPI_DB_NAME: ${NEWAPI_DB_NAME}
+      NEWAPI_DB_USER: ${NEWAPI_DB_USER}
+      NEWAPI_DB_PASSWORD: ${NEWAPI_DB_PASSWORD}
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./deploy/postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-databases.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [backend]
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    volumes:
+      - ./data/redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      TZ: Asia/Shanghai
+    networks: [backend]
+
+  new-api:
+    image: calciumion/new-api:v1.0.0-rc.21@sha256:428018a37c0b26c163a3367c18401161707cd0e08d0f26a3dde9ff0caa05e34c
+    restart: unless-stopped
+    command: ["--log-dir", "/app/logs"]
+    environment:
+      SQL_DSN: postgresql://${NEWAPI_DB_USER}:${NEWAPI_DB_PASSWORD}@postgres:5432/${NEWAPI_DB_NAME}
+      REDIS_CONN_STRING: redis://:${REDIS_PASSWORD}@redis:6379/0
+      SESSION_SECRET: ${NEWAPI_SESSION_SECRET}
+      CRYPTO_SECRET: ${NEWAPI_CRYPTO_SECRET}
+      ERROR_LOG_ENABLED: "true"
+      BATCH_UPDATE_ENABLED: "true"
+      STREAMING_TIMEOUT: "300"
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data/new-api:/data
+      - ./data/new-api-logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/status | grep -o '\"success\":[[:space:]]*true' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    networks: [backend, egress]
+
+  platform-api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+    restart: unless-stopped
+    environment:
+      HTTP_ADDR: :8080
+      PLATFORM_DATABASE_URL: postgres://${PLATFORM_DB_USER}:${PLATFORM_DB_PASSWORD}@postgres:5432/${PLATFORM_DB_NAME}?sslmode=disable
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
+      NEW_API_BASE_URL: http://new-api:3000
+      DEPENDENCY_TIMEOUT: 3s
+      TZ: Asia/Shanghai
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      new-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:8080/api/health/ready | grep -q '\"success\":true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    read_only: true
+    tmpfs: [/tmp]
+    networks: [backend, egress]
+
+  platform-worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+    entrypoint: ["/usr/local/bin/modelroute-worker"]
+    restart: unless-stopped
+    environment:
+      PLATFORM_DATABASE_URL: postgres://${PLATFORM_DB_USER}:${PLATFORM_DB_PASSWORD}@postgres:5432/${PLATFORM_DB_NAME}?sslmode=disable
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
+      NEW_API_BASE_URL: http://new-api:3000
+      DEPENDENCY_TIMEOUT: 3s
+      TZ: Asia/Shanghai
+    depends_on:
+      platform-api:
+        condition: service_healthy
+    read_only: true
+    tmpfs: [/tmp]
+    networks: [backend, egress]
+
+  gateway:
+    build:
+      context: .
+      dockerfile: deploy/gateway/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_BIND:-127.0.0.1:28100}:8080"
+    depends_on:
+      platform-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/healthz | grep -q ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [backend, edge]
+
+networks:
+  backend:
+    internal: true
+  egress:
+  edge:

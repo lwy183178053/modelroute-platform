@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -26,6 +28,15 @@ type stubDependency struct {
 }
 
 func (s stubDependency) Ping(context.Context) error { return s.err }
+
+type countingDependency struct {
+	calls atomic.Int32
+}
+
+func (s *countingDependency) Ping(context.Context) error {
+	s.calls.Add(1)
+	return nil
+}
 
 func TestLiveDoesNotRequireDependencies(t *testing.T) {
 	handler := NewServer("test-version", Dependencies{
@@ -68,6 +79,40 @@ func TestReadyReportsFailedDependency(t *testing.T) {
 	}
 	if body.Success || body.Error.Code != "dependency_unavailable" {
 		t.Fatalf("响应内容不符合预期：%+v", body)
+	}
+}
+
+func TestReadyCoalescesConcurrentDependencyChecks(t *testing.T) {
+	database := &countingDependency{}
+	redis := &countingDependency{}
+	newAPI := &countingDependency{}
+	handler := NewServer("test-version", Dependencies{
+		Database: database,
+		Redis:    redis,
+		NewAPI:   newAPI,
+	})
+
+	const requests = 50
+	start := make(chan struct{})
+	var wait sync.WaitGroup
+	wait.Add(requests)
+	for range requests {
+		go func() {
+			defer wait.Done()
+			<-start
+			request := httptest.NewRequest(http.MethodGet, "/api/health/ready", nil)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusOK {
+				t.Errorf("状态码 = %d", response.Code)
+			}
+		}()
+	}
+	close(start)
+	wait.Wait()
+
+	if database.calls.Load() != 1 || redis.calls.Load() != 1 || newAPI.calls.Load() != 1 {
+		t.Fatalf("依赖探测次数 database=%d redis=%d new_api=%d", database.calls.Load(), redis.calls.Load(), newAPI.calls.Load())
 	}
 }
 

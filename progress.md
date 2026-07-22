@@ -874,3 +874,26 @@
 - `deploy/tests/test_release_tools.py`：增加正确迁移表名和错误表名不得出现的回归断言。
 - `progress.md`：追加恢复演练问题、修正、验证和生产边界记录。
 - 回滚点：第 8 阶段提交 `dd7d0db`；本轮修复提交可单独执行 `git revert <本轮修复提交>`，生产服务器仍运行 `/opt/modelroute-platform/releases/b147266e6464`。
+
+## 2026-07-22 - Task: 修正就绪探测并发触发 New API 限流
+
+### What was done
+
+- 在真实回滚并恢复第 8 阶段后重跑压力测试，定位到 `/api/health/ready` 每次请求都会实时调用 New API `/api/status`，短时间并发触发上游状态接口 `429`，平台因此临时返回 `503`。
+- 为平台就绪检查增加 1 秒共享结果缓存和互斥合并；同一秒的并发请求共用一次数据库、Redis 和 New API 探测，仍保留真实依赖失败响应。
+- New API 源码、限流设置和模型调用链保持不变；修正仅作用于平台健康检查，避免发布验收和监控自身造成依赖限流。
+
+### Testing
+
+- 新增并发回归测试在旧实现上稳定记录数据库、Redis 和 New API 各探测 `50` 次并失败；修正后三类依赖各只探测 `1` 次并通过。
+- 就绪依赖失败原有测试通过；并发专项执行 `go test -race` 通过。
+- 使用本机 PostgreSQL 17 测试库执行 `go test -count=1 ./...` 和 `go test -race -count=1 ./...`，全部通过；`go vet ./...` 与 `go build ./cmd/...` 通过。
+- 执行部署工具测试共 `16` 项，全部通过；`git diff --check` 通过。
+- 生产重跑压力测试和稳定窗口验收将在本轮修复提交发布后执行，本条记录不提前声明问题已在线上消除。
+
+### Notes
+
+- `apps/api/internal/httpapi/server.go`：对就绪依赖探测增加 1 秒并发共享缓存。
+- `apps/api/internal/httpapi/server_test.go`：增加 50 个并发就绪请求只触发一次依赖探测的竞态回归测试。
+- `progress.md`：追加生产压测问题、根因、修正、验证和发布边界记录。
+- 回滚点：生产版本 `5eece405533d`；本轮修复提交可单独执行 `git revert <本轮修复提交>`，正式回滚仍可使用发布前备份 `20260722T125523Z` 和第 7 阶段目录 `b147266e6464`。

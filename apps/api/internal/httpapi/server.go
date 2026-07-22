@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/lwy183178053/modelroute-platform/apps/api/internal/newapi"
 )
@@ -24,6 +26,15 @@ type server struct {
 	version      string
 	dependencies Dependencies
 	services     Services
+	readiness    readinessCache
+}
+
+const readinessCacheDuration = time.Second
+
+type readinessCache struct {
+	mu               sync.Mutex
+	checkedAt        time.Time
+	failedDependency string
 }
 
 func NewServer(version string, dependencies Dependencies) http.Handler {
@@ -150,6 +161,32 @@ func (s *server) live(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *server) ready(w http.ResponseWriter, r *http.Request) {
+	failedDependency := s.readinessFailure(r.Context())
+	if failedDependency != "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"success": false,
+			"error": map[string]string{
+				"code":    "dependency_unavailable",
+				"message": failedDependency + " 连接异常",
+			},
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"data":    map[string]string{"status": "ready"},
+	})
+}
+
+func (s *server) readinessFailure(ctx context.Context) string {
+	s.readiness.mu.Lock()
+	defer s.readiness.mu.Unlock()
+
+	if !s.readiness.checkedAt.IsZero() && time.Since(s.readiness.checkedAt) < readinessCacheDuration {
+		return s.readiness.failedDependency
+	}
+
 	checks := []struct {
 		name   string
 		pinger Pinger
@@ -159,23 +196,17 @@ func (s *server) ready(w http.ResponseWriter, r *http.Request) {
 		{name: "new_api", pinger: s.dependencies.NewAPI},
 	}
 
+	failedDependency := ""
 	for _, check := range checks {
-		if check.pinger == nil || check.pinger.Ping(r.Context()) != nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-				"success": false,
-				"error": map[string]string{
-					"code":    "dependency_unavailable",
-					"message": check.name + " 连接异常",
-				},
-			})
-			return
+		if check.pinger == nil || check.pinger.Ping(ctx) != nil {
+			failedDependency = check.name
+			break
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"data":    map[string]string{"status": "ready"},
-	})
+	s.readiness.checkedAt = time.Now()
+	s.readiness.failedDependency = failedDependency
+	return failedDependency
 }
 
 func (s *server) versionInfo(w http.ResponseWriter, _ *http.Request) {

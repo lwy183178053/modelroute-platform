@@ -124,7 +124,7 @@ function App() {
     <div className="app-shell">
       <Topbar account={account} active={view} navigate={navigate} onLogin={() => setModal('login')} onLogout={logout} />
       <main>
-        {view === 'market' && <MarketView navigate={navigate} openRoute={() => setModal(account ? 'route' : 'login')} />}
+        {view === 'market' && <MarketView navigate={navigate} />}
         {view === 'console' && account && <ConsoleView account={account} navigate={navigate} notify={notify} openModal={setModal} />}
         {view === 'merchant' && (account?.is_merchant || Number(account?.role) >= 10) && <MerchantView account={account} notify={notify} openModal={setModal} />}
         {view === 'admin' && Number(account?.role) >= 10 && <AdminView notify={notify} openModal={setModal} section={adminSection} setSection={setAdminSection} />}

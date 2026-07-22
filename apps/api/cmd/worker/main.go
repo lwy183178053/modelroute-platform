@@ -30,14 +30,21 @@ func main() {
 	defer resources.Close()
 
 	log.Printf("ModelRoute Worker %s 已启动", version)
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
+	runHealthCycle(ctx, resources)
+	ticks := 0
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			ticks++
+			runHealthCycle(ctx, resources)
+			if ticks%3 != 0 {
+				continue
+			}
 			checkContext, cancelCheck := context.WithTimeout(ctx, cfg.DependencyTimeout)
 			errors := 0
 			for _, dependency := range []interface{ Ping(context.Context) error }{
@@ -54,5 +61,16 @@ func main() {
 				log.Printf("依赖检查异常数量：%d", errors)
 			}
 		}
+	}
+}
+
+func runHealthCycle(ctx context.Context, resources *bootstrap.Resources) {
+	if resources.Services.Health == nil {
+		return
+	}
+	cycleContext, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	if err := resources.Services.Health.RunCycle(cycleContext, time.Now().UTC()); err != nil {
+		log.Printf("渠道探活异常：%v", err)
 	}
 }

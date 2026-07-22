@@ -1,8 +1,10 @@
 package newapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -99,5 +101,39 @@ func TestDoReturnsTypedUpstreamError(t *testing.T) {
 	upstreamError, ok := err.(*APIError)
 	if !ok || upstreamError.Message != "账号已封禁" {
 		t.Fatalf("错误 = %#v", err)
+	}
+}
+
+func TestProxyPreservesAuthorizationStatusHeadersAndBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" || r.Header.Get("Authorization") != "Bearer sk-user" {
+			t.Fatalf("代理请求不符合预期：%s %s", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		body, _ := io.ReadAll(r.Body)
+		if !bytes.Contains(body, []byte(`"model":"mkt-ov-9"`)) {
+			t.Fatalf("代理请求正文 = %s", body)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("X-Upstream-Request-Id", "upstream-1")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte("data: first\n\ndata: second\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, time.Second)
+	response, err := client.Proxy(context.Background(), http.MethodPost, "/v1/responses", http.Header{
+		"Authorization": []string{"Bearer sk-user"},
+		"Content-Type":  []string{"application/json"},
+	}, []byte(`{"model":"mkt-ov-9"}`))
+	if err != nil {
+		t.Fatalf("原始代理失败：%v", err)
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != http.StatusAccepted || response.Header.Get("X-Upstream-Request-Id") != "upstream-1" {
+		t.Fatalf("代理响应元数据不符合预期：%d %v", response.StatusCode, response.Header)
+	}
+	if string(body) != "data: first\n\ndata: second\n\n" {
+		t.Fatalf("代理响应正文 = %q", body)
 	}
 }

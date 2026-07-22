@@ -5,7 +5,11 @@ import { Button, InlineNotice, Section, Status } from '../../ui';
 
 const statusNames = {
   pending: '待审核', verifying: '验证中', verified: '待批准', approving: '导入中',
-  approved: '已通过', rejected: '已驳回', active: '正常', disabled: '停用',
+  approved: '已通过', rejected: '已驳回', active: '正常', disabled: '已停用',
+};
+
+const healthNames = {
+  pending: '待探测', healthy: '健康', degraded: '降级', cooling: '冷却', recovering: '恢复中', disabled: '已停用',
 };
 
 const channelTypeNames = {
@@ -16,18 +20,21 @@ const channelTypeNames = {
 export default function AdminChannels({ notify }) {
   const [reviews, setReviews] = useState([]);
   const [channels, setChannels] = useState([]);
+  const [offers, setOffers] = useState([]);
   const [error, setError] = useState('');
   const [busyID, setBusyID] = useState('');
 
   const load = useCallback(async () => {
     setError('');
     try {
-      const [reviewData, channelData] = await Promise.all([
+      const [reviewData, channelData, offerData] = await Promise.all([
         apiRequest('/api/admin/channel-reviews?p=1&page_size=100'),
         apiRequest('/api/admin/channels?p=1&page_size=100'),
+        apiRequest('/api/offers'),
       ]);
       setReviews(reviewData?.items || []);
       setChannels(channelData?.items || []);
+      setOffers(offerData || []);
     } catch (requestError) {
       setError(requestError.message || '读取渠道数据失败');
     }
@@ -54,6 +61,19 @@ export default function AdminChannels({ notify }) {
     }
   };
 
+  const recover = async (channel) => {
+    setBusyID(`${channel.id}-recover`);
+    try {
+      await apiRequest(`/api/admin/channels/${channel.id}/health/reset`, { method: 'POST' });
+      notify('渠道已进入恢复探测');
+      await load();
+    } catch (requestError) {
+      notify(requestError.message || '恢复渠道失败');
+    } finally {
+      setBusyID('');
+    }
+  };
+
   return (
     <div className="admin-section-stack">
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}
@@ -68,14 +88,16 @@ export default function AdminChannels({ notify }) {
         </tbody></table></div>
       </Section>
 
-      <Section title="已导入渠道" description="展示平台归属和 New API 渠道映射，不回显上游密钥">
-        <div className="table-wrap"><table className="data-table"><thead><tr><th>渠道</th><th>商户</th><th>New API 编号</th><th>类型</th><th>基础地址</th><th>模型</th><th>密钥指纹</th><th>状态</th></tr></thead><tbody>
-          {channels.map((channel) => <tr key={channel.id}><td><strong>{channel.channel_name}</strong><small>C{channel.id} · R{channel.review_id}</small></td><td>M{channel.merchant_id}</td><td><code>New API {channel.newapi_channel_id}</code></td><td>{channelTypeNames[channel.channel_type] || `类型 ${channel.channel_type}`}</td><td><code>{channel.base_url}</code></td><td>{channel.models?.join('、') || '-'}</td><td><code>{channel.credential_fingerprint || '-'}</code></td><td><Status>{statusNames[channel.status] || channel.status}</Status></td></tr>)}
-          {channels.length === 0 && <tr><td className="table-message" colSpan="8">暂无已导入渠道</td></tr>}
+      <Section title="已导入渠道" description="展示平台归属、New API 映射和当前报价健康，不回显上游密钥">
+        <div className="table-wrap"><table className="data-table"><thead><tr><th>渠道</th><th>商户</th><th>New API 编号</th><th>类型</th><th>模型</th><th>密钥指纹</th><th>状态</th><th>报价健康</th><th>操作</th></tr></thead><tbody>
+          {channels.map((channel) => {
+            const channelOffers = offers.filter((offer) => offer.merchant_channel_id === channel.id);
+            const canRecover = channel.status === 'disabled' || channelOffers.some((offer) => offer.health_state === 'disabled');
+            return <tr key={channel.id}><td><strong>{channel.channel_name}</strong><small>C{channel.id} · R{channel.review_id}</small></td><td>M{channel.merchant_id}</td><td><code>New API {channel.newapi_channel_id}</code></td><td>{channelTypeNames[channel.channel_type] || `类型 ${channel.channel_type}`}</td><td>{channel.models?.join('、') || '-'}</td><td><code>{channel.credential_fingerprint || '-'}</code></td><td><Status>{statusNames[channel.status] || channel.status}</Status></td><td>{channelOffers.length ? channelOffers.map((offer) => <span key={offer.offer_id}><Status>{healthNames[offer.health_state] || offer.health_state}</Status><small>{offer.model}</small></span>) : '-'}</td><td>{canRecover ? <Button disabled={Boolean(busyID)} icon={RefreshCw} variant="ghost" onClick={() => recover(channel)}>恢复渠道</Button> : '-'}</td></tr>;
+          })}
+          {channels.length === 0 && <tr><td className="table-message" colSpan="9">暂无已导入渠道</td></tr>}
         </tbody></table></div>
       </Section>
-
-      <InlineNotice>渠道探活、冷却和恢复记录将在路由阶段接入真实任务与状态。</InlineNotice>
     </div>
   );
 }

@@ -17,6 +17,8 @@ type Config struct {
 	NewAPIBaseURL        string
 	DependencyTimeout    time.Duration
 	NewAPIRequestTimeout time.Duration
+	NewAPIAdminUsername  string
+	NewAPIAdminPassword  string
 	PublicOrigin         string
 	SessionCookieName    string
 	SessionCookieSecure  bool
@@ -32,6 +34,8 @@ func Load() (Config, error) {
 		NewAPIBaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv("NEW_API_BASE_URL")), "/"),
 		DependencyTimeout:    2 * time.Second,
 		NewAPIRequestTimeout: 30 * time.Second,
+		NewAPIAdminUsername:  strings.TrimSpace(os.Getenv("NEW_API_ADMIN_USERNAME")),
+		NewAPIAdminPassword:  strings.TrimSpace(os.Getenv("NEW_API_ADMIN_PASSWORD")),
 		PublicOrigin:         strings.TrimRight(strings.TrimSpace(os.Getenv("PUBLIC_ORIGIN")), "/"),
 		SessionCookieName:    valueOrDefault("SESSION_COOKIE_NAME", "modelroute_session"),
 		SessionCookieSecure:  true,
@@ -60,10 +64,12 @@ func Load() (Config, error) {
 	}
 
 	required := map[string]string{
-		"PLATFORM_DATABASE_URL": cfg.DatabaseURL,
-		"REDIS_URL":             cfg.RedisURL,
-		"NEW_API_BASE_URL":      cfg.NewAPIBaseURL,
-		"PUBLIC_ORIGIN":         cfg.PublicOrigin,
+		"PLATFORM_DATABASE_URL":  cfg.DatabaseURL,
+		"REDIS_URL":              cfg.RedisURL,
+		"NEW_API_BASE_URL":       cfg.NewAPIBaseURL,
+		"PUBLIC_ORIGIN":          cfg.PublicOrigin,
+		"NEW_API_ADMIN_USERNAME": cfg.NewAPIAdminUsername,
+		"NEW_API_ADMIN_PASSWORD": cfg.NewAPIAdminPassword,
 	}
 	for name, value := range required {
 		if value == "" {

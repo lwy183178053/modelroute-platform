@@ -21,11 +21,35 @@ function displayKey(value) {
   return value.startsWith('sk-') ? value : `sk-${value}`;
 }
 
+function formatMultiplier(value) {
+  return `${(Number(value || 0) / 10_000).toFixed(4)}x`;
+}
+
+function merchantOptions(offers) {
+  const merchants = new Map();
+  for (const offer of offers) {
+    const current = merchants.get(offer.merchant_id);
+    if (!current) {
+      merchants.set(offer.merchant_id, {
+        id: offer.merchant_id,
+        name: offer.merchant_name,
+        availability_ppm: offer.availability_ppm,
+        minimum_multiplier_bps: offer.multiplier_bps,
+      });
+      continue;
+    }
+    current.availability_ppm = Math.max(current.availability_ppm, offer.availability_ppm);
+    current.minimum_multiplier_bps = Math.min(current.minimum_multiplier_bps, offer.multiplier_bps);
+  }
+  return [...merchants.values()].sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
+}
+
 export default function ConsoleView({ account, openModal, notify, navigate }) {
   const [keys, setKeys] = useState([]);
   const [revealed, setRevealed] = useState({});
   const [keyLoading, setKeyLoading] = useState(true);
   const [keyError, setKeyError] = useState('');
+  const [merchants, setMerchants] = useState([]);
   const [merchantApplication, setMerchantApplication] = useState(undefined);
   const displayName = account.display_name || account.username;
 
@@ -33,8 +57,17 @@ export default function ConsoleView({ account, openModal, notify, navigate }) {
     setKeyLoading(true);
     setKeyError('');
     try {
-      const data = await apiRequest('/api/keys?p=1&page_size=50');
-      setKeys(data?.items || []);
+      const [data, offerData] = await Promise.all([
+        apiRequest('/api/keys?p=1&page_size=50'),
+        apiRequest('/api/offers'),
+      ]);
+      const items = data?.items || [];
+      const policies = await Promise.allSettled(items.map((key) => apiRequest(`/api/routing-policies/${key.id}`)));
+      setKeys(items.map((key, index) => ({
+        ...key,
+        routing_policy: policies[index]?.status === 'fulfilled' ? policies[index].value : null,
+      })));
+      setMerchants(merchantOptions(offerData || []));
     } catch (error) {
       setKeyError(error.message || '读取密钥失败');
     } finally {
@@ -158,14 +191,18 @@ export default function ConsoleView({ account, openModal, notify, navigate }) {
         <InlineNotice>外围平台只在请求进入 New API 前选择商户渠道并替换内部模型别名，不重新计算 Token 或缓存费用。</InlineNotice>
         <div className="table-wrap">
           <table className="data-table">
-            <thead><tr><th>名称 / 密钥</th><th>路由方式</th><th>倍率区间</th><th>优先规则</th><th>固定商户</th><th>今日消费</th><th>状态</th><th></th></tr></thead>
+            <thead><tr><th>名称 / 密钥</th><th>路由方式</th><th>倍率区间</th><th>优先规则</th><th>固定商户</th><th>状态</th><th></th></tr></thead>
             <tbody>{keys.map((key) => <tr key={key.id}>
               <td><strong>{key.name}</strong><CopyValue onCopy={() => copyKey(key)}>{displayKey(revealed[key.id] || key.key)}</CopyValue></td>
-              <td><span className="route-kind"><Route size={15} /> 默认路由</span></td><td>-</td><td>-</td><td>-</td><td>-</td><td><div className="status-control"><Status>{Number(key.status) === 1 ? '正常' : '停用'}</Status><label className="compact-switch" title={Number(key.status) === 1 ? '停用密钥' : '启用密钥'}><input aria-label={`启用${key.name}`} checked={Number(key.status) === 1} onChange={(event) => setKeyStatus(key, event.target.checked)} type="checkbox" /><span /></label></div></td>
-              <td><div className="row-actions"><Button icon={Eye} onClick={() => revealKey(key)} variant="ghost">查看</Button><Button icon={Pencil} onClick={() => openModal({ type: 'key', key, group: account.group, onSaved: loadKeys })} variant="ghost">编辑</Button><Button onClick={() => openModal('route')} variant="ghost">编辑路由策略</Button><Button icon={Trash2} onClick={() => deleteKey(key)} variant="danger">删除</Button></div></td>
+              <td><span className="route-kind"><Route size={15} /> {key.routing_policy?.mode === 'fixed' ? '固定商户' : key.routing_policy ? '智能路由' : '未绑定'}</span></td>
+              <td>{key.routing_policy ? `${formatMultiplier(key.routing_policy.minimum_multiplier_bps)} - ${formatMultiplier(key.routing_policy.maximum_multiplier_bps)}` : '-'}</td>
+              <td>{key.routing_policy?.priority === 'price' ? '价格优先' : key.routing_policy ? '稳定性优先' : '-'}</td>
+              <td>{key.routing_policy?.mode === 'fixed' ? `${key.routing_policy.merchant_ids?.length || 0} 家` : '全部合格商户'}</td>
+              <td><div className="status-control"><Status>{Number(key.status) === 1 ? '正常' : '停用'}</Status><label className="compact-switch" title={Number(key.status) === 1 ? '停用密钥' : '启用密钥'}><input aria-label={`启用${key.name}`} checked={Number(key.status) === 1} onChange={(event) => setKeyStatus(key, event.target.checked)} type="checkbox" /><span /></label></div></td>
+              <td><div className="row-actions"><Button icon={Eye} onClick={() => revealKey(key)} variant="ghost">查看</Button><Button icon={Pencil} onClick={() => openModal({ type: 'key', key, group: account.group, onSaved: loadKeys })} variant="ghost">编辑</Button><Button onClick={() => openModal({ type: 'route', key, policy: key.routing_policy, merchants, onSaved: loadKeys })} variant="ghost">编辑路由策略</Button><Button icon={Trash2} onClick={() => deleteKey(key)} variant="danger">删除</Button></div></td>
             </tr>)}
-            {!keyLoading && keys.length === 0 && <tr><td className="table-message" colSpan="8">{keyError || '尚未创建 API 密钥'}</td></tr>}
-            {keyLoading && <tr><td className="table-message" colSpan="8">正在读取 API 密钥</td></tr>}</tbody>
+            {!keyLoading && keys.length === 0 && <tr><td className="table-message" colSpan="7">{keyError || '尚未创建 API 密钥'}</td></tr>}
+            {keyLoading && <tr><td className="table-message" colSpan="7">正在读取 API 密钥</td></tr>}</tbody>
           </table>
         </div>
       </Section>

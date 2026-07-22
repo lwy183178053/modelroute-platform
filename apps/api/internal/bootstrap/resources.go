@@ -76,19 +76,27 @@ func buildHTTPServices(database *sql.DB, redisClient *redis.Client, cfg config.C
 	if err != nil {
 		return httpapi.Services{}, fmt.Errorf("初始化商户凭据加密：%w", err)
 	}
-	return httpapi.Services{
+	newAPIClient := newapi.NewClient(cfg.NewAPIBaseURL, cfg.NewAPIRequestTimeout)
+	adminNewAPI := newapi.NewServiceAccount(newAPIClient, cfg.NewAPIAdminUsername, cfg.NewAPIAdminPassword)
+	routing := httpapi.NewSQLRoutingStore(database)
+	services := httpapi.Services{
 		Sessions:    platformauth.NewStore(redisClient, cfg.SessionTTL),
-		NewAPI:      newapi.NewClient(cfg.NewAPIBaseURL, cfg.NewAPIRequestTimeout),
+		NewAPI:      newAPIClient,
+		AdminNewAPI: adminNewAPI,
 		Audit:       httpapi.NewSQLAuditStore(database),
 		Merchants:   httpapi.NewSQLMerchantStore(database),
 		Credentials: credentials,
+		Routing:     routing,
+		OfferSync:   httpapi.NewPriceSynchronizer(routing, adminNewAPI),
 		Cookie: httpapi.CookieConfig{
 			Name:         cfg.SessionCookieName,
 			Secure:       cfg.SessionCookieSecure,
 			PublicOrigin: cfg.PublicOrigin,
 			MaxAge:       cfg.SessionTTL,
 		},
-	}, nil
+	}
+	services.Health = httpapi.NewHealthRunner(routing, adminNewAPI, newAPIClient, adminNewAPI)
+	return services, nil
 }
 
 func (r *Resources) Close() {

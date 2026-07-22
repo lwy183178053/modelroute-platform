@@ -75,6 +75,8 @@ class ComposeIsolationTest(unittest.TestCase):
                 environment["PLATFORM_ENCRYPTION_KEY"],
                 "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
             )
+            self.assertEqual(environment["NEW_API_ADMIN_USERNAME"], "modelroute")
+            self.assertEqual(environment["NEW_API_ADMIN_PASSWORD"], "CHANGE_TO_SERVER_ADMIN_PASSWORD")
 
 
 if __name__ == "__main__":

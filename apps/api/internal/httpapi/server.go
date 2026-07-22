@@ -73,9 +73,20 @@ func NewServerWithServices(version string, dependencies Dependencies, services S
 	mux.HandleFunc("POST /api/admin/channel-reviews/{id}/approve", s.adminApproveReview)
 	mux.HandleFunc("POST /api/admin/channel-reviews/{id}/reject", s.adminRejectReview)
 	mux.HandleFunc("GET /api/admin/channels", s.adminMerchantChannels)
-	mux.HandleFunc("POST /v1/chat/completions", modelRouteDisabled)
-	mux.HandleFunc("POST /v1/responses", modelRouteDisabled)
-	mux.HandleFunc("POST /v1/embeddings", modelRouteDisabled)
+	mux.HandleFunc("POST /api/admin/models", s.createCanonicalModel)
+	mux.HandleFunc("GET /api/admin/models", s.adminModels)
+	mux.HandleFunc("POST /api/admin/models/{id}/prices", s.publishOfficialPrice)
+	mux.HandleFunc("GET /api/models", s.models)
+	mux.HandleFunc("POST /api/merchant/offers", s.createMerchantOffer)
+	mux.HandleFunc("GET /api/merchant/offers", s.merchantOffers)
+	mux.HandleFunc("GET /api/merchant/health", s.merchantHealth)
+	mux.HandleFunc("GET /api/routing-policies/{id}", s.routingPolicy)
+	mux.HandleFunc("PUT /api/routing-policies/{id}", s.updateRoutingPolicy)
+	mux.HandleFunc("GET /api/offers", s.marketOffers)
+	mux.HandleFunc("POST /api/admin/channels/{id}/health/reset", s.adminResetChannelHealth)
+	mux.HandleFunc("POST /v1/chat/completions", s.modelProxy)
+	mux.HandleFunc("POST /v1/responses", s.modelProxy)
+	mux.HandleFunc("POST /v1/embeddings", s.modelProxy)
 	return requestID(clientMetadata(mux))
 }
 
@@ -144,6 +155,8 @@ func modelRouteDisabled(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+type requestIDContextKey struct{}
+
 func requestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestID := r.Header.Get("X-Request-ID")
@@ -155,6 +168,7 @@ func requestID(next http.Handler) http.Handler {
 		}
 		if requestID != "" {
 			w.Header().Set("X-Request-ID", requestID)
+			r = r.WithContext(context.WithValue(r.Context(), requestIDContextKey{}, requestID))
 		}
 		next.ServeHTTP(w, r)
 	})

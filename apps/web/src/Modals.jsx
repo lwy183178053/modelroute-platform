@@ -8,25 +8,69 @@ function Footer({ cancel, submit, submitText, icon = Check }) {
   return <><Button onClick={cancel}>取消</Button><Button icon={icon} variant="primary" onClick={submit}>{submitText}</Button></>;
 }
 
-function RouteModal({ close, notify }) {
-  const [mode, setMode] = useState('smart');
-  const [priority, setPriority] = useState('stability');
+function RouteModal({ close, config, notify }) {
+  const policy = config.policy || {};
+  const [mode, setMode] = useState(policy.mode || 'smart');
+  const [priority, setPriority] = useState(policy.priority || 'stability');
+  const [minimum, setMinimum] = useState(String(Number(policy.minimum_multiplier_bps || 1) / 10_000));
+  const [maximum, setMaximum] = useState(String(Number(policy.maximum_multiplier_bps || 10_000) / 10_000));
+  const [merchantIDs, setMerchantIDs] = useState(policy.merchant_ids || []);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const toggleMerchant = (merchantID) => {
+    setMerchantIDs((current) => current.includes(merchantID) ? current.filter((id) => id !== merchantID) : [...current, merchantID]);
+  };
+
+  const submit = async () => {
+    const minimumBPS = Math.round(Number(minimum) * 10_000);
+    const maximumBPS = Math.round(Number(maximum) * 10_000);
+    if (!Number.isInteger(minimumBPS) || !Number.isInteger(maximumBPS) || minimumBPS < 1 || maximumBPS > 10_000 || minimumBPS > maximumBPS) {
+      setError('倍率区间必须在 0.0001x 到 1.0000x 之间');
+      return;
+    }
+    if (mode === 'fixed' && merchantIDs.length === 0) {
+      setError('固定路由至少选择一个商户');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await apiRequest(`/api/routing-policies/${config.key.id}`, {
+        method: 'PUT',
+        body: {
+          mode, priority,
+          minimum_multiplier_bps: minimumBPS,
+          maximum_multiplier_bps: maximumBPS,
+          merchant_ids: mode === 'fixed' ? merchantIDs : [],
+        },
+      });
+      await config.onSaved?.();
+      notify('路由策略已保存');
+      close();
+    } catch (requestError) {
+      setError(requestError.message || '保存路由策略失败');
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <Modal
       title="编辑路由策略"
       description="策略按当前 API 密钥绑定，只影响保存后的新请求。"
       onClose={close}
       wide
-      footer={<Footer cancel={close} submitText="保存策略" submit={() => { close(); notify('路由策略已保存'); }} />}
+      footer={<><Button onClick={close}>取消</Button><Button disabled={busy} icon={Check} variant="primary" onClick={submit}>{busy ? '保存中' : '保存策略'}</Button></>}
     >
+      {error && <InlineNotice tone="danger">{error}</InlineNotice>}
       <div className="form-section"><h3>路由方式</h3><div className="choice-grid">
         <label className={`choice-card ${mode === 'smart' ? 'selected' : ''}`}><input aria-label="智能路由" checked={mode === 'smart'} name="route-mode" onChange={() => setMode('smart')} type="radio" /><span className="choice-icon"><ShieldCheck size={20} /></span><strong>智能路由</strong><small>从所有符合倍率和健康条件的商户中选择</small></label>
         <label className={`choice-card ${mode === 'fixed' ? 'selected' : ''}`}><input aria-label="固定商户" checked={mode === 'fixed'} name="route-mode" onChange={() => setMode('fixed')} type="radio" /><span className="choice-icon"><Store size={20} /></span><strong>固定商户</strong><small>只从指定商户中选择，越界时直接返回无渠道错误</small></label>
       </div></div>
 
       <div className="form-grid two-column">
-        <Field label="最低成交倍率" hint="低于此倍率的报价不参与路由"><TextInput defaultValue="0.40" min="0.0001" max="1" step="0.01" type="number" /></Field>
-        <Field label="最高成交倍率" hint="平台强制不超过官方价格 1.0x"><TextInput defaultValue="0.80" min="0.0001" max="1" step="0.01" type="number" /></Field>
+        <Field label="最低成交倍率" hint="低于此倍率的报价不参与路由"><TextInput value={minimum} onChange={(event) => setMinimum(event.target.value)} min="0.0001" max="1" step="0.0001" type="number" /></Field>
+        <Field label="最高成交倍率" hint="平台强制不超过官方价格 1.0x"><TextInput value={maximum} onChange={(event) => setMaximum(event.target.value)} min="0.0001" max="1" step="0.0001" type="number" /></Field>
       </div>
 
       <div className="form-section"><h3>选择优先级</h3><div className="radio-row">
@@ -35,22 +79,49 @@ function RouteModal({ close, notify }) {
       </div></div>
 
       {mode === 'fixed' && <div className="form-section"><h3>固定商户范围</h3><div className="merchant-checks">
-        <label><input defaultChecked type="checkbox" /><span><strong>北辰云智</strong><small>99.98% 可用率 · 最低 0.72x</small></span></label>
-        <label><input defaultChecked type="checkbox" /><span><strong>青川 API</strong><small>99.95% 可用率 · 最低 0.68x</small></span></label>
-        <label><input type="checkbox" /><span><strong>矩阵算力</strong><small>99.89% 可用率 · 最低 0.55x</small></span></label>
+        {(config.merchants || []).map((merchant) => <label key={merchant.id}><input aria-label={`选择商户 ${merchant.name}`} checked={merchantIDs.includes(merchant.id)} onChange={() => toggleMerchant(merchant.id)} type="checkbox" /><span><strong>{merchant.name}</strong><small>{(Number(merchant.availability_ppm || 0) / 10_000).toFixed(2)}% 可用率 · 最低 {(Number(merchant.minimum_multiplier_bps || 0) / 10_000).toFixed(4)}x</small></span></label>)}
+        {(config.merchants || []).length === 0 && <InlineNotice tone="warning">当前市场没有可选择的商户</InlineNotice>}
       </div></div>}
       <InlineNotice tone="warning">没有符合固定商户名单、倍率区间和健康条件的候选时，返回兼容 New API 的 503 错误且不扣费。</InlineNotice>
     </Modal>
   );
 }
 
-function QuoteModal({ close, notify }) {
+function QuoteModal({ close, config, notify }) {
+  const [modelID, setModelID] = useState(String(config.models?.[0]?.id || ''));
+  const [channelID, setChannelID] = useState(String(config.channels?.[0]?.id || ''));
   const [ratio, setRatio] = useState('0.72');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const selectedModel = config.models?.find((model) => String(model.id) === modelID);
+  const submit = async () => {
+    const multiplierBPS = Math.round(Number(ratio) * 10_000);
+    if (!Number.isInteger(multiplierBPS) || multiplierBPS < 1 || multiplierBPS > 10_000) {
+      setError('成交倍率必须在 0.0001x 到 1.0000x 之间');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await apiRequest('/api/merchant/offers', { method: 'POST', body: {
+        merchant_channel_id: Number(channelID), canonical_model_id: Number(modelID), multiplier_bps: multiplierBPS,
+      } });
+      await config.onSaved?.();
+      notify('新报价版本已生效');
+      close();
+    } catch (requestError) {
+      setError(requestError.message || '创建报价失败');
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <Modal title="调整模型报价" description="GPT-5.2 · OpenAI 主线路" onClose={close} footer={<Footer cancel={close} submitText="提交调价" submit={() => { close(); notify('新报价版本已提交并等待价格同步'); }} />}>
-      <div className="quote-summary"><div><span>官方输入价格</span><strong>¥1.75 / M</strong></div><div><span>官方输出价格</span><strong>¥14.00 / M</strong></div><div><span>当前成交倍率</span><strong>0.72x</strong></div></div>
-      <Field label="新的成交倍率" hint="允许范围 0.0001x - 1.0000x"><div className="suffix-input"><TextInput max="1" min="0.0001" onChange={(event) => setRatio(event.target.value)} step="0.01" type="number" value={ratio} /><span>x</span></div></Field>
-      <div className="price-preview"><span>用户新价格</span><strong>输入 ¥{(1.75 * Number(ratio || 0)).toFixed(2)} / M</strong><strong>输出 ¥{(14 * Number(ratio || 0)).toFixed(2)} / M</strong></div>
+    <Modal title="创建模型报价" description="选择已审核渠道和标准模型，提交后同步 New API 价格与模型别名。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !modelID || !channelID} icon={Check} variant="primary" onClick={submit}>{busy ? '同步中' : '提交报价'}</Button></>}>
+      {error && <InlineNotice tone="danger">{error}</InlineNotice>}
+      <Field label="标准模型"><Select value={modelID} onChange={(event) => setModelID(event.target.value)}>{(config.models || []).map((model) => <option key={model.id} value={model.id}>{model.public_name} · {model.provider}</option>)}</Select></Field>
+      <Field label="商户渠道"><Select value={channelID} onChange={(event) => setChannelID(event.target.value)}>{(config.channels || []).map((channel) => <option key={channel.id} value={channel.id}>{channel.channel_name} · C{channel.id}</option>)}</Select></Field>
+      <div className="quote-summary"><div><span>官方价格版本</span><strong>v{selectedModel?.price?.version || '-'}</strong></div><div><span>计费模式</span><strong>{selectedModel?.price?.billing_mode === 'fixed' ? '固定计费' : 'Token 计费'}</strong></div><div><span>倍率上限</span><strong>1.0000x</strong></div></div>
+      <Field label="成交倍率" hint="允许范围 0.0001x - 1.0000x"><div className="suffix-input"><TextInput max="1" min="0.0001" onChange={(event) => setRatio(event.target.value)} step="0.0001" type="number" value={ratio} /><span>x</span></div></Field>
       <InlineNotice>调价将创建不可变的新报价版本；已进入请求的价格不会变化。</InlineNotice>
     </Modal>
   );
@@ -253,8 +324,8 @@ export default function Modals({ modal, close, notify, onAuthenticated, setModal
   if (['login', 'register', 'forgot', 'twoFactor', 'resetPassword'].includes(type)) return <AuthModal close={close} mode={type} notify={notify} onAuthenticated={onAuthenticated} reset={typeof modal === 'object' ? modal : null} setModal={setModal} />;
   if (type === 'key') return <KeyModal close={close} config={modal} notify={notify} />;
   if (type === 'adminQuota' || type === 'adminPassword') return <AdminUserModal close={close} config={modal} notify={notify} />;
-  if (type === 'route') return <RouteModal close={close} notify={notify} />;
-  if (type === 'quote') return <QuoteModal close={close} notify={notify} />;
+  if (type === 'route') return <RouteModal close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
+  if (type === 'quote') return <QuoteModal close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
   if (type === 'payment') return <PaymentModal close={close} notify={notify} />;
   if (type === 'recharge') return <RechargeModal close={close} notify={notify} />;
   if (type === 'merchantApply') return <MerchantApplyModal close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;

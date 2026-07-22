@@ -8,6 +8,7 @@
 **/*.log
 **/.vite/
 **/__pycache__/
+/apps/api/*.exe
 
 data/
 backups/

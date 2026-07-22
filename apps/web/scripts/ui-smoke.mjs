@@ -13,6 +13,7 @@ function assert(condition, message) {
 
 const browser = await chromium.launch({ executablePath, headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+page.setDefaultTimeout(10000);
 
 async function mockAdminAPI(targetPage, state) {
   await targetPage.route('**/api/**', async (route) => {
@@ -26,8 +27,49 @@ async function mockAdminAPI(targetPage, state) {
     if (url.pathname === '/api/me') {
       return json({ success: true, data: { id: 1, username: 'modelroute', display_name: '平台管理员', role: 100, status: 1, group: 'default', quota: 128642000, used_quota: 4268000, is_merchant: true, merchant_id: 31, merchant_status: 'active' } });
     }
+    if (url.pathname === '/api/models') {
+      return json({ success: true, data: [{ id: 101, public_name: 'gpt-4o-mini', provider: 'OpenAI', protocol: 'chat_completions', status: 'active', price: { id: 501, version: 2, billing_mode: 'token', model_ratio_micros: 600000, completion_ratio_micros: 4000000, cache_ratio_micros: 500000, create_cache_ratio_micros: 0, image_ratio_micros: 0, audio_ratio_micros: 0, audio_completion_ratio_micros: 0 } }] });
+    }
+    if (url.pathname === '/api/offers') {
+      return json({ success: true, data: [
+        { offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', merchant_channel_id: 51, channel_name: 'OpenAI 主线路', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 },
+        { offer_id: 202, merchant_id: 32, merchant_name: '矩阵算力', merchant_channel_id: 52, channel_name: 'OpenAI 备用线路', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 5800, health_state: 'degraded', availability_ppm: 987500, ttft_p95_ms: 1650 },
+      ] });
+    }
     if (url.pathname === '/api/keys' && request.method() === 'GET') {
       return json({ success: true, data: { page: 1, page_size: 20, total: 1, items: [{ id: 9, name: '真实主密钥', key: 'abcd**********wxyz', status: 1, created_time: 1784690000, accessed_time: 1784692000, expired_time: -1, unlimited_quota: true }] } });
+    }
+    if (url.pathname === '/api/routing-policies/9' && request.method() === 'GET') {
+      return json({ success: true, data: { id: 71, newapi_token_id: 9, mode: 'smart', priority: 'stability', minimum_multiplier_bps: 4000, maximum_multiplier_bps: 8000, merchant_ids: [] } });
+    }
+    if (url.pathname === '/api/routing-policies/9' && request.method() === 'PUT') {
+      state.routeSaveCalls += 1;
+      state.routeSaveBody = request.postDataJSON();
+      return json({ success: true, data: { id: 71, newapi_token_id: 9, ...state.routeSaveBody } });
+    }
+    if (url.pathname === '/api/merchant/offers' && request.method() === 'GET') {
+      return json({ success: true, data: [{ offer_id: 201, merchant_channel_id: 51, channel_name: 'OpenAI 主线路', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, offer_status: 'active', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] });
+    }
+    if (url.pathname === '/api/merchant/health' && request.method() === 'GET') {
+      return json({ success: true, data: [{ offer_id: 201, merchant_channel_id: 51, channel_name: 'OpenAI 主线路', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, offer_status: 'active', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] });
+    }
+    if (url.pathname === '/api/merchant/offers' && request.method() === 'POST') {
+      state.offerCreateCalls += 1;
+      state.offerCreateBody = request.postDataJSON();
+      return json({ success: true, data: { id: 203, status: 'active', ...state.offerCreateBody } }, 201);
+    }
+    if (url.pathname === '/api/admin/models' && request.method() === 'GET') {
+      return json({ success: true, data: [{ id: 101, public_name: 'gpt-4o-mini', provider: 'OpenAI', protocol: 'chat_completions', status: 'active', price: { id: 501, version: 2, billing_mode: 'token', model_ratio_micros: 600000, completion_ratio_micros: 4000000, cache_ratio_micros: 500000, create_cache_ratio_micros: 0, image_ratio_micros: 0, audio_ratio_micros: 0, audio_completion_ratio_micros: 0 } }] });
+    }
+    if (url.pathname === '/api/admin/models' && request.method() === 'POST') {
+      state.modelCreateCalls += 1;
+      state.modelCreateBody = request.postDataJSON();
+      return json({ success: true, data: { id: 102, status: 'active', ...state.modelCreateBody } }, 201);
+    }
+    if (url.pathname === '/api/admin/models/101/prices' && request.method() === 'POST') {
+      state.pricePublishCalls += 1;
+      state.pricePublishBody = request.postDataJSON();
+      return json({ success: true, data: { id: 502, version: 3, ...state.pricePublishBody } }, 201);
     }
     if (url.pathname === '/api/admin/users') {
       return json({ success: true, data: { page: 1, page_size: 20, total: 2, items: [
@@ -51,7 +93,14 @@ async function mockAdminAPI(targetPage, state) {
       return json({ success: true, data: { page: 1, page_size: 100, total: 1, items: [{ id: 22, user_id: 8, channel_name: 'Anthropic 备用线路', channel_type: 14, base_url: 'https://api.anthropic.example', requested_models: ['claude-sonnet-4-5'], status: 'pending', credential_configured: true, created_at: '2026-07-22T15:00:00Z' }] } });
     }
     if (url.pathname === '/api/admin/channels' && request.method() === 'GET') {
-      return json({ success: true, data: { page: 1, page_size: 100, total: 1, items: [{ id: 51, merchant_id: 31, review_id: 21, newapi_channel_id: 41, channel_name: 'OpenAI 主线路', channel_type: 1, base_url: 'https://api.merchant.example', models: ['gpt-4o-mini'], credential_fingerprint: 'a1b2c3...d4e5f6', status: 'active', created_at: '2026-07-22T14:00:00Z' }] } });
+      return json({ success: true, data: { page: 1, page_size: 100, total: 2, items: [
+        { id: 51, merchant_id: 31, review_id: 21, newapi_channel_id: 41, channel_name: 'OpenAI 主线路', channel_type: 1, base_url: 'https://api.merchant.example', models: ['gpt-4o-mini'], credential_fingerprint: 'a1b2c3...d4e5f6', status: 'active', created_at: '2026-07-22T14:00:00Z' },
+        { id: 52, merchant_id: 32, review_id: 23, newapi_channel_id: 42, channel_name: 'OpenAI 备用线路', channel_type: 1, base_url: 'https://api.backup.example', models: ['gpt-4o-mini'], credential_fingerprint: 'd7e8f9...a0b1c2', status: 'disabled', created_at: '2026-07-22T14:10:00Z' },
+      ] } });
+    }
+    if (url.pathname === '/api/admin/channels/52/health/reset' && request.method() === 'POST') {
+      state.healthResetCalls += 1;
+      return json({ success: true, data: { channel_id: 52, health_state: 'pending' } });
     }
     if (url.pathname === '/api/admin/channel-reviews/22/verify' && request.method() === 'POST') {
       state.channelVerifyCalls += 1;
@@ -73,11 +122,19 @@ async function mockAdminAPI(targetPage, state) {
 }
 
 try {
-  const adminMockState = { revealCalls: 0, merchantVerifyCalls: 0, channelVerifyCalls: 0 };
+  const adminMockState = {
+    revealCalls: 0, merchantVerifyCalls: 0, channelVerifyCalls: 0,
+    routeSaveCalls: 0, routeSaveBody: null, offerCreateCalls: 0, offerCreateBody: null,
+    modelCreateCalls: 0, modelCreateBody: null, pricePublishCalls: 0, pricePublishBody: null,
+    healthResetCalls: 0,
+  };
   await mockAdminAPI(page, adminMockState);
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
   await page.getByRole('heading', { name: '模型服务市场' }).waitFor();
   await page.getByText('平台管理员').waitFor();
+  await page.getByText('gpt-4o-mini').first().waitFor();
+  await page.getByText('北辰云智').first().waitFor();
+  assert(await page.getByText('GPT-5.2').count() === 0, '模型市场仍展示演示报价');
 
   const views = [
     ['控制台', '账户概览'],
@@ -99,15 +156,43 @@ try {
   assert(adminMockState.revealCalls === 1, '复制掩码密钥时未读取完整密钥');
   await page.getByRole('button', { name: '编辑路由策略' }).first().click();
   await page.getByRole('dialog', { name: '编辑路由策略' }).waitFor();
+  assert(await page.getByLabel('最低成交倍率').inputValue() === '0.4', '路由弹窗未读取当前最低倍率');
   await page.getByLabel('固定商户').check();
   assert(await page.getByText('固定商户范围').isVisible(), '固定路由商户选择未显示');
+  await page.getByRole('checkbox', { name: /北辰云智/ }).check();
   await page.getByRole('button', { name: '保存策略' }).click();
+  assert(adminMockState.routeSaveCalls === 1, '保存路由策略没有调用真实接口');
+  assert(adminMockState.routeSaveBody.mode === 'fixed' && adminMockState.routeSaveBody.merchant_ids.includes(31), '固定路由参数不正确');
 
   await page.getByRole('button', { name: '商户中心', exact: true }).click();
   await page.getByText('OpenAI 主线路').last().waitFor();
   await page.getByText('41', { exact: true }).waitFor();
+  const importedChannels = page.getByRole('heading', { name: '已导入渠道' }).locator('xpath=ancestor::section');
+  await importedChannels.getByText('正常', { exact: true }).waitFor();
+  await page.getByText('0.7200x').waitFor();
+  await page.getByRole('button', { name: '创建报价' }).click();
+  const quoteDialog = page.getByRole('dialog', { name: '创建模型报价' });
+  await quoteDialog.getByLabel('标准模型').selectOption('101');
+  await quoteDialog.getByLabel('商户渠道').selectOption('51');
+  await quoteDialog.getByLabel('成交倍率').fill('0.65');
+  await quoteDialog.getByRole('button', { name: '提交报价' }).click();
+  assert(adminMockState.offerCreateCalls === 1, '创建报价没有调用真实接口');
+  assert(adminMockState.offerCreateBody.multiplier_bps === 6500, '报价倍率没有转换为整数基点');
 
   await page.getByRole('button', { name: '管理后台', exact: true }).click();
+  await page.getByRole('button', { name: '模型与定价' }).click();
+  await page.getByText('价格版本 v2').waitFor();
+  await page.getByRole('button', { name: '新增标准模型' }).click();
+  const modelDialog = page.getByRole('dialog', { name: '新增标准模型' });
+  await modelDialog.getByLabel('模型名称').fill('text-embedding-3-small');
+  await modelDialog.getByLabel('模型厂商').fill('OpenAI');
+  await modelDialog.getByLabel('协议').selectOption('embeddings');
+  await modelDialog.getByRole('button', { name: '创建模型' }).click();
+  assert(adminMockState.modelCreateCalls === 1, '新增标准模型没有调用真实接口');
+  await page.getByRole('button', { name: '发布价格' }).first().click();
+  const priceDialog = page.getByRole('dialog', { name: '发布官方价格' });
+  await priceDialog.getByRole('button', { name: '发布价格' }).click();
+  assert(adminMockState.pricePublishCalls === 1, '发布官方价格没有调用真实接口');
   await page.getByRole('button', { name: '用户管理' }).click();
   await page.getByText('alice@example.com').waitFor();
   await page.getByRole('button', { name: '审计日志' }).click();
@@ -120,6 +205,10 @@ try {
   await page.getByRole('button', { name: '渠道与探活' }).click();
   await page.getByText('Anthropic 备用线路').waitFor();
   await page.getByText('New API 41').waitFor();
+  await page.getByText('已停用').waitFor();
+  await page.getByRole('button', { name: '恢复渠道' }).click();
+  await page.getByText('渠道已进入恢复探测').waitFor();
+  assert(adminMockState.healthResetCalls === 1, '恢复渠道没有调用真实健康接口');
   await page.getByRole('button', { name: '验证' }).click();
   await page.getByText('渠道验证通过').waitFor();
   assert(adminMockState.channelVerifyCalls === 1, '管理员渠道页验证没有调用真实渠道审核接口');
@@ -144,6 +233,8 @@ try {
     const fulfill = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(data) });
     if (url.pathname === '/api/me' && anonymousLoggedIn) return fulfill({ success: true, data: { id: 7, username: 'alice', display_name: 'Alice', role: 1, status: 1, group: 'default', quota: 500000, used_quota: 120000, is_merchant: false, merchant_status: 'none' } });
     if (url.pathname === '/api/me') return fulfill({ success: false, error: { code: 'authentication_required', message: '请先登录' } }, 401);
+    if (url.pathname === '/api/models') return fulfill({ success: true, data: [{ id: 101, public_name: 'gpt-4o-mini', provider: 'OpenAI', protocol: 'chat_completions', status: 'active', price: { version: 2, billing_mode: 'token', model_ratio_micros: 600000, completion_ratio_micros: 4000000 } }] });
+    if (url.pathname === '/api/offers') return fulfill({ success: true, data: [{ offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', merchant_channel_id: 51, channel_name: 'OpenAI 主线路', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] });
     if (url.pathname === '/api/auth/login' && request.method() === 'POST') {
       anonymousLoggedIn = true;
       return fulfill({ success: true, data: { id: 7, username: 'alice', display_name: 'Alice', role: 1, status: 1, group: 'default' } });

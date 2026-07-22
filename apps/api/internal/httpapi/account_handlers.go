@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/lwy183178053/modelroute-platform/apps/api/internal/newapi"
+	"github.com/lwy183178053/modelroute-platform/apps/api/internal/platformauth"
 )
 
 type keyRequest struct {
@@ -54,10 +55,40 @@ func (s *server) createKey(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var tokenIDsBefore map[int]struct{}
+	if s.services.Routing != nil && s.services.Credentials != nil {
+		var err error
+		tokenIDsBefore, err = s.userTokenIDs(r, session)
+		if err != nil {
+			writeUpstreamError(w, err, http.StatusBadGateway)
+			return
+		}
+	}
 	data, err := s.services.NewAPI.Do(r.Context(), http.MethodPost, "/api/token/", request, upstreamAuth(session))
 	if err != nil {
 		writeUpstreamError(w, err, http.StatusBadRequest)
 		return
+	}
+	if tokenIDsBefore != nil {
+		tokenIDsAfter, err := s.userTokenIDs(r, session)
+		if err != nil {
+			writeUpstreamError(w, err, http.StatusBadGateway)
+			return
+		}
+		bound := 0
+		for tokenID := range tokenIDsAfter {
+			if _, existed := tokenIDsBefore[tokenID]; existed {
+				continue
+			}
+			if _, ok := s.bindTokenPolicy(w, r, session.UserID, session.UpstreamCookie, tokenID); !ok {
+				return
+			}
+			bound++
+		}
+		if bound == 0 {
+			writeAPIError(w, http.StatusBadGateway, "token_bind_failed", "New API 已创建密钥，但未返回新增令牌编号")
+			return
+		}
 	}
 	writeRawData(w, data)
 }
@@ -156,7 +187,35 @@ func (s *server) deleteKey(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, err, http.StatusBadRequest)
 		return
 	}
+	if s.services.Routing != nil {
+		if err := s.services.Routing.RevokeTokenBinding(r.Context(), session.UserID, id); err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "token_revoke_failed", "密钥已删除，但路由绑定清理失败")
+			return
+		}
+	}
 	writeRawData(w, data)
+}
+
+func (s *server) userTokenIDs(r *http.Request, session platformauth.Session) (map[int]struct{}, error) {
+	data, err := s.services.NewAPI.Do(r.Context(), http.MethodGet, "/api/token/?p=1&page_size=100", nil, upstreamAuth(session))
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Items []struct {
+			ID int `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	ids := make(map[int]struct{}, len(result.Items))
+	for _, item := range result.Items {
+		if item.ID > 0 {
+			ids[item.ID] = struct{}{}
+		}
+	}
+	return ids, nil
 }
 
 func (s *server) adminUser(w http.ResponseWriter, r *http.Request) {

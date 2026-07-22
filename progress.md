@@ -425,3 +425,89 @@
 - 服务器 `/opt/modelroute-platform/releases/192f31c`：保存第 4 阶段已验收运行发布。
 - 服务器 `/opt/modelroute-platform/shared/backups/20260722T065007Z`：保存发布前数据库、Compose、版本和环境文件备份。
 - 回滚点：服务器将 `/opt/modelroute-platform/current` 原子切换到 `/opt/modelroute-platform/releases/a3e1bdd`，再执行该目录的 `deploy/scripts/deploy.sh`；平台数据库需恢复时使用上述发布前备份和 `restore.sh`。
+
+## 2026-07-22 - Task: 实现第 5 阶段模型报价、用户路由与渠道健康
+
+### What was done
+
+- 建立标准模型、官方价格版本、商户报价版本、密钥指纹绑定、用户路由策略、渠道模型健康、路由决策、健康事件和性能汇总数据结构，价格和倍率全部使用整数单位。
+- 增加 New API 服务账号会话、专用探活令牌、价格选项同步、渠道模型别名映射和报价激活流程；同步失败时保留旧报价继续服务。
+- 为每个 New API 密钥建立独立策略，支持智能路由、固定商户、倍率区间、价格优先和稳定性优先；删除密钥时同步撤销平台绑定。
+- 开放聊天补全、Responses 和嵌入三个模型接口，仅替换请求模型名并原样转交鉴权、正文与流式响应给 New API；首字节前允许在 `429/5xx` 候选间切换。
+- Worker 接入主动探活、三级故障判断、阶梯冷却、两次恢复探测和硬故障双侧停用；真实请求只记录状态、耗时、渠道和请求编号。
+- 模型市场、控制台、商户中心和管理后台全部改用真实模型、报价、策略和健康接口，补齐商户创建报价、管理员发布官方价格和恢复渠道操作。
+- 增加 PostgreSQL 真实 SQL 集成测试、生产路由契约脚本、中文业务文档和桌面/移动端验收截图。
+
+### Testing
+
+- 路由市场公开接口测试先因旧会话参数预期失败，按公开只读契约修正后通过；商户渠道状态文案测试先稳定复现“在售”误用，单点修正为“正常”后通过。
+- 执行 `go test ./...`、`go vet ./...`、`go build ./cmd/...` 和 `go test -race ./...`，全部退出码为 `0`。
+- 在临时 PostgreSQL 17 容器顺序执行三份迁移，确认标准模型、报价、路由策略、健康和决策关键表存在；随后用真实 `pgx` 连接验证倍率过滤、固定商户、探活领取和结果写回。
+- 执行 `npm.cmd run test:ui`，Vite 转换 `1608` 个模块，真实市场、密钥策略、商户报价、管理员模型价格和渠道恢复交互通过。
+- 执行 `npm.cmd run capture`，生成桌面与移动端市场、控制台、商户、模型定价、渠道管理和路由弹窗截图；Playwright 根页面溢出与空白检查通过，并人工检查关键页面。
+- 执行部署测试共 `6` 项，Compose 配置和全部 Shell 脚本语法通过；`git diff --check` 和聊天中认证、支付凭据字面值扫描无异常。
+- 生产路由契约脚本保留到本阶段提交部署后执行，本轮没有把本地验证描述为线上完成。
+
+### Notes
+
+- `.env.example`：增加 New API 服务端管理员账号和密码示例变量。
+- `.gitignore`：忽略 Go 在 Windows 根包构建产生的可执行文件。
+- `apps/api/cmd/worker/main.go`：每 10 秒执行渠道探活，并保留原有依赖状态日志周期。
+- `apps/api/internal/bootstrap/resources.go`：注入服务账号、SQL 路由仓储、报价同步器和健康任务。
+- `apps/api/internal/bootstrap/resources_test.go`：验证模型路由和健康依赖已完成注入。
+- `apps/api/internal/config/config.go`：加载并强制校验 New API 服务账号凭据。
+- `apps/api/internal/config/config_test.go`：覆盖服务账号凭据缺失和正常加载。
+- `apps/api/internal/httpapi/account_handlers.go`：在密钥创建、查询和删除流程中建立或撤销路由绑定。
+- `apps/api/internal/httpapi/health_runner.go`：实现专用令牌探活、状态分类和 New API 硬故障停用。
+- `apps/api/internal/httpapi/health_runner_test.go`：覆盖探活请求、冷却、恢复、硬故障和令牌登记。
+- `apps/api/internal/httpapi/pricing_sync.go`：同步 New API 全部计费维度、渠道模型和内部别名映射。
+- `apps/api/internal/httpapi/pricing_sync_test.go`：覆盖 Token、固定价格、缓存维度、原价格保留和同步顺序。
+- `apps/api/internal/httpapi/routing_domain.go`：实现倍率换算、模型字段替换、候选排序和冷却状态机。
+- `apps/api/internal/httpapi/routing_domain_test.go`：覆盖整数换算、协议正文、排序、三级冷却和两次恢复。
+- `apps/api/internal/httpapi/routing_handlers.go`：实现模型、报价、路由策略和管理员健康恢复接口。
+- `apps/api/internal/httpapi/routing_handlers_test.go`：覆盖价格上限、报价同步、密钥绑定、策略校验、公开市场和恢复顺序。
+- `apps/api/internal/httpapi/routing_proxy.go`：实现三类 `/v1/*` 请求的候选选择、首字节前切换和流式透传。
+- `apps/api/internal/httpapi/routing_proxy_test.go`：覆盖价格与稳定性路由、失败切换、流式响应和无候选错误。
+- `apps/api/internal/httpapi/routing_store.go`：实现标准模型、报价版本、路由决策、健康记录和查询的 PostgreSQL 仓储。
+- `apps/api/internal/httpapi/routing_store_test.go`：覆盖报价事务、版本激活、策略绑定、健康更新和官方价格发布 SQL 契约。
+- `apps/api/internal/httpapi/routing_store_postgres_test.go`：使用真实 PostgreSQL 验证关键候选和探活 SQL。
+- `apps/api/internal/httpapi/server.go`：注册模型、报价、策略、健康和三个模型调用接口。
+- `apps/api/internal/httpapi/services.go`：扩展路由、报价同步、健康和服务账号依赖契约。
+- `apps/api/internal/migrations/migrate_test.go`：验证第 3 份路由迁移顺序和关键表。
+- `apps/api/internal/migrations/sql/000003_routing.sql`：创建模型报价、密钥路由和健康记录相关表、约束与索引。
+- `apps/api/internal/newapi/client.go`：增加保持原始请求头和响应流的模型代理入口。
+- `apps/api/internal/newapi/client_test.go`：验证 Authorization、正文、流式响应和客户端地址透传。
+- `apps/api/internal/newapi/service_account.go`：实现 New API 管理会话复用、失效重登和探活令牌管理。
+- `apps/api/internal/newapi/service_account_test.go`：覆盖服务账号登录复用、令牌查找、创建和读取。
+- `apps/web/src/main.jsx`：把市场“用于路由”入口引导到具体密钥所在的控制台。
+- `apps/web/src/Modals.jsx`：接入真实路由策略保存和商户报价创建。
+- `apps/web/src/data.js`：删除已被真实接口替代的模型市场、商户渠道和报价演示数据。
+- `apps/web/src/views/MarketView.jsx`：展示真实标准模型、商户报价、可用率、P95 和倍率。
+- `apps/web/src/views/ConsoleView.jsx`：按密钥读取并显示模式、倍率区间、优先级和固定商户数量。
+- `apps/web/src/views/MerchantView.jsx`：展示真实报价版本与健康状态，并提供创建报价入口。
+- `apps/web/src/views/AdminView.jsx`：增加模型与定价管理导航。
+- `apps/web/src/views/admin/AdminModels.jsx`：实现标准模型创建和官方价格版本发布界面。
+- `apps/web/src/views/admin/AdminChannels.jsx`：展示渠道关联报价健康并提供硬故障恢复操作。
+- `apps/web/scripts/ui-smoke.mjs`：覆盖第 5 阶段真实接口请求、提交参数和角色页面交互。
+- `apps/web/scripts/capture.mjs`：使用真实接口数据形状生成第 5 阶段桌面与移动端截图。
+- `apps/web/artifacts/market-desktop.png`：更新真实市场桌面验收图。
+- `apps/web/artifacts/market-mobile.png`：更新真实市场移动端验收图。
+- `apps/web/artifacts/console-desktop.png`：更新密钥路由桌面验收图。
+- `apps/web/artifacts/console-mobile.png`：更新密钥路由移动端验收图。
+- `apps/web/artifacts/merchant-desktop.png`：更新商户报价和健康桌面验收图。
+- `apps/web/artifacts/merchant-mobile.png`：更新商户报价和健康移动端验收图。
+- `apps/web/artifacts/admin-desktop.png`：更新管理员页面桌面验收图。
+- `apps/web/artifacts/admin-channels-desktop.png`：更新渠道健康桌面验收图。
+- `apps/web/artifacts/admin-channels-mobile.png`：更新渠道健康移动端验收图。
+- `apps/web/artifacts/admin-models-desktop.png`：新增模型定价桌面验收图。
+- `apps/web/artifacts/admin-models-mobile.png`：新增模型定价移动端验收图。
+- `apps/web/artifacts/payment-config-desktop.png`：随最新前端构建更新支付配置桌面回归图。
+- `apps/web/artifacts/route-modal-desktop.png`：更新真实策略桌面弹窗验收图。
+- `apps/web/artifacts/route-modal-mobile.png`：更新真实策略移动端弹窗验收图。
+- `compose.yaml`：向 API 和 Worker 传递 New API 服务账号变量。
+- `deploy/tests/test_compose.py`：验证两个平台进程均接收服务账号变量。
+- `deploy/scripts/verify-routing.sh`：新增临时密钥、公开市场和 OpenAI 错误线上契约。
+- `docs/模型报价路由与健康.md`：记录业务边界、版本计价、路由、探活、接口、验收和回滚。
+- `docs/部署运行手册.md`：补充服务账号配置和路由契约验收步骤。
+- `progress.md`：追加第 5 阶段本地实现和验证记录。
+- 回滚点：阶段标签 `phase-4-merchants`；第 5 阶段提交后可执行 `git revert <第5阶段提交>` 生成仓库回退改动，生产服务器在本轮记录时仍运行第 4 阶段发布 `192f31c`。

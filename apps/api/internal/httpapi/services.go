@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"time"
 
 	"github.com/lwy183178053/modelroute-platform/apps/api/internal/newapi"
@@ -25,6 +26,7 @@ type SessionManager interface {
 type NewAPIClient interface {
 	Authenticate(context.Context, string, any, string) (newapi.AuthenticationResult, error)
 	Do(context.Context, string, string, any, *newapi.Auth) (json.RawMessage, error)
+	Proxy(context.Context, string, string, http.Header, []byte) (*http.Response, error)
 }
 
 type AuditRecorder interface {
@@ -56,8 +58,16 @@ type CookieConfig struct {
 type Services struct {
 	Sessions    SessionManager
 	NewAPI      NewAPIClient
+	AdminNewAPI AdminNewAPI
 	Audit       AuditRecorder
 	Merchants   MerchantRepository
 	Credentials CredentialProtector
+	Routing     RoutingRepository
+	OfferSync   OfferSynchronizer
+	Health      HealthCycleRunner
 	Cookie      CookieConfig
+}
+
+type HealthCycleRunner interface {
+	RunCycle(context.Context, time.Time) error
 }

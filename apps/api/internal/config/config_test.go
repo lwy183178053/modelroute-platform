@@ -33,6 +33,8 @@ func TestLoadUsesExplicitValues(t *testing.T) {
 	t.Setenv("SESSION_TTL", "12h")
 	t.Setenv("SESSION_COOKIE_SECURE", "true")
 	t.Setenv("PLATFORM_ENCRYPTION_KEY", testEncryptionKey())
+	t.Setenv("NEW_API_ADMIN_USERNAME", "modelroute")
+	t.Setenv("NEW_API_ADMIN_PASSWORD", "server-only-secret")
 
 	cfg, err := Load()
 	if err != nil {
@@ -58,6 +60,22 @@ func TestLoadUsesExplicitValues(t *testing.T) {
 	}
 	if string(cfg.EncryptionKey) != "0123456789abcdef0123456789abcdef" {
 		t.Fatal("平台加密密钥未正确解码")
+	}
+	if cfg.NewAPIAdminUsername != "modelroute" || cfg.NewAPIAdminPassword != "server-only-secret" {
+		t.Fatal("New API 服务账号配置未正确加载")
+	}
+}
+
+func TestLoadRequiresNewAPIServiceAccount(t *testing.T) {
+	t.Setenv("PLATFORM_DATABASE_URL", "postgres://platform:test@postgres/platform")
+	t.Setenv("REDIS_URL", "redis://:test@redis:6379/1")
+	t.Setenv("NEW_API_BASE_URL", "http://new-api:3000")
+	t.Setenv("PUBLIC_ORIGIN", "https://aggregate.lwylink.xyz")
+	t.Setenv("PLATFORM_ENCRYPTION_KEY", testEncryptionKey())
+	t.Setenv("NEW_API_ADMIN_USERNAME", "")
+	t.Setenv("NEW_API_ADMIN_PASSWORD", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("缺少 New API 服务账号时应返回错误")
 	}
 }
 

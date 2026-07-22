@@ -1,0 +1,337 @@
+package httpapi
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/lwy183178053/modelroute-platform/apps/api/internal/newapi"
+)
+
+func (s *server) createCanonicalModel(w http.ResponseWriter, r *http.Request) {
+	_, session, ok := s.requireSession(w, r, roleAdmin)
+	if !ok || !s.requireSameOrigin(w, r) || !s.routingReady(w, false) {
+		return
+	}
+	var request struct {
+		PublicName string        `json:"public_name"`
+		Provider   string        `json:"provider"`
+		Protocol   string        `json:"protocol"`
+		Price      OfficialPrice `json:"price"`
+	}
+	if err := decodeJSON(r, &request); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "标准模型格式无效")
+		return
+	}
+	command := CreateCanonicalModelCommand{
+		PublicName: strings.TrimSpace(request.PublicName), Provider: strings.TrimSpace(request.Provider),
+		Protocol: strings.TrimSpace(request.Protocol), AdminID: session.UserID, Price: request.Price,
+	}
+	if err := validateCanonicalModel(command); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_model_price", err.Error())
+		return
+	}
+	model, err := s.services.Routing.CreateCanonicalModel(r.Context(), command)
+	if err != nil {
+		writeAPIError(w, http.StatusConflict, "model_create_failed", "标准模型名称或价格版本冲突")
+		return
+	}
+	if err := s.recordAudit(r, session, "model.create", int(model.ID), "success", ""); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "标准模型已创建，但审计记录失败")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"success": true, "data": model})
+}
+
+func (s *server) models(w http.ResponseWriter, r *http.Request) {
+	if !s.routingReady(w, false) {
+		return
+	}
+	s.writeModels(w, r)
+}
+
+func (s *server) adminModels(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := s.requireSession(w, r, roleAdmin); !ok || !s.routingReady(w, false) {
+		return
+	}
+	s.writeModels(w, r)
+}
+
+func (s *server) writeModels(w http.ResponseWriter, r *http.Request) {
+	models, err := s.services.Routing.ListCanonicalModels(r.Context())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "models_query_failed", "查询标准模型失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": models})
+}
+
+func (s *server) publishOfficialPrice(w http.ResponseWriter, r *http.Request) {
+	_, session, ok := s.requireSession(w, r, roleAdmin)
+	if !ok || !s.requireSameOrigin(w, r) || !s.routingReady(w, false) {
+		return
+	}
+	modelID, ok := pathInt64(w, r, "id", "标准模型编号无效")
+	if !ok {
+		return
+	}
+	var price OfficialPrice
+	if err := decodeJSON(r, &price); err != nil || validateCanonicalModel(CreateCanonicalModelCommand{PublicName: "price-check", Provider: "price-check", Protocol: "responses", Price: price}) != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_model_price", "官方价格配置无效")
+		return
+	}
+	published, err := s.services.Routing.PublishOfficialPrice(r.Context(), modelID, session.UserID, price)
+	if err != nil {
+		writeAPIError(w, http.StatusConflict, "price_publish_failed", "标准模型不存在或价格版本冲突")
+		return
+	}
+	if err := s.recordAudit(r, session, "model.price.publish", int(modelID), "success", ""); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "官方价格已发布，但审计记录失败")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"success": true, "data": published})
+}
+
+func (s *server) createMerchantOffer(w http.ResponseWriter, r *http.Request) {
+	_, session, ok := s.requireSession(w, r, roleCommon)
+	if !ok || !s.requireSameOrigin(w, r) || !s.routingReady(w, false) {
+		return
+	}
+	var request struct {
+		MerchantChannelID int64 `json:"merchant_channel_id"`
+		CanonicalModelID  int64 `json:"canonical_model_id"`
+		MultiplierBPS     int   `json:"multiplier_bps"`
+	}
+	if err := decodeJSON(r, &request); err != nil || request.MerchantChannelID <= 0 || request.CanonicalModelID <= 0 || request.MultiplierBPS < 1 || request.MultiplierBPS > 10_000 {
+		writeAPIError(w, http.StatusBadRequest, "invalid_offer", "报价倍率必须在 1 到 10000 基点之间")
+		return
+	}
+	if s.services.OfferSync == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "routing_unavailable", "报价同步服务尚未就绪")
+		return
+	}
+	offer, err := s.services.Routing.CreateOffer(r.Context(), CreateOfferCommand{
+		UserID: session.UserID, MerchantChannelID: request.MerchantChannelID,
+		CanonicalModelID: request.CanonicalModelID, MultiplierBPS: request.MultiplierBPS,
+		InternalAlias: newOfferAlias(),
+	})
+	if err != nil {
+		status := http.StatusConflict
+		message := "渠道、模型或当前报价状态不允许上架"
+		if errors.Is(err, ErrRoutingNotFound) {
+			status = http.StatusNotFound
+			message = "未找到可上架的已审核渠道或标准模型"
+		}
+		writeAPIError(w, status, "offer_create_failed", message)
+		return
+	}
+	if err := s.services.OfferSync.SyncOffer(r.Context(), offer.ID, offer.MerchantChannelID); err != nil {
+		_ = s.services.Routing.MarkOfferSyncFailed(r.Context(), offer.ID, "New API 价格或渠道映射同步失败")
+		writeAPIError(w, http.StatusBadGateway, "offer_sync_failed", "报价未生效，New API 价格或渠道映射同步失败")
+		return
+	}
+	offer.Status = "active"
+	if err := s.recordAudit(r, session, "offer.create", int(offer.ID), "success", ""); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "报价已生效，但审计记录失败")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"success": true, "data": offer})
+}
+
+func (s *server) routingPolicy(w http.ResponseWriter, r *http.Request) {
+	_, session, ok := s.requireSession(w, r, roleCommon)
+	if !ok || !s.routingReady(w, false) {
+		return
+	}
+	tokenID, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	policy, ok := s.bindTokenPolicy(w, r, session.UserID, session.UpstreamCookie, tokenID)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": policy})
+}
+
+func (s *server) updateRoutingPolicy(w http.ResponseWriter, r *http.Request) {
+	_, session, ok := s.requireSession(w, r, roleCommon)
+	if !ok || !s.requireSameOrigin(w, r) || !s.routingReady(w, false) {
+		return
+	}
+	tokenID, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var input RoutingPolicyInput
+	if err := decodeJSON(r, &input); err != nil || validateRoutingPolicy(input) != nil {
+		message := "路由策略参数无效"
+		if err := validateRoutingPolicy(input); err != nil {
+			message = err.Error()
+		}
+		writeAPIError(w, http.StatusBadRequest, "invalid_routing_policy", message)
+		return
+	}
+	if _, ok := s.bindTokenPolicy(w, r, session.UserID, session.UpstreamCookie, tokenID); !ok {
+		return
+	}
+	policy, err := s.services.Routing.UpdatePolicy(r.Context(), session.UserID, tokenID, input)
+	if err != nil {
+		writeAPIError(w, http.StatusConflict, "routing_policy_update_failed", "路由策略或固定商户状态已变化")
+		return
+	}
+	if err := s.recordAudit(r, session, "routing_policy.update", tokenID, "success", ""); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "路由策略已更新，但审计记录失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": policy})
+}
+
+func (s *server) marketOffers(w http.ResponseWriter, r *http.Request) {
+	if !s.routingReady(w, false) {
+		return
+	}
+	offers, err := s.services.Routing.ListMarketOffers(r.Context(), 0, strings.TrimSpace(r.URL.Query().Get("model")))
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "offers_query_failed", "查询市场报价失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": offers})
+}
+
+func (s *server) merchantOffers(w http.ResponseWriter, r *http.Request) {
+	_, session, ok := s.requireSession(w, r, roleCommon)
+	if !ok || !s.routingReady(w, false) {
+		return
+	}
+	offers, err := s.services.Routing.ListMerchantOffers(r.Context(), session.UserID)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "merchant_offers_query_failed", "查询商户报价失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": offers})
+}
+
+func (s *server) merchantHealth(w http.ResponseWriter, r *http.Request) {
+	s.merchantOffers(w, r)
+}
+
+func (s *server) adminResetChannelHealth(w http.ResponseWriter, r *http.Request) {
+	_, session, ok := s.requireSession(w, r, roleAdmin)
+	if !ok || !s.requireSameOrigin(w, r) || !s.routingReady(w, false) || s.services.AdminNewAPI == nil {
+		return
+	}
+	channelID, ok := pathInt64(w, r, "id", "渠道编号无效")
+	if !ok {
+		return
+	}
+	newAPIChannelID, err := s.services.Routing.ChannelForHealthReset(r.Context(), channelID)
+	if err != nil {
+		writeAPIError(w, http.StatusNotFound, "channel_not_found", "渠道不存在")
+		return
+	}
+	if _, err := s.services.AdminNewAPI.Do(r.Context(), http.MethodPost, "/api/channel/"+strconv.Itoa(newAPIChannelID)+"/status", map[string]int{"status": 1}); err != nil {
+		writeAPIError(w, http.StatusBadGateway, "channel_enable_failed", "恢复 New API 渠道失败")
+		return
+	}
+	if err := s.services.Routing.ResetChannelHealth(r.Context(), channelID); err != nil {
+		_, _ = s.services.AdminNewAPI.Do(r.Context(), http.MethodPost, "/api/channel/"+strconv.Itoa(newAPIChannelID)+"/status", map[string]int{"status": 2})
+		writeAPIError(w, http.StatusInternalServerError, "channel_reset_failed", "恢复平台渠道失败")
+		return
+	}
+	if err := s.recordAudit(r, session, "channel.health.reset", int(channelID), "success", ""); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "渠道已恢复，但审计记录失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"channel_id": channelID, "health_state": "pending"}})
+}
+
+func (s *server) bindTokenPolicy(w http.ResponseWriter, r *http.Request, userID int, cookie string, tokenID int) (RoutingPolicy, bool) {
+	if s.services.Credentials == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "routing_unavailable", "令牌指纹服务尚未就绪")
+		return RoutingPolicy{}, false
+	}
+	data, err := s.services.NewAPI.Do(r.Context(), http.MethodPost, "/api/token/"+strconv.Itoa(tokenID)+"/key", nil, &newapi.Auth{Cookie: cookie, UserID: userID})
+	if err != nil {
+		writeUpstreamError(w, err, http.StatusNotFound)
+		return RoutingPolicy{}, false
+	}
+	var revealed struct {
+		Key string `json:"key"`
+	}
+	if err := json.Unmarshal(data, &revealed); err != nil || strings.TrimSpace(revealed.Key) == "" {
+		writeAPIError(w, http.StatusBadGateway, "token_reveal_failed", "New API 未返回有效密钥")
+		return RoutingPolicy{}, false
+	}
+	policy, err := s.services.Routing.BindTokenAndDefaultPolicy(r.Context(), userID, tokenID, s.services.Credentials.Fingerprint([]byte(strings.TrimSpace(revealed.Key))))
+	if err != nil {
+		writeAPIError(w, http.StatusConflict, "token_bind_failed", "密钥路由绑定冲突")
+		return RoutingPolicy{}, false
+	}
+	return policy, true
+}
+
+func validateRoutingPolicy(input RoutingPolicyInput) error {
+	if input.Mode != "smart" && input.Mode != "fixed" {
+		return errors.New("路由模式必须是智能路由或固定路由")
+	}
+	if input.Priority != "price" && input.Priority != "stability" {
+		return errors.New("优先方式必须是价格优先或稳定性优先")
+	}
+	if input.MinimumMultiplierBPS < 1 || input.MaximumMultiplierBPS > 10_000 || input.MinimumMultiplierBPS > input.MaximumMultiplierBPS {
+		return errors.New("倍率区间必须在 1 到 10000 基点之间")
+	}
+	if input.Mode == "fixed" && len(uniqueInt64(input.MerchantIDs)) == 0 {
+		return errors.New("固定路由至少选择一个商户")
+	}
+	return nil
+}
+
+func validateCanonicalModel(command CreateCanonicalModelCommand) error {
+	if command.PublicName == "" || len(command.PublicName) > 255 || strings.HasPrefix(command.PublicName, "mkt-ov-") || command.Provider == "" || len(command.Provider) > 80 {
+		return errors.New("模型名称或厂商无效")
+	}
+	switch command.Protocol {
+	case "chat_completions", "responses", "embeddings":
+	default:
+		return errors.New("模型协议不在首期开放范围")
+	}
+	price := command.Price
+	if price.BillingMode == "token" {
+		if price.ModelRatioMicros <= 0 || price.ModelPriceMicroUSD != 0 {
+			return errors.New("Token 计费必须提供整数主倍率且不得提供固定价格")
+		}
+	} else if price.BillingMode == "fixed" {
+		if price.ModelPriceMicroUSD <= 0 || price.ModelRatioMicros != 0 {
+			return errors.New("固定计费必须提供整数微美元价格且不得提供主倍率")
+		}
+	} else {
+		return errors.New("计费模式必须是 token 或 fixed")
+	}
+	for _, value := range []int64{price.CompletionRatioMicros, price.CacheRatioMicros, price.CreateCacheRatioMicros, price.ImageRatioMicros, price.AudioRatioMicros, price.AudioCompletionRatioMicros} {
+		if value < 0 {
+			return errors.New("计费维度不得为负数")
+		}
+	}
+	return nil
+}
+
+func newOfferAlias() string {
+	var value [12]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		panic("系统随机源不可用")
+	}
+	return "mkt-ov-" + hex.EncodeToString(value[:])
+}
+
+func (s *server) routingReady(w http.ResponseWriter, requireSync bool) bool {
+	if s.services.Routing == nil || (requireSync && s.services.OfferSync == nil) {
+		writeAPIError(w, http.StatusServiceUnavailable, "routing_unavailable", "模型路由服务尚未就绪")
+		return false
+	}
+	return true
+}

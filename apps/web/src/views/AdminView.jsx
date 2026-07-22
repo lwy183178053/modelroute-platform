@@ -15,6 +15,7 @@ import { Button, Metric, PageHeader, Section, Status } from '../ui';
 import AdminMerchants from './admin/AdminMerchants';
 import AdminChannels from './admin/AdminChannels';
 import AdminPayment from './admin/AdminPayment';
+import AdminModels from './admin/AdminModels';
 import AdminWithdrawals from './admin/AdminWithdrawals';
 import AdminUsers from './admin/AdminUsers';
 import AdminAudit from './admin/AdminAudit';
@@ -23,6 +24,7 @@ const sections = [
   { id: 'overview', label: '运营总览', icon: Activity },
   { id: 'users', label: '用户管理', icon: UserRoundCog },
   { id: 'merchants', label: '商户审核', icon: Building2, count: 3 },
+  { id: 'models', label: '模型与定价', icon: BadgeDollarSign },
   { id: 'channels', label: '渠道与探活', icon: HeartPulse, count: 2 },
   { id: 'payment', label: '支付与充值', icon: CreditCard, count: 1 },
   { id: 'withdrawals', label: '提现审核', icon: Landmark, count: 2 },
@@ -102,6 +104,7 @@ export default function AdminView({ section, setSection, openModal, notify }) {
           {section === 'overview' && <AdminOverview setSection={setSection} />}
           {section === 'users' && <AdminUsers notify={notify} openModal={openModal} />}
           {section === 'merchants' && <AdminMerchants notify={notify} />}
+          {section === 'models' && <AdminModels notify={notify} />}
           {section === 'channels' && <AdminChannels notify={notify} />}
           {section === 'payment' && <AdminPayment notify={notify} openModal={openModal} />}
           {section === 'withdrawals' && <AdminWithdrawals notify={notify} />}

@@ -59,16 +59,53 @@ func (e *APIError) Error() string {
 }
 
 type Client struct {
-	baseURL    string
-	httpClient *http.Client
+	baseURL     string
+	httpClient  *http.Client
+	proxyClient *http.Client
 }
 
 func NewClient(baseURL string, timeout time.Duration) *Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = timeout
 	return &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
+		proxyClient: &http.Client{Transport: transport},
+	}
+}
+
+func (c *Client) Proxy(ctx context.Context, method string, path string, headers http.Header, body []byte) (*http.Response, error) {
+	request, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("创建 New API 模型请求：%w", err)
+	}
+	for name, values := range headers {
+		if isHopByHopHeader(name) {
+			continue
+		}
+		for _, value := range values {
+			request.Header.Add(name, value)
+		}
+	}
+	if clientIP, ok := ctx.Value(clientIPContextKey{}).(string); ok && clientIP != "" {
+		request.Header.Set("X-Forwarded-For", clientIP)
+		request.Header.Set("X-Real-IP", clientIP)
+	}
+	response, err := c.proxyClient.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("请求 New API 模型接口：%w", err)
+	}
+	return response, nil
+}
+
+func isHopByHopHeader(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "connection", "proxy-connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade":
+		return true
+	default:
+		return false
 	}
 }
 

@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
-import { BadgeDollarSign, CloudCog, HeartPulse, Plus, ServerCog, Store, Waypoints } from 'lucide-react';
-import { apiRequest } from '../api';
+import { BadgeDollarSign, CloudCog, HeartPulse, Landmark, Plus, ServerCog, WalletCards, Waypoints } from 'lucide-react';
+import { apiRequest, formatQuota } from '../api';
 import { Button, InlineNotice, Metric, PageHeader, Section, Status } from '../ui';
 
 const statusNames = {
   pending: '待审核', verifying: '验证中', verified: '待批准', approving: '导入中',
   approved: '已通过', rejected: '已驳回', active: '正常', inactive: '已退役',
   syncing: '同步中', sync_failed: '同步失败', disabled: '已停用',
+};
+
+const withdrawalStatusNames = { pending: '待审核', approved: '待打款', paid: '已打款', rejected: '已驳回' };
+
+const ledgerNames = {
+  earning: '调用结算', refund: '退款冲正', withdrawal_freeze: '提现冻结',
+  withdrawal_release: '驳回释放', withdrawal_paid: '确认打款',
 };
 
 const healthNames = {
@@ -32,6 +39,17 @@ function formatLatency(value) {
   return milliseconds >= 1000 ? `${(milliseconds / 1000).toFixed(2)}s` : `${milliseconds}ms`;
 }
 
+function formatDate(value) {
+  if (!value) return '-';
+  return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+}
+
+function formatQuotaDelta(value) {
+  const amount = Number(value || 0);
+  if (!amount) return '-';
+  return `${amount > 0 ? '+' : '-'}${formatQuota(Math.abs(amount))}`;
+}
+
 export default function MerchantView({ account, openModal }) {
   const [channels, setChannels] = useState([]);
   const [reviews, setReviews] = useState([]);
@@ -39,6 +57,9 @@ export default function MerchantView({ account, openModal }) {
   const [models, setModels] = useState([]);
   const [offers, setOffers] = useState([]);
   const [health, setHealth] = useState([]);
+  const [balance, setBalance] = useState(null);
+  const [ledger, setLedger] = useState([]);
+  const [withdrawals, setWithdrawals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -46,11 +67,15 @@ export default function MerchantView({ account, openModal }) {
     setLoading(true);
     setError('');
     try {
-      const [channelData, modelData, offerData, healthData] = await Promise.all([
+      const financeRequests = account?.merchant_id
+        ? [apiRequest('/api/merchant/balance'), apiRequest('/api/merchant/ledger?page_size=50'), apiRequest('/api/merchant/withdrawals?page_size=50')]
+        : [Promise.resolve(null), Promise.resolve(null), Promise.resolve(null)];
+      const [channelData, modelData, offerData, healthData, balanceData, ledgerData, withdrawalData] = await Promise.all([
         apiRequest('/api/merchant/channels'),
         apiRequest('/api/models'),
         apiRequest('/api/merchant/offers'),
         apiRequest('/api/merchant/health'),
+        ...financeRequests,
       ]);
       setChannels(channelData?.items || []);
       setReviews(channelData?.reviews || []);
@@ -58,12 +83,15 @@ export default function MerchantView({ account, openModal }) {
       setModels(modelData || []);
       setOffers(offerData || []);
       setHealth(healthData || []);
+      setBalance(balanceData || null);
+      setLedger(ledgerData?.items || []);
+      setWithdrawals(withdrawalData?.items || []);
     } catch (requestError) {
       setError(requestError.message || '读取商户经营数据失败');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [account?.merchant_id]);
 
   useEffect(() => { load(); }, [load]);
   const activeCount = channels.filter((channel) => channel.status === 'active').length;
@@ -78,7 +106,7 @@ export default function MerchantView({ account, openModal }) {
         eyebrow={`商户中心${merchant?.merchant_id ? ` · M${merchant.merchant_id}` : ''}`}
         title="商户经营概览"
         description="管理渠道、报价版本以及当前探活和真实请求健康状态。"
-        actions={canSubmit && <><Button icon={Plus} onClick={() => openModal({ type: 'channel', onSaved: load })}>提交新渠道</Button><Button disabled={!channels.length || !models.length} icon={BadgeDollarSign} variant="primary" onClick={() => openModal({ type: 'quote', channels: channels.filter((channel) => channel.status === 'active'), models: models.filter((model) => model.status === 'active'), onSaved: load })}>创建报价</Button></>}
+        actions={canSubmit && <><Button icon={Plus} onClick={() => openModal({ type: 'channel', onSaved: load })}>提交新渠道</Button><Button disabled={!channels.length || !models.length} icon={BadgeDollarSign} onClick={() => openModal({ type: 'quote', channels: channels.filter((channel) => channel.status === 'active'), models: models.filter((model) => model.status === 'active'), onSaved: load })}>创建报价</Button><Button disabled={!balance?.available_quota} icon={Landmark} variant="primary" onClick={() => openModal({ type: 'withdraw', balance, onSaved: load })}>申请提现</Button></>}
       />
 
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}
@@ -90,6 +118,27 @@ export default function MerchantView({ account, openModal }) {
         <Metric label="在售报价" value={String(activeOffers)} hint={`${offers.length} 个报价版本`} icon={ServerCog} tone="blue" />
         <Metric label="健康报价" value={String(healthyOffers)} hint={merchant?.merchant_status === 'active' ? '商户身份正常' : '商户身份待处理'} icon={HeartPulse} tone="green" />
       </div>
+
+      <div className="metrics-grid">
+        <Metric label="可提现余额" value={formatQuota(balance?.available_quota)} hint="提交后立即冻结" icon={WalletCards} />
+        <Metric label="冻结余额" value={formatQuota(balance?.frozen_quota)} hint="等待审核或线下打款" icon={Landmark} tone="amber" />
+        <Metric label="累计结算" value={formatQuota(balance?.lifetime_earned_quota)} hint={`退款冲正 ${formatQuota(balance?.lifetime_refunded_quota)}`} icon={BadgeDollarSign} tone="green" />
+        <Metric label="累计提现" value={formatQuota(balance?.lifetime_paid_quota)} hint="只统计已确认打款" icon={Landmark} tone="blue" />
+      </div>
+
+      <Section title="结算账本" description="消费、缓存命中和退款金额以 New API 最终日志额度为准">
+        <div className="table-wrap"><table className="data-table"><thead><tr><th>类型</th><th>关联对象</th><th>可用变动</th><th>冻结变动</th><th>变动后余额</th><th>时间</th></tr></thead><tbody>
+          {ledger.map((entry) => <tr key={entry.id}><td><Status>{ledgerNames[entry.entry_type] || entry.entry_type}</Status></td><td><strong>{entry.model_name || entry.withdrawal_no || '-'}</strong><small>{entry.newapi_log_id ? `New API 日志 ${entry.newapi_log_id}` : entry.description}</small></td><td>{formatQuotaDelta(entry.available_delta)}</td><td>{formatQuotaDelta(entry.frozen_delta)}</td><td>{formatQuota(entry.available_after)}<small>冻结 {formatQuota(entry.frozen_after)}</small></td><td>{formatDate(entry.created_at)}</td></tr>)}
+          {!loading && ledger.length === 0 && <tr><td className="table-message" colSpan="6">暂无结算账本记录</td></tr>}
+        </tbody></table></div>
+      </Section>
+
+      <Section title="提现记录" description="平台只处理冻结和审核，实际款项由管理员线下支付并登记凭证">
+        <div className="table-wrap"><table className="data-table"><thead><tr><th>申请编号</th><th>金额</th><th>收款方式</th><th>收款账户</th><th>状态</th><th>申请时间</th></tr></thead><tbody>
+          {withdrawals.map((item) => <tr key={item.id}><td><code>{item.withdrawal_no}</code></td><td><strong>{formatQuota(item.amount_quota)}</strong></td><td>{item.recipient_type === 'alipay' ? '支付宝' : item.recipient_type === 'bank' ? '银行卡' : '其他'}</td><td><code>{item.recipient_account_masked}</code></td><td><Status>{withdrawalStatusNames[item.status] || item.status}</Status></td><td>{formatDate(item.created_at)}</td></tr>)}
+          {!loading && withdrawals.length === 0 && <tr><td className="table-message" colSpan="6">暂无提现申请</td></tr>}
+        </tbody></table></div>
+      </Section>
 
       <Section title="渠道审核版本" description="新渠道、密钥变更和基础地址变更均保留独立审核记录">
         <div className="table-wrap"><table className="data-table"><thead><tr><th>审核编号</th><th>渠道</th><th>类型</th><th>基础地址</th><th>拟售模型</th><th>凭据</th><th>状态</th><th>结果</th></tr></thead><tbody>

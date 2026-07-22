@@ -53,6 +53,23 @@ async function mockAdminAPI(targetPage, state) {
     if (url.pathname === '/api/merchant/health' && request.method() === 'GET') {
       return json({ success: true, data: [{ offer_id: 201, merchant_channel_id: 51, channel_name: 'OpenAI 主线路', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, offer_status: 'active', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] });
     }
+    if (url.pathname === '/api/merchant/balance' && request.method() === 'GET') {
+      return json({ success: true, data: { merchant_id: 31, available_quota: 9000000, frozen_quota: 2500000, lifetime_earned_quota: 14000000, lifetime_refunded_quota: 500000, lifetime_paid_quota: 2000000 } });
+    }
+    if (url.pathname === '/api/merchant/ledger' && request.method() === 'GET') {
+      return json({ success: true, data: { page: 1, page_size: 50, total: 2, items: [
+        { id: 81, merchant_id: 31, entry_type: 'earning', available_delta: 900000, frozen_delta: 0, available_after: 9000000, frozen_after: 2500000, description: '模型调用结算', newapi_log_id: 1001, source_type: 2, model_name: 'gpt-4o-mini', gross_quota: 1000000, created_at: '2026-07-22T15:00:00Z' },
+        { id: 80, merchant_id: 31, entry_type: 'withdrawal_freeze', available_delta: -2500000, frozen_delta: 2500000, available_after: 8100000, frozen_after: 2500000, description: '提交人工提现并冻结余额', withdrawal_no: 'MW202607220001', created_at: '2026-07-22T14:00:00Z' },
+      ] } });
+    }
+    if (url.pathname === '/api/merchant/withdrawals' && request.method() === 'GET') {
+      return json({ success: true, data: { page: 1, page_size: 50, total: 1, items: [{ id: 8, withdrawal_no: 'MW202607220001', merchant_id: 31, amount_quota: 2500000, available_before_quota: 10600000, recipient_type: 'alipay', recipient_account_masked: '138****2621', status: 'pending', created_at: '2026-07-22T14:00:00Z' }] } });
+    }
+    if (url.pathname === '/api/merchant/withdrawals' && request.method() === 'POST') {
+      state.withdrawalCreateCalls += 1;
+      state.withdrawalCreateBody = request.postDataJSON();
+      return json({ success: true, data: { id: 10, withdrawal_no: 'MW202607220010', merchant_id: 31, amount_quota: state.withdrawalCreateBody.amount_quota, recipient_type: state.withdrawalCreateBody.recipient_type, recipient_account_masked: '138****2621', status: 'pending', created_at: '2026-07-22T16:00:00Z' } }, 201);
+    }
     if (url.pathname === '/api/merchant/offers' && request.method() === 'POST') {
       state.offerCreateCalls += 1;
       state.offerCreateBody = request.postDataJSON();
@@ -120,6 +137,26 @@ async function mockAdminAPI(targetPage, state) {
       state.paymentRetryCalls += 1;
       return json({ success: true, data: null });
     }
+    if (url.pathname === '/api/admin/withdrawals' && request.method() === 'GET') {
+      return json({ success: true, data: { page: 1, page_size: 50, total: 2, items: [
+        { id: 8, withdrawal_no: 'MW202607220001', merchant_id: 31, merchant_name: '北辰云智', amount_quota: 2500000, available_before_quota: 10600000, recipient_type: 'alipay', recipient_account_masked: '138****2621', recipient_account: '13800132621', status: 'pending', created_at: '2026-07-22T14:00:00Z' },
+        { id: 9, withdrawal_no: 'MW202607220002', merchant_id: 32, merchant_name: '矩阵算力', amount_quota: 5000000, available_before_quota: 8200000, recipient_type: 'bank', recipient_account_masked: '6217****1098', recipient_account: '6217000012341098', status: 'approved', review_reason: '资料核对通过', created_at: '2026-07-22T13:00:00Z' },
+      ] } });
+    }
+    if (/^\/api\/admin\/withdrawals\/\d+\/(approve|reject|paid)$/.test(url.pathname) && request.method() === 'POST') {
+      state.withdrawalActionCalls += 1;
+      state.withdrawalActionPath = url.pathname;
+      state.withdrawalActionBody = request.postDataJSON();
+      return json({ success: true, data: { id: Number(url.pathname.split('/')[4]), status: url.pathname.endsWith('/paid') ? 'paid' : url.pathname.endsWith('/reject') ? 'rejected' : 'approved' } });
+    }
+    if (url.pathname === '/api/admin/settlement-reconciliation' && request.method() === 'GET') {
+      return json({ success: true, data: { page: 1, page_size: 50, total: 1, items: [{ id: 12, source_id: 14, newapi_log_id: 1004, newapi_user_id: 18, source_type: 2, model_name: 'mkt-ov-missing', newapi_channel_id: 99, gross_quota: 50, reason_code: 'offer_mapping_missing', details: { newapi_channel_id: 99 }, status: 'open', created_at: '2026-07-22T15:30:00Z' }] } });
+    }
+    if (url.pathname === '/api/admin/settlement-reconciliation/12/ignore' && request.method() === 'POST') {
+      state.reconciliationIgnoreCalls += 1;
+      state.reconciliationIgnoreBody = request.postDataJSON();
+      return json({ success: true, data: { id: 12, status: 'ignored' } });
+    }
     if (url.pathname === '/api/admin/channel-reviews/22/verify' && request.method() === 'POST') {
       state.channelVerifyCalls += 1;
       return json({ success: true, data: { review_id: 22, models: ['claude-sonnet-4-5'] } });
@@ -145,6 +182,9 @@ try {
     routeSaveCalls: 0, routeSaveBody: null, offerCreateCalls: 0, offerCreateBody: null,
     modelCreateCalls: 0, modelCreateBody: null, pricePublishCalls: 0, pricePublishBody: null,
     healthResetCalls: 0, paymentSettingCalls: 0, paymentSettingBody: null, paymentRetryCalls: 0,
+    withdrawalCreateCalls: 0, withdrawalCreateBody: null, withdrawalActionCalls: 0,
+    withdrawalActionPath: '', withdrawalActionBody: null, reconciliationIgnoreCalls: 0,
+    reconciliationIgnoreBody: null,
   };
   await mockAdminAPI(page, adminMockState);
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
@@ -188,6 +228,15 @@ try {
   const importedChannels = page.getByRole('heading', { name: '已导入渠道' }).locator('xpath=ancestor::section');
   await importedChannels.getByText('正常', { exact: true }).waitFor();
   await page.getByText('0.7200x').waitFor();
+  await page.getByText('$18.00', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '申请提现' }).click();
+  const withdrawalDialog = page.getByRole('dialog', { name: '申请人工提现' });
+  await withdrawalDialog.getByLabel('提现金额（美元）').fill('5');
+  await withdrawalDialog.getByLabel('收款方式').selectOption('alipay');
+  await withdrawalDialog.getByLabel('收款账户').fill('13800132621');
+  await withdrawalDialog.getByRole('button', { name: '提交提现申请' }).click();
+  assert(adminMockState.withdrawalCreateCalls === 1, '商户提现没有调用真实接口');
+  assert(adminMockState.withdrawalCreateBody.amount_quota === 2500000, '提现美元金额没有转换为 New API 整数额度');
   await page.getByRole('button', { name: '创建报价' }).click();
   const quoteDialog = page.getByRole('dialog', { name: '创建模型报价' });
   await quoteDialog.getByLabel('标准模型').selectOption('101');
@@ -248,6 +297,24 @@ try {
   await page.getByRole('button', { name: '重试入账' }).click();
   await page.getByText('入账任务已重新排队').waitFor();
   assert(adminMockState.paymentRetryCalls === 1, '失败入账没有调用重试接口');
+  await page.getByRole('button', { name: '提现审核' }).click();
+  await page.getByText('MW202607220001').waitFor();
+  await page.getByRole('button', { name: '通过' }).first().click();
+  const approveDialog = page.getByRole('dialog', { name: '通过提现申请' });
+  await approveDialog.getByLabel('审核原因').fill('账本与收款信息核对通过');
+  await approveDialog.getByRole('button', { name: '确认通过' }).click();
+  assert(adminMockState.withdrawalActionCalls === 1 && adminMockState.withdrawalActionPath.endsWith('/8/approve'), '提现审核通过没有调用真实接口');
+  await page.getByRole('button', { name: '确认打款' }).click();
+  const paidDialog = page.getByRole('dialog', { name: '确认线下打款' });
+  await paidDialog.getByLabel('打款流水号').fill('BANK-009');
+  await paidDialog.getByLabel('凭证说明').fill('银行回单 009');
+  await paidDialog.getByRole('button', { name: '确认已打款' }).click();
+  assert(adminMockState.withdrawalActionCalls === 2 && adminMockState.withdrawalActionPath.endsWith('/9/paid'), '确认线下打款没有调用真实接口');
+  await page.getByRole('button', { name: '忽略异常' }).click();
+  const ignoreDialog = page.getByRole('dialog', { name: '忽略对账异常' });
+  await ignoreDialog.getByLabel('处置原因').fill('确认不是平台路由产生的日志');
+  await ignoreDialog.getByRole('button', { name: '确认忽略' }).click();
+  assert(adminMockState.reconciliationIgnoreCalls === 1, '忽略对账异常没有调用真实接口');
 
   const anonymousPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
   let anonymousLoggedIn = false;
@@ -351,7 +418,7 @@ try {
   await resetDialog.getByText('TempPass1234').waitFor();
   await resetPage.close();
 
-  console.log('UI 冒烟测试通过：角色导航、真实账号数据、路由策略、报价和支付设置交互正常。');
+  console.log('UI 冒烟测试通过：角色导航、真实账号数据、路由策略、报价、支付、结算和人工提现交互正常。');
 } finally {
   await browser.close();
   await stopLocalPreview(previewServer);

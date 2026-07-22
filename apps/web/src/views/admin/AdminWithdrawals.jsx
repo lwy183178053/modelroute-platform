@@ -1,14 +1,64 @@
-import { Check, Download, FileCheck2, ReceiptText, X } from 'lucide-react';
-import { withdrawals } from '../../data';
+import { useCallback, useEffect, useState } from 'react';
+import { Check, FileCheck2, ShieldAlert, X } from 'lucide-react';
+import { apiRequest, formatQuota } from '../../api';
 import { Button, InlineNotice, Section, Status } from '../../ui';
 
-export default function AdminWithdrawals({ notify }) {
+const statusNames = { pending: '待审核', approved: '待打款', paid: '已打款', rejected: '已驳回' };
+const reasonNames = {
+  offer_mapping_missing: '报价归属缺失',
+  refund_origin_missing: '退款原消费缺失',
+  refund_origin_ambiguous: '退款原消费不唯一',
+  refund_origin_insufficient: '退款原消费额度不足',
+};
+
+function formatDate(value) {
+  if (!value) return '-';
+  return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+}
+
+export default function AdminWithdrawals({ notify, openModal }) {
+  const [withdrawals, setWithdrawals] = useState([]);
+  const [reconciliation, setReconciliation] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const [withdrawalData, reconciliationData] = await Promise.all([
+        apiRequest('/api/admin/withdrawals?page_size=50'),
+        apiRequest('/api/admin/settlement-reconciliation?status=open&page_size=50'),
+      ]);
+      setWithdrawals(withdrawalData?.items || []);
+      setReconciliation(reconciliationData?.items || []);
+    } catch (requestError) {
+      setError(requestError.message || '读取提现与对账数据失败');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const action = (item, actionName) => openModal({ type: 'withdrawalAction', action: actionName, item, onSaved: load });
   return (
-    <Section title="人工提现审核" description="平台只冻结和审核提现金额，确认线下打款凭证后再完成出账" actions={<Button icon={Download}>导出申请</Button>}>
-      <InlineNotice tone="warning">提现不自动打款。审核、打款确认和驳回均要求管理员原因并写入审计日志。</InlineNotice>
-      <div className="table-wrap"><table className="data-table"><thead><tr><th>申请编号</th><th>商户</th><th>提现金额</th><th>申请时可用余额</th><th>收款账户</th><th>提交时间</th><th>状态</th><th>操作</th></tr></thead><tbody>
-        {withdrawals.map((item) => <tr key={item.id}><td><code>{item.id}</code></td><td><strong>{item.merchant}</strong></td><td><strong>{item.amount}</strong></td><td>{item.available}</td><td>{item.account}</td><td>{item.submitted}</td><td><Status>{item.state}</Status></td><td><div className="row-actions"><Button icon={ReceiptText} variant="ghost">账本核对</Button><Button icon={Check} variant="ghost" onClick={() => notify(`${item.id} 审核通过，等待录入打款凭证`)}>通过</Button><Button icon={FileCheck2} variant="ghost" onClick={() => notify(`${item.id} 已确认打款`)}>确认打款</Button><Button icon={X} variant="danger">驳回</Button></div></td></tr>)}
-      </tbody></table></div>
-    </Section>
+    <>
+      {error && <InlineNotice tone="warning">{error}</InlineNotice>}
+      <Section title="人工提现审核" description="提现不自动打款；通过后仍保持冻结，录入线下打款凭证才完成出账">
+        <InlineNotice tone="warning">审核、打款确认和驳回均要求管理员填写原因或凭证并写入审计日志。</InlineNotice>
+        <div className="table-wrap"><table className="data-table"><thead><tr><th>申请编号</th><th>商户</th><th>提现金额</th><th>申请前可用</th><th>收款账户</th><th>提交时间</th><th>状态</th><th>操作</th></tr></thead><tbody>
+          {withdrawals.map((item) => <tr key={item.id}><td><code>{item.withdrawal_no}</code></td><td><strong>{item.merchant_name}</strong><small>M{item.merchant_id}</small></td><td><strong>{formatQuota(item.amount_quota)}</strong></td><td>{formatQuota(item.available_before_quota)}</td><td><span>{item.recipient_type === 'alipay' ? '支付宝' : item.recipient_type === 'bank' ? '银行卡' : '其他'}</span><small><code>{item.recipient_account}</code></small></td><td>{formatDate(item.created_at)}</td><td><Status>{statusNames[item.status] || item.status}</Status></td><td><div className="row-actions">{item.status === 'pending' && <Button icon={Check} variant="ghost" onClick={() => action(item, 'approve')}>通过</Button>}{['pending', 'approved'].includes(item.status) && <Button icon={X} variant="danger" onClick={() => action(item, 'reject')}>驳回</Button>}{item.status === 'approved' && <Button icon={FileCheck2} variant="ghost" onClick={() => action(item, 'paid')}>确认打款</Button>}</div></td></tr>)}
+          {!loading && withdrawals.length === 0 && <tr><td className="table-message" colSpan="8">暂无提现申请</td></tr>}
+          {loading && <tr><td className="table-message" colSpan="8">正在读取提现申请</td></tr>}
+        </tbody></table></div>
+      </Section>
+
+      <Section title="结算对账队列" description="映射缺失和退款原消费缺失不会猜测入账，映射恢复后 Worker 自动重试">
+        <div className="table-wrap"><table className="data-table"><thead><tr><th>New API 日志</th><th>类型</th><th>模型别名</th><th>渠道</th><th>额度</th><th>异常原因</th><th>时间</th><th>操作</th></tr></thead><tbody>
+          {reconciliation.map((item) => <tr key={item.id}><td><code>{item.newapi_log_id}</code></td><td>{item.source_type === 6 ? '退款' : '消费'}</td><td><code>{item.model_name}</code></td><td>{item.newapi_channel_id}</td><td>{formatQuota(item.gross_quota)}</td><td><Status>{reasonNames[item.reason_code] || item.reason_code}</Status></td><td>{formatDate(item.created_at)}</td><td><Button icon={ShieldAlert} variant="ghost" onClick={() => openModal({ type: 'reconciliationAction', action: 'ignore', item, onSaved: load })}>忽略异常</Button></td></tr>)}
+          {!loading && reconciliation.length === 0 && <tr><td className="table-message" colSpan="8">暂无待处理对账异常</td></tr>}
+          {loading && <tr><td className="table-message" colSpan="8">正在读取对账队列</td></tr>}
+        </tbody></table></div>
+      </Section>
+    </>
   );
 }

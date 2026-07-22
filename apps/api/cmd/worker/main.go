@@ -34,6 +34,7 @@ func main() {
 	defer ticker.Stop()
 	runHealthCycle(ctx, resources)
 	runPaymentCreditCycle(ctx, resources)
+	runSettlementCycle(ctx, resources)
 	ticks := 0
 
 	for {
@@ -44,6 +45,7 @@ func main() {
 			ticks++
 			runHealthCycle(ctx, resources)
 			runPaymentCreditCycle(ctx, resources)
+			runSettlementCycle(ctx, resources)
 			if ticks%3 != 0 {
 				continue
 			}
@@ -63,6 +65,17 @@ func main() {
 				log.Printf("依赖检查异常数量：%d", errors)
 			}
 		}
+	}
+}
+
+func runSettlementCycle(ctx context.Context, resources *bootstrap.Resources) {
+	if resources.Services.SettlementSync == nil {
+		return
+	}
+	cycleContext, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	if err := resources.Services.SettlementSync.RunCycle(cycleContext, time.Now().UTC()); err != nil {
+		log.Printf("结算同步周期异常：%v", err)
 	}
 }
 

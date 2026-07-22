@@ -27,7 +27,7 @@ const sections = [
   { id: 'models', label: '模型与定价', icon: BadgeDollarSign },
   { id: 'channels', label: '渠道与探活', icon: HeartPulse, count: 2 },
   { id: 'payment', label: '支付与充值', icon: CreditCard },
-  { id: 'withdrawals', label: '提现审核', icon: Landmark, count: 2 },
+  { id: 'withdrawals', label: '提现审核', icon: Landmark },
   { id: 'settings', label: '平台设置', icon: Settings2 },
   { id: 'audit', label: '审计日志', icon: FileClock },
 ];
@@ -106,7 +106,7 @@ export default function AdminView({ section, setSection, openModal, notify }) {
           {section === 'models' && <AdminModels notify={notify} />}
           {section === 'channels' && <AdminChannels notify={notify} />}
           {section === 'payment' && <AdminPayment notify={notify} openModal={openModal} />}
-          {section === 'withdrawals' && <AdminWithdrawals notify={notify} />}
+          {section === 'withdrawals' && <AdminWithdrawals notify={notify} openModal={openModal} />}
           {section === 'settings' && <PlaceholderPanel notify={notify} />}
           {section === 'audit' && <AdminAudit />}
         </div>

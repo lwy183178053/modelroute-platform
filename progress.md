@@ -670,3 +670,72 @@
 - 服务器 `/opt/modelroute-platform/releases/5aa9fa406f47`：保存第 6 阶段已验收运行发布。
 - 服务器 `/opt/modelroute-platform/shared/backups/20260722T094226Z`：保存发布前两个数据库、Compose、版本和修改前环境文件备份。
 - 回滚点：服务器将 `/opt/modelroute-platform/current` 原子切换到 `/opt/modelroute-platform/releases/6dd0565` 并执行该目录的 `deploy/scripts/deploy.sh`；需要连数据库回退时，使用上述发布前备份和 `restore.sh`，再恢复 `environment.before.env`。
+
+## 2026-07-22 - Task: 实现第 7 阶段结算同步与人工提现
+
+### What was done
+
+- 建立结算同步水位、New API 原始日志来源、退款分配、对账队列、商户余额、只追加账本和人工提现数据结构，Worker 每 10 秒同步最终消费与退款日志。
+- 以 New API 最终整数额度作为唯一计费事实，缓存命中不在平台重算；消费按整数拆分平台 10% 和商户剩余额度，部分退款按原消费拆分累计精确冲正。
+- 实现 5 分钟重叠窗口、5 秒安全延迟、日志编号幂等和成功后推进水位；报价映射恢复后自动重试开放的对账项。
+- 补齐异步任务退款的保守关联：精确标识缺失时只关联同归属的唯一无标识消费，候选不唯一或额度不足继续进入人工对账。
+- 实现商户余额、标准模型名账本、提现申请和原子冻结；管理员可审核、驳回、确认线下打款和忽略对账异常，所有写操作检查同源并记录审计。
+- 收款账户使用平台主密钥加密保存，商户只得到掩码，管理员接口才解密明文，密文字段不进入 JSON；商户账本不暴露内部报价别名。
+- 商户中心和管理员提现页接入真实接口，删除提现演示数据、虚假数量和无实现导出入口，增加桌面与移动端回归截图及只读生产验收脚本。
+- 新增中文结算文档并更新部署运行手册；本轮只完成本地实现和验证，生产仍运行第 6 阶段版本，待提交后先备份再发布。
+
+### Testing
+
+- 测试先行验证唯一候选退款、歧义候选、额度不足和商户账本模型名：现有实现分别失败为 `refund_origin_missing` 和内部报价别名，修改后专项 PostgreSQL 用例全部通过。
+- 使用本机 PostgreSQL 17 容器执行 `go test ./...`，全部通过；真实 SQL 用例覆盖 8 个并发重叠日志只结算一次、两笔并发提现只冻结一笔、两次部分退款精确归零、映射恢复自动结算和账本禁止更新。
+- 使用同一真实数据库执行 `go test -race ./...`，全部通过；`go vet ./...` 与 `go build ./cmd/...` 退出码均为 `0`。
+- 执行 `npm.cmd run test:ui`，Vite 转换 `1608` 个模块，角色权限、真实账号、路由、报价、支付、结算和人工提现交互通过。
+- 执行 `npm.cmd run capture`，生成 8 个业务视图、6 个专项管理视图和 6 个关键弹窗，脚本确认根页面无横向溢出；人工检查桌面提现弹窗与移动提现审核页布局。
+- 执行部署测试共 `9` 项，全部通过；使用只读 Docker 挂载对 9 个部署 Shell 脚本逐一执行真实 `sh -n`，全部通过。
+- `git diff --cached --check`、冲突标记、已出现的 SSH/易支付凭据字面值和私钥特征扫描均无异常；`verify-settlement.sh` 暂存模式为 `100755`。
+
+### Notes
+
+- `apps/api/cmd/worker/main.go`：把结算同步周期接入平台 Worker。
+- `apps/api/internal/bootstrap/resources.go`：注入结算仓储与同步任务。
+- `apps/api/internal/bootstrap/resources_test.go`：验证结算依赖完整注入。
+- `apps/api/internal/httpapi/server.go`：注册商户结算、提现以及管理员提现和对账接口。
+- `apps/api/internal/httpapi/services.go`：增加结算仓储与同步周期依赖契约。
+- `apps/api/internal/httpapi/settlement_domain.go`：实现整数拆分、退款比例冲正、日志解析和同步窗口。
+- `apps/api/internal/httpapi/settlement_domain_test.go`：覆盖整数拆分、部分退款、日志元数据和同步窗口。
+- `apps/api/internal/httpapi/settlement_handlers.go`：实现结算、提现、管理员审核、打款和对账 HTTP 入口。
+- `apps/api/internal/httpapi/settlement_handlers_test.go`：覆盖角色权限、同源检查、输入验证、敏感字段和管理操作。
+- `apps/api/internal/httpapi/settlement_reconciliation.go`：实现管理员对账列表和忽略处置。
+- `apps/api/internal/httpapi/settlement_store.go`：实现日志幂等、消费结算、退款关联、对账重试和余额更新。
+- `apps/api/internal/httpapi/settlement_store_postgres_test.go`：以真实 PostgreSQL 覆盖并发、退款、提现、对账恢复和内部别名隐藏。
+- `apps/api/internal/httpapi/settlement_sync.go`：实现 New API 日志分页同步和水位推进。
+- `apps/api/internal/httpapi/settlement_sync_test.go`：覆盖分页、类型筛选、水位、失败记录和字段校验。
+- `apps/api/internal/httpapi/settlement_types.go`：定义结算、账本、提现、对账数据与仓储接口。
+- `apps/api/internal/httpapi/settlement_withdrawals.go`：实现商户余额、标准模型名账本和人工提现状态事务。
+- `apps/api/internal/migrations/migrate_test.go`：验证第 5 份迁移顺序和关键表。
+- `apps/api/internal/migrations/sql/000005_settlement.sql`：创建结算、余额、账本、提现和对账表、索引与只追加触发器。
+- `apps/web/scripts/capture.mjs`：增加结算、提现和对账真实接口形状及专项截图。
+- `apps/web/scripts/ui-smoke.mjs`：覆盖提现申请、管理员审核、打款、驳回、对账处置和敏感字段边界。
+- `apps/web/src/Modals.jsx`：实现商户提现和管理员提现、对账操作弹窗。
+- `apps/web/src/data.js`：删除提现演示数据。
+- `apps/web/src/views/AdminView.jsx`：移除提现假数量并接入真实操作弹窗。
+- `apps/web/src/views/MerchantView.jsx`：展示真实余额、标准模型账本、提现记录和申请入口。
+- `apps/web/src/views/admin/AdminWithdrawals.jsx`：接入真实提现审核与结算对账队列。
+- `apps/web/artifacts/admin-channels-desktop.png`：随最终构建更新管理员渠道桌面回归图。
+- `apps/web/artifacts/admin-channels-mobile.png`：随最终构建更新管理员渠道移动回归图。
+- `apps/web/artifacts/admin-desktop.png`：随最终构建更新管理员首页桌面回归图。
+- `apps/web/artifacts/admin-mobile.png`：随最终构建更新管理员首页移动回归图。
+- `apps/web/artifacts/admin-models-desktop.png`：随最终构建更新管理员模型桌面回归图。
+- `apps/web/artifacts/merchant-desktop.png`：增加结算账本和提现记录的商户桌面回归图。
+- `apps/web/artifacts/merchant-mobile.png`：增加结算账本和提现记录的商户移动回归图。
+- `apps/web/artifacts/payment-config-desktop.png`：随最终构建更新支付配置桌面回归图。
+- `apps/web/artifacts/admin-withdrawals-desktop.png`：新增提现审核与对账桌面回归图。
+- `apps/web/artifacts/admin-withdrawals-mobile.png`：新增提现审核与对账移动回归图。
+- `apps/web/artifacts/withdrawal-modal-desktop.png`：新增商户提现桌面弹窗回归图。
+- `apps/web/artifacts/withdrawal-modal-mobile.png`：新增商户提现移动弹窗回归图。
+- `deploy/scripts/verify-settlement.sh`：新增只读生产结算权限、列表、敏感字段和同源拦截验收。
+- `deploy/tests/test_compose.py`：锁定结算验收脚本只读和权限边界。
+- `docs/结算与人工提现.md`：记录账务口径、同步、退款关联、提现状态、接口和运维方法。
+- `docs/部署运行手册.md`：增加第 5 份迁移和结算专项生产验收步骤。
+- `progress.md`：追加第 7 阶段本地实现、验证、文件清单和回滚记录。
+- 回滚点：阶段标签 `phase-6-payments`；第 7 阶段提交后可执行 `git revert <第7阶段提交>` 生成代码回退改动，生产发布前仍以 `/opt/modelroute-platform/releases/5aa9fa406f47` 为运行回滚点。

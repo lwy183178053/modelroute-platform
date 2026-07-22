@@ -36,7 +36,7 @@ func TestBuildHTTPServicesUsesSessionAndOriginConfig(t *testing.T) {
 	if services.Sessions == nil || services.NewAPI == nil || services.Audit == nil || services.Merchants == nil || services.Credentials == nil {
 		t.Fatalf("HTTP 服务依赖未完整注入：%+v", services)
 	}
-	if services.AdminNewAPI == nil || services.Routing == nil || services.OfferSync == nil || services.Health == nil || services.Payments == nil || services.PaymentCredit == nil {
+	if services.AdminNewAPI == nil || services.Routing == nil || services.OfferSync == nil || services.Health == nil || services.Payments == nil || services.PaymentCredit == nil || services.Settlement == nil || services.SettlementSync == nil {
 		t.Fatalf("路由服务依赖未完整注入：%+v", services)
 	}
 	if services.Cookie.Name != "modelroute_session" || services.Cookie.PublicOrigin != "https://aggregate.lwylink.xyz" || services.Cookie.MaxAge != 12*time.Hour || !services.Cookie.Secure {

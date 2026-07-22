@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Check, CreditCard, KeyRound, Landmark, LockKeyhole, Plus, RotateCcw, Send, ShieldCheck, Store } from 'lucide-react';
 import AuthModal from './AuthModal';
-import { apiRequest } from './api';
+import { apiRequest, formatQuota } from './api';
 import { Button, Field, InlineNotice, Modal, Select, TextInput } from './ui';
 
 function Footer({ cancel, submit, submitText, icon = Check }) {
@@ -303,8 +303,7 @@ function MerchantApplyModal({ close, config, notify }) {
   );
 }
 
-function SimpleMerchantModal({ type, close, config, notify }) {
-  const withdrawal = type === 'withdraw';
+function ChannelModal({ close, config, notify }) {
   const [channelName, setChannelName] = useState('');
   const [channelType, setChannelType] = useState('1');
   const [baseURL, setBaseURL] = useState('');
@@ -330,9 +329,96 @@ function SimpleMerchantModal({ type, close, config, notify }) {
     }
   };
   return (
-    <Modal title={withdrawal ? '申请人工提现' : '提交新渠道'} description={withdrawal ? '申请后冻结对应余额，由管理员审核并线下打款。' : '新渠道验证通过后才会导入 New API。'} onClose={close} footer={withdrawal ? <Footer cancel={close} submitText="提交提现申请" submit={() => { close(); notify('提现申请已提交审核'); }} icon={Landmark} /> : <><Button onClick={close}>取消</Button><Button disabled={busy} icon={Plus} onClick={submitChannel} variant="primary">{busy ? '提交中' : '提交渠道审核'}</Button></>}>
+    <Modal title="提交新渠道" description="新渠道验证通过后才会导入 New API。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy} icon={Plus} onClick={submitChannel} variant="primary">{busy ? '提交中' : '提交渠道审核'}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
-      {withdrawal ? <><Field label="提现金额"><div className="prefix-input"><span>¥</span><TextInput defaultValue="5000.00" type="number" /></div></Field><Field label="收款账户"><Select><option>支付宝 · 138****2621</option><option>银行卡 · 6217 **** 1098</option></Select></Field><InlineNotice tone="warning">可提现余额 ¥18,642.30，本次金额将在申请后冻结。</InlineNotice></> : <><Field label="渠道名称"><TextInput onChange={(event) => setChannelName(event.target.value)} placeholder="例如 OpenAI 企业线路" value={channelName} /></Field><Field label="渠道类型"><Select onChange={(event) => setChannelType(event.target.value)} value={channelType}><option value="1">OpenAI 兼容</option><option value="14">Anthropic</option><option value="20">OpenRouter</option><option value="24">Gemini</option><option value="43">DeepSeek</option></Select></Field><Field label="上游基础地址"><TextInput onChange={(event) => setBaseURL(event.target.value)} placeholder="https://api.example.com/v1" value={baseURL} /></Field><Field label="上游 API 密钥"><TextInput onChange={(event) => setAPIKey(event.target.value)} placeholder="保存后不再回显" type="password" value={apiKey} /></Field><Field label="拟售模型"><textarea className="textarea" onChange={(event) => setModels(event.target.value)} rows="3" value={models} /></Field></>}
+      <Field label="渠道名称"><TextInput onChange={(event) => setChannelName(event.target.value)} placeholder="例如 OpenAI 企业线路" value={channelName} /></Field><Field label="渠道类型"><Select onChange={(event) => setChannelType(event.target.value)} value={channelType}><option value="1">OpenAI 兼容</option><option value="14">Anthropic</option><option value="20">OpenRouter</option><option value="24">Gemini</option><option value="43">DeepSeek</option></Select></Field><Field label="上游基础地址"><TextInput onChange={(event) => setBaseURL(event.target.value)} placeholder="https://api.example.com/v1" value={baseURL} /></Field><Field label="上游 API 密钥"><TextInput onChange={(event) => setAPIKey(event.target.value)} placeholder="保存后不再回显" type="password" value={apiKey} /></Field><Field label="拟售模型"><textarea className="textarea" onChange={(event) => setModels(event.target.value)} rows="3" value={models} /></Field>
+    </Modal>
+  );
+}
+
+function WithdrawalModal({ close, config, notify }) {
+  const [amount, setAmount] = useState('');
+  const [recipientType, setRecipientType] = useState('alipay');
+  const [recipientAccount, setRecipientAccount] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const availableQuota = Number(config.balance?.available_quota || 0);
+  const submit = async () => {
+    const amountQuota = Math.round(Number(amount) * 500_000);
+    if (!Number.isSafeInteger(amountQuota) || amountQuota <= 0 || amountQuota > availableQuota) {
+      setError('提现金额必须大于 0 且不超过可提现余额');
+      return;
+    }
+    if (recipientAccount.trim().length < 5) {
+      setError('请填写有效收款账户');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await apiRequest('/api/merchant/withdrawals', { method: 'POST', body: {
+        amount_quota: amountQuota,
+        recipient_type: recipientType,
+        recipient_account: recipientAccount.trim(),
+      } });
+      await config.onSaved?.();
+      notify('提现申请已提交审核');
+      close();
+    } catch (requestError) {
+      setError(requestError.message || '提交提现申请失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title="申请人工提现" description="申请后立即冻结对应余额，由管理员审核并线下打款。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy} icon={Landmark} onClick={submit} variant="primary">{busy ? '提交中' : '提交提现申请'}</Button></>}>
+      {error && <InlineNotice tone="danger">{error}</InlineNotice>}
+      <Field label="提现金额（美元）" hint={`当前可提现 ${formatQuota(availableQuota)}`}><div className="prefix-input"><span>$</span><TextInput min="0.01" onChange={(event) => setAmount(event.target.value)} step="0.01" type="number" value={amount} /></div></Field>
+      <Field label="收款方式"><Select onChange={(event) => setRecipientType(event.target.value)} value={recipientType}><option value="alipay">支付宝</option><option value="bank">银行卡</option><option value="other">其他</option></Select></Field>
+      <Field label="收款账户" hint="账户信息加密保存，仅管理员处理打款时可见"><TextInput maxLength="256" onChange={(event) => setRecipientAccount(event.target.value)} value={recipientAccount} /></Field>
+    </Modal>
+  );
+}
+
+function SettlementActionModal({ close, config, notify }) {
+  const action = config.action;
+  const [reason, setReason] = useState('');
+  const [reference, setReference] = useState('');
+  const [proof, setProof] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const definitions = {
+    approve: { title: '通过提现申请', submit: '确认通过', notice: '提现申请已通过，等待线下打款' },
+    reject: { title: '驳回提现申请', submit: '确认驳回', notice: '提现申请已驳回并释放冻结余额' },
+    paid: { title: '确认线下打款', submit: '确认已打款', notice: '线下打款凭证已登记' },
+    ignore: { title: '忽略对账异常', submit: '确认忽略', notice: '对账异常已标记为忽略' },
+  };
+  const definition = definitions[action];
+  const submit = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const reconciliation = action === 'ignore';
+      const path = reconciliation
+        ? `/api/admin/settlement-reconciliation/${config.item.id}/ignore`
+        : `/api/admin/withdrawals/${config.item.id}/${action}`;
+      const body = action === 'paid'
+        ? { payout_reference: reference.trim(), payout_proof: proof.trim() }
+        : { reason: reason.trim() };
+      await apiRequest(path, { method: 'POST', body });
+      await config.onSaved?.();
+      notify(definition.notice);
+      close();
+    } catch (requestError) {
+      setError(requestError.message || '操作失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title={definition.title} description={action === 'ignore' ? `New API 日志 ${config.item.newapi_log_id}` : `${config.item.merchant_name} · ${config.item.withdrawal_no}`} onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy} icon={Check} onClick={submit} variant="primary">{busy ? '处理中' : definition.submit}</Button></>}>
+      {error && <InlineNotice tone="danger">{error}</InlineNotice>}
+      {action === 'paid' ? <><Field label="打款流水号"><TextInput maxLength="200" onChange={(event) => setReference(event.target.value)} value={reference} /></Field><Field label="凭证说明"><textarea className="textarea" maxLength="2000" onChange={(event) => setProof(event.target.value)} rows="4" value={proof} /></Field></> : <Field label={action === 'ignore' ? '处置原因' : '审核原因'}><textarea className="textarea" maxLength="500" onChange={(event) => setReason(event.target.value)} rows="4" value={reason} /></Field>}
     </Modal>
   );
 }
@@ -429,6 +515,8 @@ export default function Modals({ modal, close, notify, onAuthenticated, setModal
   if (type === 'recharge') return <RechargeModal close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
   if (type === 'creditResolve') return <CreditResolveModal close={close} config={modal} notify={notify} />;
   if (type === 'merchantApply') return <MerchantApplyModal close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
-  if (type === 'withdraw' || type === 'channel') return <SimpleMerchantModal type={type} close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
+  if (type === 'channel') return <ChannelModal close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
+  if (type === 'withdraw') return <WithdrawalModal close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
+  if (type === 'withdrawalAction' || type === 'reconciliationAction') return <SettlementActionModal close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
   return null;
 }

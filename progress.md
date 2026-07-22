@@ -396,3 +396,32 @@
 - `docs/部署运行手册.md`：补充加密主密钥和商户契约验收步骤。
 - `progress.md`：追加本轮实现、验证、文件清单和回滚点。
 - 回滚点：阶段标签 `phase-3-accounts`；第 4 阶段提交后可执行 `git revert <第4阶段提交>` 生成仓库回退改动，生产服务器在本轮记录时尚未部署此阶段。
+
+## 2026-07-22 - Task: 完成第 4 阶段生产部署与商户契约验收
+
+### What was done
+
+- 在生产发布前备份平台库、New API 库、Compose 和版本信息，并单独保留修改前的受限环境文件。
+- 将已推送提交 `192f31c` 作为不可变发布上传到服务器，校验本地与服务器归档 SHA-256 一致后构建六服务 Compose。
+- 在共享 `.env` 中生成 32 字节随机商户凭据加密主密钥，完成 Base64 长度校验并保持文件权限 `600`。
+- 执行第 2 份平台迁移，完成内网与公网基础验收、账号契约和新增商户契约，随后原子切换 `current`。
+- 商户契约使用随机测试凭据创建申请，验证列表和响应不回显密钥，再通过管理员接口驳回并确认数据库密文字段为空。
+
+### Testing
+
+- 发布前备份 `20260722T065007Z` 的平台库、New API 库、Compose 和版本文件 SHA-256 全部通过，修改前 `.env` 已保存到同一受限备份目录。
+- 服务器发布归档 SHA-256 与本地一致；Compose 部署进程退出码为 `0`，API 自动执行两份平台迁移。
+- `deploy/scripts/verify.sh` 在 `http://127.0.0.1:28100` 和 `https://aggregate.lwylink.xyz` 均通过。
+- `verify-accounts.sh` 与 `verify-merchants.sh` 均通过；测试申请最终状态为 `rejected`，对应待审核密文为空。
+- `/api/version` 返回 `192f31c`；网关、New API、平台 API、Worker、PostgreSQL 和 Redis 共六个服务均为运行状态，带健康检查的服务均为 `healthy`。
+- `aggregate.lwylink.xyz` 的 HTTP 返回 `308`、HTTPS 返回 `200`，`api.lwylink.xyz` 与 `sdk.lwylink.xyz` 均返回 `200`。
+- New API、PostgreSQL 和 Redis 没有宿主机发布端口；稳定窗口 Caddy 日志未出现新增 TLS、`502`、`503`、`504` 或 `context canceled` 异常。
+
+### Notes
+
+- `docs/商户与渠道审核接口.md`：补充第 4 阶段生产契约与密钥验收结果。
+- `docs/部署环境审计.md`：补充生产加密主密钥、平台迁移和隔离核验事实。
+- `progress.md`：追加生产部署、契约验收、文件清单和回滚点。
+- 服务器 `/opt/modelroute-platform/releases/192f31c`：保存第 4 阶段已验收运行发布。
+- 服务器 `/opt/modelroute-platform/shared/backups/20260722T065007Z`：保存发布前数据库、Compose、版本和环境文件备份。
+- 回滚点：服务器将 `/opt/modelroute-platform/current` 原子切换到 `/opt/modelroute-platform/releases/a3e1bdd`，再执行该目录的 `deploy/scripts/deploy.sh`；平台数据库需恢复时使用上述发布前备份和 `restore.sh`。

@@ -137,6 +137,31 @@ services:
     tmpfs: [/tmp]
     networks: [backend, egress]
 
+  model-seed:
+    profiles: [tools]
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+    entrypoint: ["/usr/local/bin/modelroute-seed-models"]
+    restart: "no"
+    environment:
+      PLATFORM_DATABASE_URL: postgres://${PLATFORM_DB_USER}:${PLATFORM_DB_PASSWORD}@postgres:5432/${PLATFORM_DB_NAME}?sslmode=disable
+      NEW_API_BASE_URL: http://new-api:3000
+      NEW_API_REQUEST_TIMEOUT: ${NEW_API_REQUEST_TIMEOUT}
+      NEW_API_ADMIN_USERNAME: ${NEW_API_ADMIN_USERNAME}
+      NEW_API_ADMIN_PASSWORD: ${NEW_API_ADMIN_PASSWORD}
+      TZ: Asia/Shanghai
+    depends_on:
+      postgres:
+        condition: service_healthy
+      new-api:
+        condition: service_healthy
+    read_only: true
+    tmpfs: [/tmp]
+    networks: [backend, egress]
+
   gateway:
     build:
       context: .

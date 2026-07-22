@@ -131,6 +131,10 @@ func validateAbsolutePrice(price OfficialPrice, protocol string) error {
 	return nil
 }
 
+func ValidateCanonicalModel(command CreateCanonicalModelCommand) error {
+	return validateCanonicalModel(command)
+}
+
 func buildTieredExpression(price OfficialPrice, discountBPS int, protocol string) (string, []OfferPriceTier, error) {
 	if discountBPS < 1 || discountBPS > int(discountBPSScale) {
 		return "", nil, errors.New("商户折扣必须在 1 到 10000 基点之间")

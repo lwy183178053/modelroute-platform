@@ -6,7 +6,8 @@ COPY apps/api/go.mod apps/api/go.sum ./
 RUN go mod download
 COPY apps/api/ ./
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.version=${APP_VERSION}" -o /out/modelroute-api ./cmd/api \
-    && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.version=${APP_VERSION}" -o /out/modelroute-worker ./cmd/worker
+    && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.version=${APP_VERSION}" -o /out/modelroute-worker ./cmd/worker \
+    && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.version=${APP_VERSION}" -o /out/modelroute-seed-models ./cmd/seed-models
 
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates tzdata \
@@ -15,4 +16,5 @@ RUN apk add --no-cache ca-certificates tzdata \
 USER modelroute
 COPY --from=builder /out/modelroute-api /usr/local/bin/modelroute-api
 COPY --from=builder /out/modelroute-worker /usr/local/bin/modelroute-worker
+COPY --from=builder /out/modelroute-seed-models /usr/local/bin/modelroute-seed-models
 ENTRYPOINT ["/usr/local/bin/modelroute-api"]

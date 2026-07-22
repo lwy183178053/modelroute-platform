@@ -32,7 +32,7 @@ class DeployScriptTest(unittest.TestCase):
             (release / ".env").write_text("APP_VERSION=stale\n", encoding="ascii")
             docker = fake_bin / "docker"
             docker.write_bytes(
-                b'#!/bin/sh\nprintf "%s\\n" "$APP_VERSION" >> "$DEPLOY_TEST_LOG"\n'
+                b'#!/bin/sh\nprintf "%s|%s\\n" "$APP_VERSION" "$*" >> "$DEPLOY_TEST_LOG"\n'
             )
             docker.chmod(0o755)
 
@@ -47,8 +47,19 @@ class DeployScriptTest(unittest.TestCase):
             )
             subprocess.run(["bash", "-lc", command], check=True)
 
-            versions = (release / "docker.log").read_text(encoding="ascii").splitlines()
-            self.assertEqual(versions, [release.name] * 4)
+            calls = (release / "docker.log").read_text(encoding="ascii").splitlines()
+            self.assertEqual([line.split("|", 1)[0] for line in calls], [release.name] * 6)
+            self.assertEqual(
+                [line.split("|", 1)[1] for line in calls],
+                [
+                    "compose --env-file .env --profile tools config --quiet",
+                    "compose --env-file .env --profile tools build",
+                    "compose --env-file .env up -d postgres redis new-api",
+                    "compose --env-file .env run --rm model-seed",
+                    "compose --env-file .env up -d --remove-orphans",
+                    "compose --env-file .env ps",
+                ],
+            )
 
 
 if __name__ == "__main__":

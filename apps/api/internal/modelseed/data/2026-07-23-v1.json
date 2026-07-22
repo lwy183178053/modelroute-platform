@@ -1,0 +1,292 @@
+{
+  "version": "2026-07-23-v1",
+  "new_api_version": "v1.0.0-rc.21",
+  "new_api_source_commit": "bde9b2f44887d34ec54799ae191d50f97914359e",
+  "models": [
+    {
+      "public_name": "gpt-5.4",
+      "provider": "OpenAI",
+      "protocol": "responses",
+      "lifecycle": "stable",
+      "price": {
+        "currency": "USD",
+        "usd_exchange_rate_micros": 1000000,
+        "source_url": "https://developers.openai.com/api/docs/models/gpt-5.4",
+        "checked_at": "2026-07-23T00:00:00Z",
+        "tiers": [
+          { "minimum_input_tokens": 0, "maximum_input_tokens": 272000, "input_price_micros": 2500000, "output_price_micros": 15000000, "cache_read_price_micros": 250000 },
+          { "minimum_input_tokens": 272001, "maximum_input_tokens": null, "input_price_micros": 5000000, "output_price_micros": 22500000, "cache_read_price_micros": 500000 }
+        ]
+      }
+    },
+    {
+      "public_name": "gpt-5.4-pro",
+      "provider": "OpenAI",
+      "protocol": "responses",
+      "lifecycle": "stable",
+      "price": {
+        "currency": "USD",
+        "usd_exchange_rate_micros": 1000000,
+        "source_url": "https://developers.openai.com/api/docs/models/gpt-5.4-pro",
+        "checked_at": "2026-07-23T00:00:00Z",
+        "tiers": [
+          { "minimum_input_tokens": 0, "maximum_input_tokens": 272000, "input_price_micros": 30000000, "output_price_micros": 180000000 },
+          { "minimum_input_tokens": 272001, "maximum_input_tokens": null, "input_price_micros": 60000000, "output_price_micros": 270000000 }
+        ]
+      }
+    },
+    {
+      "public_name": "text-embedding-3-small",
+      "provider": "OpenAI",
+      "protocol": "embeddings",
+      "lifecycle": "stable",
+      "price": {
+        "currency": "USD",
+        "usd_exchange_rate_micros": 1000000,
+        "source_url": "https://developers.openai.com/api/docs/models/text-embedding-3-small",
+        "checked_at": "2026-07-23T00:00:00Z",
+        "tiers": [
+          { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 20000 }
+        ]
+      }
+    },
+    {
+      "public_name": "text-embedding-3-large",
+      "provider": "OpenAI",
+      "protocol": "embeddings",
+      "lifecycle": "stable",
+      "price": {
+        "currency": "USD",
+        "usd_exchange_rate_micros": 1000000,
+        "source_url": "https://developers.openai.com/api/docs/models/text-embedding-3-large",
+        "checked_at": "2026-07-23T00:00:00Z",
+        "tiers": [
+          { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 130000 }
+        ]
+      }
+    },
+    {
+      "public_name": "claude-opus-4-8",
+      "provider": "Anthropic",
+      "protocol": "chat_completions",
+      "lifecycle": "stable",
+      "price": {
+        "currency": "USD", "usd_exchange_rate_micros": 1000000,
+        "source_url": "https://platform.claude.com/docs/en/about-claude/pricing", "checked_at": "2026-07-23T00:00:00Z",
+        "tiers": [
+          { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 5000000, "output_price_micros": 25000000, "cache_read_price_micros": 500000, "cache_write_5m_price_micros": 6250000, "cache_write_1h_price_micros": 10000000 }
+        ]
+      }
+    },
+    {
+      "public_name": "claude-opus-4-7",
+      "provider": "Anthropic",
+      "protocol": "chat_completions",
+      "lifecycle": "stable",
+      "price": {
+        "currency": "USD", "usd_exchange_rate_micros": 1000000,
+        "source_url": "https://platform.claude.com/docs/en/about-claude/pricing", "checked_at": "2026-07-23T00:00:00Z",
+        "tiers": [
+          { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 5000000, "output_price_micros": 25000000, "cache_read_price_micros": 500000, "cache_write_5m_price_micros": 6250000, "cache_write_1h_price_micros": 10000000 }
+        ]
+      }
+    },
+    {
+      "public_name": "claude-opus-4-6",
+      "provider": "Anthropic",
+      "protocol": "chat_completions",
+      "lifecycle": "stable",
+      "price": {
+        "currency": "USD", "usd_exchange_rate_micros": 1000000,
+        "source_url": "https://platform.claude.com/docs/en/about-claude/pricing", "checked_at": "2026-07-23T00:00:00Z",
+        "tiers": [
+          { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 5000000, "output_price_micros": 25000000, "cache_read_price_micros": 500000, "cache_write_5m_price_micros": 6250000, "cache_write_1h_price_micros": 10000000 }
+        ]
+      }
+    },
+    {
+      "public_name": "claude-sonnet-4-6",
+      "provider": "Anthropic",
+      "protocol": "chat_completions",
+      "lifecycle": "stable",
+      "price": {
+        "currency": "USD", "usd_exchange_rate_micros": 1000000,
+        "source_url": "https://platform.claude.com/docs/en/about-claude/pricing", "checked_at": "2026-07-23T00:00:00Z",
+        "tiers": [
+          { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 3000000, "output_price_micros": 15000000, "cache_read_price_micros": 300000, "cache_write_5m_price_micros": 3750000, "cache_write_1h_price_micros": 6000000 }
+        ]
+      }
+    },
+    {
+      "public_name": "claude-haiku-4-5-20251001",
+      "provider": "Anthropic",
+      "protocol": "chat_completions",
+      "lifecycle": "stable",
+      "price": {
+        "currency": "USD", "usd_exchange_rate_micros": 1000000,
+        "source_url": "https://platform.claude.com/docs/en/about-claude/pricing", "checked_at": "2026-07-23T00:00:00Z",
+        "tiers": [
+          { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 1000000, "output_price_micros": 5000000, "cache_read_price_micros": 100000, "cache_write_5m_price_micros": 1250000, "cache_write_1h_price_micros": 2000000 }
+        ]
+      }
+    },
+    {
+      "public_name": "gemini-3.1-pro-preview",
+      "provider": "Gemini",
+      "protocol": "chat_completions",
+      "lifecycle": "preview",
+      "price": {
+        "currency": "USD", "usd_exchange_rate_micros": 1000000,
+        "source_url": "https://ai.google.dev/gemini-api/docs/pricing", "checked_at": "2026-07-23T00:00:00Z",
+        "tiers": [
+          { "minimum_input_tokens": 0, "maximum_input_tokens": 200000, "input_price_micros": 2000000, "output_price_micros": 12000000, "cache_read_price_micros": 200000 },
+          { "minimum_input_tokens": 200001, "maximum_input_tokens": null, "input_price_micros": 4000000, "output_price_micros": 18000000, "cache_read_price_micros": 400000 }
+        ]
+      }
+    },
+    {
+      "public_name": "gemini-3-flash-preview",
+      "provider": "Gemini",
+      "protocol": "chat_completions",
+      "lifecycle": "preview",
+      "price": {
+        "currency": "USD", "usd_exchange_rate_micros": 1000000,
+        "source_url": "https://ai.google.dev/gemini-api/docs/pricing", "checked_at": "2026-07-23T00:00:00Z",
+        "tiers": [
+          { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 500000, "output_price_micros": 3000000, "cache_read_price_micros": 50000 }
+        ]
+      }
+    },
+    {
+      "public_name": "gemini-2.5-pro",
+      "provider": "Gemini",
+      "protocol": "chat_completions",
+      "lifecycle": "stable",
+      "price": {
+        "currency": "USD", "usd_exchange_rate_micros": 1000000,
+        "source_url": "https://ai.google.dev/gemini-api/docs/pricing", "checked_at": "2026-07-23T00:00:00Z",
+        "tiers": [
+          { "minimum_input_tokens": 0, "maximum_input_tokens": 200000, "input_price_micros": 1250000, "output_price_micros": 10000000, "cache_read_price_micros": 125000 },
+          { "minimum_input_tokens": 200001, "maximum_input_tokens": null, "input_price_micros": 2500000, "output_price_micros": 15000000, "cache_read_price_micros": 250000 }
+        ]
+      }
+    },
+    {
+      "public_name": "gemini-2.5-flash",
+      "provider": "Gemini",
+      "protocol": "chat_completions",
+      "lifecycle": "stable",
+      "price": {
+        "currency": "USD", "usd_exchange_rate_micros": 1000000,
+        "source_url": "https://ai.google.dev/gemini-api/docs/pricing", "checked_at": "2026-07-23T00:00:00Z",
+        "tiers": [
+          { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 300000, "output_price_micros": 2500000, "cache_read_price_micros": 30000 }
+        ]
+      }
+    },
+    {
+      "public_name": "gemini-2.5-flash-lite",
+      "provider": "Gemini",
+      "protocol": "chat_completions",
+      "lifecycle": "stable",
+      "price": {
+        "currency": "USD", "usd_exchange_rate_micros": 1000000,
+        "source_url": "https://ai.google.dev/gemini-api/docs/pricing", "checked_at": "2026-07-23T00:00:00Z",
+        "tiers": [
+          { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 100000, "output_price_micros": 400000, "cache_read_price_micros": 10000 }
+        ]
+      }
+    },
+    {
+      "public_name": "gemini-embedding-001",
+      "provider": "Gemini",
+      "protocol": "embeddings",
+      "lifecycle": "stable",
+      "price": {
+        "currency": "USD", "usd_exchange_rate_micros": 1000000,
+        "source_url": "https://ai.google.dev/gemini-api/docs/pricing", "checked_at": "2026-07-23T00:00:00Z",
+        "tiers": [
+          { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 150000 }
+        ]
+      }
+    },
+    {
+      "public_name": "deepseek-v4-flash",
+      "provider": "DeepSeek",
+      "protocol": "chat_completions",
+      "lifecycle": "stable",
+      "price": {
+        "currency": "USD", "usd_exchange_rate_micros": 1000000,
+        "source_url": "https://api-docs.deepseek.com/quick_start/pricing", "checked_at": "2026-07-23T00:00:00Z",
+        "tiers": [
+          { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 140000, "output_price_micros": 280000, "cache_read_price_micros": 2800 }
+        ]
+      }
+    },
+    {
+      "public_name": "deepseek-v4-pro",
+      "provider": "DeepSeek",
+      "protocol": "chat_completions",
+      "lifecycle": "stable",
+      "price": {
+        "currency": "USD", "usd_exchange_rate_micros": 1000000,
+        "source_url": "https://api-docs.deepseek.com/quick_start/pricing", "checked_at": "2026-07-23T00:00:00Z",
+        "tiers": [
+          { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 435000, "output_price_micros": 870000, "cache_read_price_micros": 3625 }
+        ]
+      }
+    },
+    {
+      "public_name": "qwen-max",
+      "provider": "Qwen",
+      "protocol": "chat_completions",
+      "lifecycle": "stable",
+      "price": {
+        "currency": "USD", "usd_exchange_rate_micros": 1000000,
+        "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing", "checked_at": "2026-07-23T00:00:00Z",
+        "tiers": [
+          { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 1600000, "output_price_micros": 6400000 }
+        ]
+      }
+    },
+    {
+      "public_name": "kimi-k2.5",
+      "provider": "Moonshot",
+      "protocol": "chat_completions",
+      "lifecycle": "stable",
+      "price": {
+        "currency": "CNY", "usd_exchange_rate_micros": 147650,
+        "source_url": "https://platform.kimi.com/docs/pricing/chat-k25", "checked_at": "2026-07-23T00:00:00Z",
+        "tiers": [
+          { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 4000000, "output_price_micros": 21000000, "cache_read_price_micros": 700000 }
+        ]
+      }
+    },
+    {
+      "public_name": "MiniMax-M2.7",
+      "provider": "Minimax",
+      "protocol": "chat_completions",
+      "lifecycle": "stable",
+      "price": {
+        "currency": "CNY", "usd_exchange_rate_micros": 147650,
+        "source_url": "https://platform.minimaxi.com/docs/guides/pricing-paygo", "checked_at": "2026-07-23T00:00:00Z",
+        "tiers": [
+          { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 2100000, "output_price_micros": 8400000, "cache_read_price_micros": 420000, "cache_write_5m_price_micros": 2625000 }
+        ]
+      }
+    },
+    {
+      "public_name": "MiniMax-M2.7-highspeed",
+      "provider": "Minimax",
+      "protocol": "chat_completions",
+      "lifecycle": "stable",
+      "price": {
+        "currency": "CNY", "usd_exchange_rate_micros": 147650,
+        "source_url": "https://platform.minimaxi.com/docs/guides/pricing-paygo", "checked_at": "2026-07-23T00:00:00Z",
+        "tiers": [
+          { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 4200000, "output_price_micros": 16800000, "cache_read_price_micros": 420000, "cache_write_5m_price_micros": 2625000 }
+        ]
+      }
+    }
+  ]
+}

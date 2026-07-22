@@ -12,7 +12,9 @@ fi
 APP_VERSION=$(basename "$ROOT_DIR")
 export APP_VERSION
 
-docker compose --env-file .env config --quiet
-docker compose --env-file .env build
+docker compose --env-file .env --profile tools config --quiet
+docker compose --env-file .env --profile tools build
+docker compose --env-file .env up -d postgres redis new-api
+docker compose --env-file .env run --rm model-seed
 docker compose --env-file .env up -d --remove-orphans
 docker compose --env-file .env ps

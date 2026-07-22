@@ -1160,3 +1160,52 @@
 - `apps/web/artifacts/withdrawal-modal-mobile.png`：更新统一商户工作区背景下的移动端提现弹窗截图。
 - `progress.md`：追加本阶段实现、验证、文件清单和回滚点。
 - 回滚点：基线提交 `83a0c01`；本阶段提交后可执行 `git revert <本阶段提交>` 生成代码回退改动。本阶段没有数据库迁移且尚未发布生产，不需要恢复数据库。
+
+## 2026-07-23 - Task: 添加固定 New API 支持交集的版本化官方模型种子
+
+### What was done
+
+- 新增版本化官方模型种子 `2026-07-23-v1`，绑定 New API `v1.0.0-rc.21` 与源码提交 `bde9b2f44887d34ec54799ae191d50f97914359e`；首批收录 7 家厂商的 21 个模型，其中 19 个稳定版启用、2 个 Preview 停用。
+- 实现种子结构、固定适配器支持交集、官方价格与阶梯校验；重复导入保持幂等，价格变化只追加新版本，模型身份冲突时终止。
+- 新增一次性模型种子命令，通过 New API 原生登录读取配置中的有效唯一管理员，并以实际管理员编号创建模型和发布价格版本。
+- 在 Docker 镜像中加入种子命令，并将 `model-seed` 作为 `tools` profile 的一次性服务；部署固定为先启动依赖、执行种子，再启动外围常驻服务。
+- 为官方模型种子目录增加精确 Git 忽略例外，确保版本化 JSON 进入发布提交，同时不放开其他运行时 `data/` 目录。
+
+### Testing
+
+- 部署脚本回归测试先在缺少 `--profile tools` 的旧命令上稳定失败；修复后验证构建包含一次性服务，而最终常驻启动不启用 `tools` profile。
+- 发布包回归测试先稳定捕获官方模型 JSON 被通用 `data/` 规则忽略；增加精确例外后转绿，Git 未跟踪清单已包含种子文件。
+- 执行 `go test -count=1 ./...`、`go vet ./...` 和 `go build ./cmd/...`，全部通过。
+- 使用本机 PostgreSQL 17 独立测试库执行完整种子集成测试：首次创建 21 个模型和 21 个价格版本，重复执行保持 21/21；单模型调价由 1 个价格版本追加为 2 个，测试结束后清理种子数据。
+- 对固定 New API 源码执行种子交集测试和 OpenAI、Anthropic、Gemini、DeepSeek、Qwen、Moonshot、Minimax 七个渠道包测试，固定提交与计划一致，全部通过。
+- 执行 18 个部署 Python 测试、默认及 `tools` profile Compose 配置校验、API/Worker/种子镜像构建和镜像内三个可执行文件检查，全部通过；默认服务列表不含 `model-seed`。
+- 执行 `gofmt` 差异检查、`git diff --check` 和变更敏感信息模式扫描，均未发现问题。
+- 本轮实时核价链接复查受外部访问策略影响：DeepSeek、Kimi、MiniMax、Qwen 和 Claude 页面可返回 200，OpenAI 页面向命令行客户端返回 403，Gemini 当前网络不可达；平台不在生产自动抓取官网，确定性验收以版本化种子、固定源码交集和整数价格测试为准。
+
+### Notes
+
+- `.gitignore`：仅放行版本化官方模型种子 JSON，保留其他运行时数据目录忽略规则。
+- `README.md`：增加官方模型种子模块入口。
+- `apps/api/Dockerfile`：构建并复制一次性模型种子命令。
+- `apps/api/cmd/seed-models/main.go`：实现配置加载、唯一管理员验证、迁移和种子执行入口。
+- `apps/api/cmd/seed-models/main_test.go`：覆盖种子依赖配置和唯一管理员校验。
+- `apps/api/internal/httpapi/absolute_pricing.go`：向受控种子模块开放标准模型复用校验入口。
+- `apps/api/internal/modelseed/apply.go`：实现模型创建、幂等跳过、调价追加和版本元数据写入。
+- `apps/api/internal/modelseed/apply_test.go`：覆盖首次导入、重复导入和调价追加。
+- `apps/api/internal/modelseed/catalog.go`：实现嵌入式种子解析、摘要、固定版本和字段校验。
+- `apps/api/internal/modelseed/catalog_test.go`：覆盖未知字段、支持清单、厂商协议、阶梯边界和人民币汇率。
+- `apps/api/internal/modelseed/repository.go`：复用平台模型与价格仓储并事务写入种子元数据。
+- `apps/api/internal/modelseed/repository_postgres_test.go`：覆盖真实 PostgreSQL 的完整种子幂等和价格版本追加。
+- `apps/api/internal/modelseed/support_rc21.go`：固化七家渠道在 New API rc.21 中支持的首批模型交集。
+- `apps/api/internal/modelseed/support_rc21_external_test.go`：逐模型核对固定 New API 渠道适配器源码。
+- `apps/api/internal/modelseed/data/2026-07-23-v1.json`：记录 21 个模型、官方价格、阶梯、生命周期、来源和核价时间。
+- `compose.yaml`：增加 `tools` profile 下的 `model-seed` 一次性服务。
+- `deploy/scripts/deploy.sh`：加入依赖启动、模型种子和常驻服务的固定发布顺序。
+- `deploy/tests/test_compose.py`：覆盖种子服务 profile、入口、依赖和非重启约束。
+- `deploy/tests/test_deploy.py`：覆盖部署版本注入、profile 构建和六步调用顺序。
+- `deploy/tests/test_release_tools.py`：锁定官方模型种子不得被 Git 忽略。
+- `docs/官方模型种子.md`：记录当前目录、核价来源、未纳入原因、导入规则、执行和回滚方式。
+- `docs/绝对价格与分层计费.md`：补充缓存写入口径和官方模型种子规则。
+- `docs/部署运行手册.md`：补充一次性种子执行、生产验收和发布前核对项。
+- `progress.md`：追加本阶段实现、验证、文件清单和回滚点。
+- 回滚点：上一阶段提交 `a97b38b`；本阶段提交后可执行 `git revert <本阶段提交>` 生成代码回退改动。生产尚未执行模型种子，本阶段回退不需要恢复数据库；未来生产已执行种子后若需恢复目录状态，必须恢复同一时间点的平台库与 New API 库备份。

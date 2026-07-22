@@ -22,6 +22,15 @@ def shell_path(path):
 
 
 class ReleaseToolContractTest(unittest.TestCase):
+    def test_official_model_seed_catalog_is_included_in_release(self):
+        catalog = ROOT / "apps" / "api" / "internal" / "modelseed" / "data" / "2026-07-23-v1.json"
+        self.assertTrue(catalog.is_file())
+        result = subprocess.run(
+            ["git", "check-ignore", "--quiet", str(catalog.relative_to(ROOT))],
+            cwd=ROOT,
+        )
+        self.assertEqual(result.returncode, 1, "官方模型种子不得被 .gitignore 排除")
+
     def test_operations_verifier_is_read_only_and_covers_phase_eight(self):
         verifier = read_script("verify-operations.sh")
         for path in (

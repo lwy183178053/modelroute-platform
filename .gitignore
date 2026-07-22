@@ -11,6 +11,8 @@
 /apps/api/*.exe
 
 data/
+!apps/api/internal/modelseed/data/
+!apps/api/internal/modelseed/data/*.json
 backups/
 certs/
 secrets/

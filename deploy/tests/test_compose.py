@@ -14,6 +14,8 @@ def compose_config():
             "compose",
             "--env-file",
             ".env.example",
+            "--profile",
+            "tools",
             "-f",
             "compose.yaml",
             "config",
@@ -77,6 +79,14 @@ class ComposeIsolationTest(unittest.TestCase):
             )
             self.assertEqual(environment["NEW_API_ADMIN_USERNAME"], "modelroute")
             self.assertEqual(environment["NEW_API_ADMIN_PASSWORD"], "CHANGE_TO_SERVER_ADMIN_PASSWORD")
+
+    def test_model_seed_is_an_explicit_one_shot_tool(self):
+        seed = self.config["services"]["model-seed"]
+        self.assertEqual(seed["entrypoint"], ["/usr/local/bin/modelroute-seed-models"])
+        self.assertEqual(seed["profiles"], ["tools"])
+        self.assertEqual(seed["restart"], "no")
+        self.assertEqual(seed["depends_on"]["postgres"]["condition"], "service_healthy")
+        self.assertEqual(seed["depends_on"]["new-api"]["condition"], "service_healthy")
 
     def test_base_verifier_requires_api_key_from_enabled_model_route(self):
         verifier = (ROOT / "deploy" / "scripts" / "verify.sh").read_text(encoding="utf-8")

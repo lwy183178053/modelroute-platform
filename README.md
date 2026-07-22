@@ -6,6 +6,7 @@ ModelRoute 是一个统一面向普通用户、商户和管理员的模型 API �
 
 - `apps/web`：已确认视觉方向的 React 前端。
 - `apps/api`：外围平台 Go 接口与模型路由网关。
+- `apps/api/internal/modelseed`：绑定固定 New API 支持交集的版本化官方模型种子。
 - `deploy`：Docker Compose、网关和部署脚本。
 - `docs`：中文设计、实施、部署和验证文档。
 

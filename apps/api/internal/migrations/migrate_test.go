@@ -10,7 +10,7 @@ func TestEmbeddedMigrationsAreOrdered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Files() 返回错误：%v", err)
 	}
-	if len(files) != 5 {
+	if len(files) != 6 {
 		t.Fatalf("迁移文件数量 = %d", len(files))
 	}
 	if files[0].Version != 1 || files[0].Name != "000001_foundation.sql" {
@@ -30,6 +30,9 @@ func TestEmbeddedMigrationsAreOrdered(t *testing.T) {
 	}
 	if files[4].Version != 5 || files[4].Name != "000005_settlement.sql" {
 		t.Fatalf("结算迁移不符合预期：%+v", files[4])
+	}
+	if files[5].Version != 6 || files[5].Name != "000006_platform_merchant.sql" {
+		t.Fatalf("平台商户迁移不符合预期：%+v", files[5])
 	}
 	for _, table := range []string{"merchant_applications", "merchant_profiles", "merchant_channel_reviews", "merchant_channels"} {
 		if !strings.Contains(files[1].SQL, "CREATE TABLE "+table) {
@@ -53,6 +56,11 @@ func TestEmbeddedMigrationsAreOrdered(t *testing.T) {
 	} {
 		if !strings.Contains(files[4].SQL, "CREATE TABLE "+table) {
 			t.Fatalf("结算迁移缺少表 %s", table)
+		}
+	}
+	for _, fragment := range []string{"is_platform_owned", "merchant_profile_id", "platform_owned"} {
+		if !strings.Contains(files[5].SQL, fragment) {
+			t.Fatalf("平台商户迁移缺少 %s", fragment)
 		}
 	}
 }

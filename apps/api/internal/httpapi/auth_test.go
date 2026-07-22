@@ -106,6 +106,39 @@ func TestLoginReturnsPlatformCookieAndHidesUpstreamCookie(t *testing.T) {
 	}
 }
 
+func TestOnlyConfiguredUsernameKeepsAdministratorRole(t *testing.T) {
+	services, store, _ := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.SetCookie(w, &http.Cookie{Name: "session", Value: "upstream-secret", HttpOnly: true})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"data": map[string]any{
+				"id": 9, "username": "second-admin@example.com", "display_name": "Second Admin",
+				"role": 100, "status": 1, "group": "default",
+			},
+		})
+	}))
+	services.AdminUsername = "3180615598@qq.com"
+	handler := NewServerWithServices("test", Dependencies{}, services)
+	request := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(`{"username":"second-admin@example.com","password":"secret123"}`))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("状态码=%d，响应=%s", response.Code, response.Body.String())
+	}
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("平台 Cookie 数量=%d", len(cookies))
+	}
+	session, err := store.Get(context.Background(), cookies[0].Value)
+	if err != nil {
+		t.Fatalf("读取平台会话失败：%v", err)
+	}
+	if session.Role != roleCommon || strings.Contains(response.Body.String(), `"role":100`) {
+		t.Fatalf("非唯一管理员仍保留管理员权限：session=%+v response=%s", session, response.Body.String())
+	}
+}
+
 func TestClientIPRejectsInvalidForwardedValue(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	request.Header.Set("X-Forwarded-For", "not-an-ip")

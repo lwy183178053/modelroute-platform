@@ -67,6 +67,7 @@ type Services struct {
 	Sessions       SessionManager
 	NewAPI         NewAPIClient
 	AdminNewAPI    AdminNewAPI
+	AdminUsername  string
 	Audit          AuditRecorder
 	Merchants      MerchantRepository
 	Credentials    CredentialProtector

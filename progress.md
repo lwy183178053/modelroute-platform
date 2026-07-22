@@ -959,3 +959,41 @@
 - `C:\Users\Administrator\.ssh\modelroute_103_ed25519.pub`：新增对应公钥并登记到服务器 root `authorized_keys`。
 - `C:\Users\Administrator\.ssh\modelroute_103_root_password.txt`：保存轮换后的 root 密码，仅当前 Windows 用户可访问，不进入 Git。
 - 回滚方式：保持专用密钥可用，通过该密钥再次执行受控密码轮换；只有另一条管理通道已验证时，才从服务器 `authorized_keys` 删除本轮公钥并删除上述本机文件。
+
+## 2026-07-22 - Task: 落实唯一管理员直属普通商户
+
+### What was done
+
+- 将 ModelRoute 管理员身份收口为 `NEW_API_ADMIN_USERNAME` 指定的唯一账号；其他 New API 管理角色进入平台后按普通用户处理，登录、二次验证、资料刷新和接口会话校验使用同一规则。
+- 平台启动时核对唯一管理员账号的编号、用户名、状态和角色，并幂等创建其直属“ModelRoute 官方”真实商户资料；核对或创建失败时停止启动。
+- 管理员与普通商户共用同一套商户身份、接口和操作，删除管理员缺少商户记录时的临时放行；管理员只额外拥有管理后台。
+- 新增第 6 号迁移，允许平台自营商户不依赖普通申请记录，全库只保留一个平台自营商户，并把渠道审核关联到真实商户编号。
+- `/api/me` 增加商户名称和平台自营标识，供后续同一商户工作区直接使用。
+
+### Testing
+
+- 新增测试先在旧实现上稳定失败，失败点为缺少第 6 号迁移、唯一管理员配置、平台商户创建方法和启动引导函数；实现后聚焦测试全部通过。
+- 使用本机 PostgreSQL 17 测试库真实执行 `000006_platform_merchant.sql`，`go test -count=1 ./internal/httpapi` 通过，现有商户、路由、支付、结算集成场景保持兼容。
+- 执行 `go test -count=1 ./...`、`go vet ./...` 和 `go build ./cmd/...`，全部通过。
+- 执行 `go test -race -count=1 ./internal/httpapi ./internal/bootstrap`，全部通过；`git diff --check` 将在提交前执行。
+
+### Notes
+
+- `apps/api/internal/bootstrap/resources.go`：注入唯一管理员用户名，并在服务启动时核验管理员和创建直属官方商户。
+- `apps/api/internal/bootstrap/resources_test.go`：覆盖唯一管理员直属商户启动引导。
+- `apps/api/internal/httpapi/auth_handlers.go`：统一归一化登录、二次验证、资料刷新和会话中的管理员角色。
+- `apps/api/internal/httpapi/auth_test.go`：锁定非配置管理员用户名不得保留平台管理员权限。
+- `apps/api/internal/httpapi/merchant_handlers.go`：删除管理员缺少真实商户资料时的特殊放行。
+- `apps/api/internal/httpapi/merchant_handlers_test.go`：覆盖管理员真实商户要求及 `/api/me` 商户字段。
+- `apps/api/internal/httpapi/merchant_store.go`：实现官方商户幂等创建、真实身份读取和渠道审核商户关联。
+- `apps/api/internal/httpapi/merchant_store_test.go`：覆盖官方商户创建和审批关联真实商户编号。
+- `apps/api/internal/httpapi/merchant_types.go`：扩展商户身份字段和仓储契约。
+- `apps/api/internal/httpapi/services.go`：增加唯一管理员用户名服务配置。
+- `apps/api/internal/migrations/migrate_test.go`：锁定第 6 号迁移顺序和关键约束。
+- `apps/api/internal/migrations/sql/000006_platform_merchant.sql`：增加平台自营商户和渠道审核归属结构。
+- `docs/账号与管理员接口.md`：记录唯一管理员角色边界和普通商户复用规则。
+- `docs/商户与渠道审核接口.md`：记录管理员真实商户身份、相同商户接口和审核归属。
+- `docs/部署运行手册.md`：更新唯一管理员配置和启动失败边界。
+- `docs/superpowers/plans/2026-07-22-ModelRoute完整实施计划.md`：把原计划修正为唯一管理员直属普通商户。
+- `progress.md`：追加本阶段实现、验证、文件清单和回滚点。
+- 回滚点：基线提交 `13a03b1`；本阶段提交后可执行 `git revert <本阶段提交>` 生成代码回退改动。第 6 号迁移包含数据库结构变更，生产尚未发布；未来发布后若需跨迁移回退，应使用同一发布前的平台库与 New API 库备份恢复。

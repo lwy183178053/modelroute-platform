@@ -524,9 +524,6 @@ func (s *server) requireMerchant(w http.ResponseWriter, r *http.Request) (string
 		return "", platformauth.Session{}, MerchantIdentity{}, false
 	}
 	identity, err := s.services.Merchants.Identity(r.Context(), session.UserID)
-	if session.Role >= roleAdmin && errors.Is(err, ErrMerchantNotFound) {
-		return token, session, MerchantIdentity{UserID: session.UserID, Status: "active", IsMerchant: true}, true
-	}
 	if err != nil || !identity.IsMerchant || identity.Status != "active" {
 		writeAPIError(w, http.StatusForbidden, "merchant_required", "当前账号没有有效商户权限")
 		return "", platformauth.Session{}, MerchantIdentity{}, false

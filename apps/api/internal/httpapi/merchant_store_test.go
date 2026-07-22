@@ -43,6 +43,31 @@ func TestSQLMerchantStoreCreatesApplicationAndInitialReviewAtomically(t *testing
 	}
 }
 
+func TestSQLMerchantStoreEnsuresPlatformMerchantForAdministrator(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewSQLMerchantStore(database)
+	createdAt := time.Date(2026, 7, 22, 14, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO merchant_profiles")).
+		WithArgs(1, "ModelRoute 官方", "https://aggregate.lwylink.xyz").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "newapi_user_id", "display_name", "status", "is_platform_owned", "created_at"}).
+			AddRow(31, 1, "ModelRoute 官方", "active", true, createdAt))
+
+	identity, err := store.EnsurePlatformMerchant(context.Background(), 1, "https://aggregate.lwylink.xyz")
+	if err != nil {
+		t.Fatalf("创建平台商户失败：%v", err)
+	}
+	if identity.MerchantID != 31 || identity.UserID != 1 || identity.DisplayName != "ModelRoute 官方" || !identity.IsMerchant || !identity.IsPlatformOwned {
+		t.Fatalf("平台商户身份=%+v", identity)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSQLMerchantStoreClaimsReviewWithAtomicStateTransition(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -83,7 +108,7 @@ func TestSQLMerchantStoreFinalApprovalClearsCredentialAndCreatesOwnership(t *tes
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(31))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO merchant_channels")).WithArgs(int64(31), int64(21), 41, "主线路", 1, "https://api.merchant.example", []byte(`["gpt-4o-mini"]`), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(51))
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE merchant_channel_reviews")).WithArgs(1, int64(21)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE merchant_channel_reviews")).WithArgs(1, int64(21), int64(31)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE merchant_applications")).WithArgs(1, int64(11)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	approval, err := store.FinishApproval(context.Background(), 21, 1, 41)

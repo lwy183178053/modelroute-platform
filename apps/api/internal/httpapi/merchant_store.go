@@ -23,10 +23,44 @@ func NewSQLMerchantStore(database *sql.DB) *SQLMerchantStore {
 func (s *SQLMerchantStore) Identity(ctx context.Context, userID int) (MerchantIdentity, error) {
 	var identity MerchantIdentity
 	err := s.database.QueryRowContext(ctx, `
-SELECT id, newapi_user_id, status
+SELECT id, newapi_user_id, display_name, status, is_platform_owned
 FROM merchant_profiles
 WHERE newapi_user_id = $1
-`, userID).Scan(&identity.MerchantID, &identity.UserID, &identity.Status)
+`, userID).Scan(&identity.MerchantID, &identity.UserID, &identity.DisplayName, &identity.Status, &identity.IsPlatformOwned)
+	if err != nil {
+		return MerchantIdentity{}, merchantStoreError(err)
+	}
+	identity.IsMerchant = true
+	return identity, nil
+}
+
+func (s *SQLMerchantStore) EnsurePlatformMerchant(ctx context.Context, userID int, publicOrigin string) (MerchantIdentity, error) {
+	var identity MerchantIdentity
+	var createdAt time.Time
+	err := s.database.QueryRowContext(ctx, `
+INSERT INTO merchant_profiles
+    (newapi_user_id, approved_application_id, display_name, website_url, status,
+     approved_by_newapi_user_id, is_platform_owned)
+VALUES ($1, NULL, $2, $3, 'active', $1, true)
+ON CONFLICT (newapi_user_id) DO UPDATE
+SET approved_application_id = NULL,
+    display_name = EXCLUDED.display_name,
+    website_url = EXCLUDED.website_url,
+    status = 'active',
+    status_reason = NULL,
+    approved_by_newapi_user_id = EXCLUDED.approved_by_newapi_user_id,
+    approved_at = now(),
+    is_platform_owned = true,
+    updated_at = now()
+RETURNING id, newapi_user_id, display_name, status, is_platform_owned, created_at
+`, userID, "ModelRoute 官方", publicOrigin).Scan(
+		&identity.MerchantID,
+		&identity.UserID,
+		&identity.DisplayName,
+		&identity.Status,
+		&identity.IsPlatformOwned,
+		&createdAt,
+	)
 	if err != nil {
 		return MerchantIdentity{}, merchantStoreError(err)
 	}
@@ -111,9 +145,9 @@ func (s *SQLMerchantStore) CreateChannelReview(ctx context.Context, command Crea
 	}
 	err = s.database.QueryRowContext(ctx, `
 INSERT INTO merchant_channel_reviews
-    (merchant_newapi_user_id, channel_name, channel_type, base_url,
+    (merchant_profile_id, merchant_newapi_user_id, channel_name, channel_type, base_url,
      requested_models, encrypted_credential, credential_fingerprint)
-SELECT $1, $2, $3, $4, $5::jsonb, $6, $7
+SELECT id, $1, $2, $3, $4, $5::jsonb, $6, $7
 FROM merchant_profiles
 WHERE newapi_user_id = $1 AND status = 'active'
 RETURNING id, created_at
@@ -421,9 +455,9 @@ RETURNING id
 	result, err := tx.ExecContext(ctx, `
 UPDATE merchant_channel_reviews
 SET status = 'approved', encrypted_credential = NULL, verification_error = NULL,
-    reviewed_by_newapi_user_id = $1, reviewed_at = now(), updated_at = now()
+    reviewed_by_newapi_user_id = $1, reviewed_at = now(), merchant_profile_id = $3, updated_at = now()
 WHERE id = $2 AND status = 'approving'
-`, adminID, review.ID)
+`, adminID, review.ID, merchantID)
 	if err != nil {
 		return MerchantApproval{}, fmt.Errorf("完成渠道审批：%w", err)
 	}

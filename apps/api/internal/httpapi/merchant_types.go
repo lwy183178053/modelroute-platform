@@ -19,10 +19,12 @@ type CredentialProtector interface {
 }
 
 type MerchantIdentity struct {
-	MerchantID int64  `json:"merchant_id"`
-	UserID     int    `json:"user_id"`
-	Status     string `json:"merchant_status"`
-	IsMerchant bool   `json:"is_merchant"`
+	MerchantID      int64  `json:"merchant_id"`
+	UserID          int    `json:"user_id"`
+	DisplayName     string `json:"merchant_name"`
+	Status          string `json:"merchant_status"`
+	IsMerchant      bool   `json:"is_merchant"`
+	IsPlatformOwned bool   `json:"is_platform_merchant"`
 }
 
 type MerchantChannelReview struct {
@@ -121,6 +123,7 @@ type MerchantStatusChange struct {
 
 type MerchantRepository interface {
 	Identity(context.Context, int) (MerchantIdentity, error)
+	EnsurePlatformMerchant(context.Context, int, string) (MerchantIdentity, error)
 	CreateApplication(context.Context, CreateMerchantApplication) (MerchantApplication, error)
 	ApplicationForUser(context.Context, int) (MerchantApplication, error)
 	CreateChannelReview(context.Context, CreateMerchantChannel) (MerchantChannelReview, error)

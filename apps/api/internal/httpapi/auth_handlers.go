@@ -36,6 +36,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, err, http.StatusUnauthorized)
 		return
 	}
+	result.User.Role = platformRole(result.User.Username, result.User.Role, s.services.AdminUsername)
 	session := platformauth.Session{
 		UserID:           result.User.ID,
 		Username:         result.User.Username,
@@ -84,6 +85,7 @@ func (s *server) loginTwoFactor(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, err, http.StatusUnauthorized)
 		return
 	}
+	result.User.Role = platformRole(result.User.Username, result.User.Role, s.services.AdminUsername)
 	updated := platformauth.Session{
 		UserID:         result.User.ID,
 		Username:       result.User.Username,
@@ -203,6 +205,7 @@ func (s *server) me(w http.ResponseWriter, r *http.Request) {
 	}
 	session.Username = user.Username
 	session.DisplayName = user.DisplayName
+	user.Role = platformRole(user.Username, user.Role, s.services.AdminUsername)
 	session.Role = user.Role
 	session.Status = user.Status
 	session.Group = user.Group
@@ -215,14 +218,18 @@ func (s *server) me(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadGateway, "upstream_response_invalid", "账号资料响应格式无效")
 		return
 	}
+	response["role"] = user.Role
 	response["is_merchant"] = false
+	response["is_platform_merchant"] = false
 	if s.services.Merchants != nil {
 		identity, err := s.services.Merchants.Identity(r.Context(), session.UserID)
 		switch {
 		case err == nil:
 			response["is_merchant"] = identity.IsMerchant && identity.Status == "active"
 			response["merchant_id"] = identity.MerchantID
+			response["merchant_name"] = identity.DisplayName
 			response["merchant_status"] = identity.Status
+			response["is_platform_merchant"] = identity.IsPlatformOwned
 		case errors.Is(err, ErrMerchantNotFound):
 			response["merchant_status"] = "none"
 		default:
@@ -356,11 +363,23 @@ func (s *server) requireSession(w http.ResponseWriter, r *http.Request, minimumR
 		writeAPIError(w, http.StatusUnauthorized, "authentication_required", "登录状态无效")
 		return "", platformauth.Session{}, false
 	}
+	session.Role = platformRole(session.Username, session.Role, s.services.AdminUsername)
 	if session.Role < minimumRole {
 		writeAPIError(w, http.StatusForbidden, "forbidden", "账号权限不足")
 		return "", platformauth.Session{}, false
 	}
 	return cookie.Value, session, true
+}
+
+func platformRole(username string, upstreamRole int, administratorUsername string) int {
+	administratorUsername = strings.TrimSpace(administratorUsername)
+	if upstreamRole < roleAdmin || administratorUsername == "" {
+		return upstreamRole
+	}
+	if strings.EqualFold(strings.TrimSpace(username), administratorUsername) {
+		return upstreamRole
+	}
+	return roleCommon
 }
 
 func (s *server) requirePendingSession(w http.ResponseWriter, r *http.Request) (string, platformauth.Session, bool) {

@@ -3,7 +3,10 @@ package bootstrap
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"strings"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/lwy183178053/modelroute-platform/apps/api/internal/config"
@@ -57,6 +60,11 @@ func Open(ctx context.Context, cfg config.Config) (*Resources, error) {
 		database.Close()
 		return nil, err
 	}
+	if err := ensureAdministratorMerchant(ctx, services.AdminNewAPI, services.Merchants, cfg.NewAPIAdminUsername, cfg.PublicOrigin); err != nil {
+		redisClient.Close()
+		database.Close()
+		return nil, err
+	}
 	return &Resources{
 		Database: database,
 		Redis:    redisClient,
@@ -82,18 +90,19 @@ func buildHTTPServices(database *sql.DB, redisClient *redis.Client, cfg config.C
 	payments := httpapi.NewSQLPaymentStore(database)
 	settlement := httpapi.NewSQLSettlementStore(database)
 	services := httpapi.Services{
-		Sessions:     platformauth.NewStore(redisClient, cfg.SessionTTL),
-		NewAPI:       newAPIClient,
-		AdminNewAPI:  adminNewAPI,
-		Audit:        httpapi.NewSQLAuditStore(database),
-		Merchants:    httpapi.NewSQLMerchantStore(database),
-		Credentials:  credentials,
-		Routing:      routing,
-		OfferSync:    httpapi.NewPriceSynchronizer(routing, adminNewAPI),
-		Payments:     payments,
-		Settlement:   settlement,
-		UsageAliases: routing,
-		Overview:     httpapi.NewSQLAdminOverviewStore(database),
+		Sessions:      platformauth.NewStore(redisClient, cfg.SessionTTL),
+		NewAPI:        newAPIClient,
+		AdminNewAPI:   adminNewAPI,
+		AdminUsername: cfg.NewAPIAdminUsername,
+		Audit:         httpapi.NewSQLAuditStore(database),
+		Merchants:     httpapi.NewSQLMerchantStore(database),
+		Credentials:   credentials,
+		Routing:       routing,
+		OfferSync:     httpapi.NewPriceSynchronizer(routing, adminNewAPI),
+		Payments:      payments,
+		Settlement:    settlement,
+		UsageAliases:  routing,
+		Overview:      httpapi.NewSQLAdminOverviewStore(database),
 		Cookie: httpapi.CookieConfig{
 			Name:         cfg.SessionCookieName,
 			Secure:       cfg.SessionCookieSecure,
@@ -105,6 +114,28 @@ func buildHTTPServices(database *sql.DB, redisClient *redis.Client, cfg config.C
 	services.PaymentCredit = httpapi.NewPaymentCreditRunner(payments, adminNewAPI)
 	services.SettlementSync = httpapi.NewSettlementSyncRunner(settlement, adminNewAPI)
 	return services, nil
+}
+
+type administratorMerchantStore interface {
+	EnsurePlatformMerchant(context.Context, int, string) (httpapi.MerchantIdentity, error)
+}
+
+func ensureAdministratorMerchant(ctx context.Context, admin httpapi.AdminNewAPI, merchants administratorMerchantStore, administratorUsername string, publicOrigin string) error {
+	data, err := admin.Do(ctx, http.MethodGet, "/api/user/self", nil)
+	if err != nil {
+		return fmt.Errorf("读取唯一管理员账号：%w", err)
+	}
+	var user newapi.User
+	if err := json.Unmarshal(data, &user); err != nil {
+		return fmt.Errorf("解析唯一管理员账号：%w", err)
+	}
+	if user.ID <= 0 || user.Status != 1 || user.Role < 10 || !strings.EqualFold(strings.TrimSpace(user.Username), strings.TrimSpace(administratorUsername)) {
+		return fmt.Errorf("New API 服务账号不是配置的有效唯一管理员")
+	}
+	if _, err := merchants.EnsurePlatformMerchant(ctx, user.ID, publicOrigin); err != nil {
+		return fmt.Errorf("创建管理员直属商户：%w", err)
+	}
+	return nil
 }
 
 func (r *Resources) Close() {

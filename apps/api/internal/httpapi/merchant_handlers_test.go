@@ -17,6 +17,7 @@ import (
 type merchantRepositoryStub struct {
 	MerchantRepository
 	identity          func(context.Context, int) (MerchantIdentity, error)
+	channels          func(context.Context, int) ([]MerchantChannel, error)
 	createApplication func(context.Context, CreateMerchantApplication) (MerchantApplication, error)
 	claimReview       func(context.Context, int64, string) (MerchantChannelReview, error)
 	finishVerify      func(context.Context, int64, int, []string, string) error
@@ -33,6 +34,13 @@ func (s *merchantRepositoryStub) Identity(ctx context.Context, userID int) (Merc
 
 func (s *merchantRepositoryStub) CreateApplication(ctx context.Context, command CreateMerchantApplication) (MerchantApplication, error) {
 	return s.createApplication(ctx, command)
+}
+
+func (s *merchantRepositoryStub) ChannelsForUser(ctx context.Context, userID int) ([]MerchantChannel, error) {
+	if s.channels == nil {
+		return nil, nil
+	}
+	return s.channels(ctx, userID)
 }
 
 func (s *merchantRepositoryStub) ClaimReview(ctx context.Context, reviewID int64, targetStatus string) (MerchantChannelReview, error) {
@@ -243,6 +251,32 @@ func TestMerchantAndAdminEndpointsEnforceServerSideIdentity(t *testing.T) {
 	}
 }
 
+func TestAdministratorMerchantEndpointRequiresPersistedMerchantIdentity(t *testing.T) {
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Fatal("缺少商户身份时不应调用 New API")
+	}))
+	services.Merchants = &merchantRepositoryStub{
+		identity: func(context.Context, int) (MerchantIdentity, error) {
+			return MerchantIdentity{}, ErrMerchantNotFound
+		},
+		channels: func(context.Context, int) ([]MerchantChannel, error) {
+			t.Fatal("缺少商户身份时不应读取商户渠道")
+			return nil, nil
+		},
+	}
+	services.Credentials = testCredentialBox(t)
+	token := createPlatformSession(t, services, 1, 100)
+	handler := NewServerWithServices("test", Dependencies{}, services)
+	request := httptest.NewRequest(http.MethodGet, "/api/merchant/channels", nil)
+	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("状态码=%d，响应=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestMerchantConflictErrorIsStable(t *testing.T) {
 	if !errors.Is(ErrMerchantConflict, ErrMerchantConflict) {
 		t.Fatal("商户冲突错误必须可比较")
@@ -259,7 +293,7 @@ func TestMeIncludesPlatformMerchantIdentity(t *testing.T) {
 		}})
 	}))
 	services.Merchants = &merchantRepositoryStub{identity: func(_ context.Context, userID int) (MerchantIdentity, error) {
-		return MerchantIdentity{MerchantID: 31, UserID: userID, Status: "active", IsMerchant: true}, nil
+		return MerchantIdentity{MerchantID: 31, UserID: userID, DisplayName: "ModelRoute 官方", Status: "active", IsMerchant: true, IsPlatformOwned: true}, nil
 	}}
 	token, err := store.Create(context.Background(), platformauth.Session{UserID: 7, Username: "alice", Role: 1, Status: 1, UpstreamCookie: "session=user"})
 	if err != nil {
@@ -270,7 +304,10 @@ func TestMeIncludesPlatformMerchantIdentity(t *testing.T) {
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"is_merchant":true`) || !strings.Contains(response.Body.String(), `"merchant_id":31`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"is_merchant":true`) ||
+		!strings.Contains(response.Body.String(), `"merchant_id":31`) ||
+		!strings.Contains(response.Body.String(), `"merchant_name":"ModelRoute 官方"`) ||
+		!strings.Contains(response.Body.String(), `"is_platform_merchant":true`) {
 		t.Fatalf("me 响应=%d %s", response.Code, response.Body.String())
 	}
 }

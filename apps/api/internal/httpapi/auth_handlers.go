@@ -210,7 +210,27 @@ func (s *server) me(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "session_error", "刷新登录状态失败")
 		return
 	}
-	writeRawData(w, data)
+	var response map[string]any
+	if err := json.Unmarshal(data, &response); err != nil {
+		writeAPIError(w, http.StatusBadGateway, "upstream_response_invalid", "账号资料响应格式无效")
+		return
+	}
+	response["is_merchant"] = false
+	if s.services.Merchants != nil {
+		identity, err := s.services.Merchants.Identity(r.Context(), session.UserID)
+		switch {
+		case err == nil:
+			response["is_merchant"] = identity.IsMerchant && identity.Status == "active"
+			response["merchant_id"] = identity.MerchantID
+			response["merchant_status"] = identity.Status
+		case errors.Is(err, ErrMerchantNotFound):
+			response["merchant_status"] = "none"
+		default:
+			writeAPIError(w, http.StatusInternalServerError, "merchant_store_error", "读取商户身份失败")
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": response})
 }
 
 func (s *server) logout(w http.ResponseWriter, r *http.Request) {

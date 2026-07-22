@@ -12,6 +12,7 @@ import (
 	"github.com/lwy183178053/modelroute-platform/apps/api/internal/migrations"
 	"github.com/lwy183178053/modelroute-platform/apps/api/internal/newapi"
 	"github.com/lwy183178053/modelroute-platform/apps/api/internal/platformauth"
+	"github.com/lwy183178053/modelroute-platform/apps/api/internal/secretbox"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -50,6 +51,12 @@ func Open(ctx context.Context, cfg config.Config) (*Resources, error) {
 		return nil, fmt.Errorf("连接 Redis：%w", err)
 	}
 
+	services, err := buildHTTPServices(database, redisClient, cfg)
+	if err != nil {
+		redisClient.Close()
+		database.Close()
+		return nil, err
+	}
 	return &Resources{
 		Database: database,
 		Redis:    redisClient,
@@ -60,22 +67,28 @@ func Open(ctx context.Context, cfg config.Config) (*Resources, error) {
 			}),
 			NewAPI: dependencies.NewHTTPPinger(cfg.NewAPIBaseURL+"/api/status", cfg.DependencyTimeout),
 		},
-		Services: buildHTTPServices(database, redisClient, cfg),
+		Services: services,
 	}, nil
 }
 
-func buildHTTPServices(database *sql.DB, redisClient *redis.Client, cfg config.Config) httpapi.Services {
+func buildHTTPServices(database *sql.DB, redisClient *redis.Client, cfg config.Config) (httpapi.Services, error) {
+	credentials, err := secretbox.New(cfg.EncryptionKey)
+	if err != nil {
+		return httpapi.Services{}, fmt.Errorf("初始化商户凭据加密：%w", err)
+	}
 	return httpapi.Services{
-		Sessions: platformauth.NewStore(redisClient, cfg.SessionTTL),
-		NewAPI:   newapi.NewClient(cfg.NewAPIBaseURL, cfg.NewAPIRequestTimeout),
-		Audit:    httpapi.NewSQLAuditStore(database),
+		Sessions:    platformauth.NewStore(redisClient, cfg.SessionTTL),
+		NewAPI:      newapi.NewClient(cfg.NewAPIBaseURL, cfg.NewAPIRequestTimeout),
+		Audit:       httpapi.NewSQLAuditStore(database),
+		Merchants:   httpapi.NewSQLMerchantStore(database),
+		Credentials: credentials,
 		Cookie: httpapi.CookieConfig{
 			Name:         cfg.SessionCookieName,
 			Secure:       cfg.SessionCookieSecure,
 			PublicOrigin: cfg.PublicOrigin,
 			MaxAge:       cfg.SessionTTL,
 		},
-	}
+	}, nil
 }
 
 func (r *Resources) Close() {

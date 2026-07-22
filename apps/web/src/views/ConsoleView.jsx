@@ -26,6 +26,7 @@ export default function ConsoleView({ account, openModal, notify, navigate }) {
   const [revealed, setRevealed] = useState({});
   const [keyLoading, setKeyLoading] = useState(true);
   const [keyError, setKeyError] = useState('');
+  const [merchantApplication, setMerchantApplication] = useState(undefined);
   const displayName = account.display_name || account.username;
 
   const loadKeys = useCallback(async () => {
@@ -42,6 +43,16 @@ export default function ConsoleView({ account, openModal, notify, navigate }) {
   }, []);
 
   useEffect(() => { loadKeys(); }, [loadKeys]);
+
+  const loadMerchantApplication = useCallback(async () => {
+    try {
+      setMerchantApplication(await apiRequest('/api/merchant/application'));
+    } catch {
+      setMerchantApplication(null);
+    }
+  }, []);
+
+  useEffect(() => { loadMerchantApplication(); }, [loadMerchantApplication]);
 
   const fetchFullKey = async (key) => {
     if (revealed[key.id]) return revealed[key.id];
@@ -130,9 +141,12 @@ export default function ConsoleView({ account, openModal, notify, navigate }) {
           <div className="account-rows">
             <div><span>账号</span><strong>{account.username}</strong></div>
             <div><span>分组</span><strong>{account.group || 'default'}</strong></div>
-            <div><span>账号角色</span><strong>{Number(account.role) >= 10 ? '管理员' : '普通用户'}</strong></div>
+            <div><span>账号角色</span><strong>{Number(account.role) >= 10 ? '管理员' : account.is_merchant ? '商户' : '普通用户'}</strong></div>
           </div>
-          {Number(account.role) >= 10 ? <Button className="full-button" icon={ArrowUpRight} onClick={() => navigate('merchant')}>进入商户中心</Button> : <Button className="full-button" icon={ArrowUpRight} onClick={() => openModal('merchantApply')}>申请成为商户</Button>}
+          {(account.is_merchant || Number(account.role) >= 10) && <Button className="full-button" icon={ArrowUpRight} onClick={() => navigate('merchant')}>进入商户中心</Button>}
+          {!account.is_merchant && Number(account.role) < 10 && merchantApplication && ['pending', 'verifying', 'verified', 'approving'].includes(merchantApplication.status) && <InlineNotice tone="warning">等待管理员审核 · 申请编号 {merchantApplication.id}</InlineNotice>}
+          {!account.is_merchant && Number(account.role) < 10 && (!merchantApplication || merchantApplication.status === 'rejected') && <Button className="full-button" icon={ArrowUpRight} onClick={() => openModal({ type: 'merchantApply', onSaved: loadMerchantApplication })}>{merchantApplication?.status === 'rejected' ? '重新提交商户申请' : '申请成为商户'}</Button>}
+          {merchantApplication?.status === 'rejected' && <InlineNotice tone="warning">上次申请已驳回：{merchantApplication.review_reason || '请核对资料后重新提交'}</InlineNotice>}
         </Section>
       </div>
 

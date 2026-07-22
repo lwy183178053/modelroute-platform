@@ -68,6 +68,14 @@ class ComposeIsolationTest(unittest.TestCase):
         healthcheck = self.config["services"]["gateway"]["healthcheck"]["test"]
         self.assertIn("http://127.0.0.1:8080/healthz", healthcheck[1])
 
+    def test_platform_services_receive_credential_encryption_key(self):
+        for service_name in ("platform-api", "platform-worker"):
+            environment = self.config["services"][service_name]["environment"]
+            self.assertEqual(
+                environment["PLATFORM_ENCRYPTION_KEY"],
+                "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

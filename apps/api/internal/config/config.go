@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/url"
 	"os"
@@ -20,6 +21,7 @@ type Config struct {
 	SessionCookieName    string
 	SessionCookieSecure  bool
 	SessionTTL           time.Duration
+	EncryptionKey        []byte
 }
 
 func Load() (Config, error) {
@@ -89,6 +91,11 @@ func Load() (Config, error) {
 	if strings.ContainsAny(cfg.SessionCookieName, " ;,=\t\r\n") {
 		return Config{}, fmt.Errorf("SESSION_COOKIE_NAME 格式无效")
 	}
+	encryptionKey, err := base64.StdEncoding.DecodeString(strings.TrimSpace(os.Getenv("PLATFORM_ENCRYPTION_KEY")))
+	if err != nil || len(encryptionKey) != 32 {
+		return Config{}, fmt.Errorf("PLATFORM_ENCRYPTION_KEY 必须是 Base64 编码的 32 字节密钥")
+	}
+	cfg.EncryptionKey = encryptionKey
 
 	return cfg, nil
 }

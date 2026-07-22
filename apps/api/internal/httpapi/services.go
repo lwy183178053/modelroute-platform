@@ -54,8 +54,10 @@ type CookieConfig struct {
 }
 
 type Services struct {
-	Sessions SessionManager
-	NewAPI   NewAPIClient
-	Audit    AuditRecorder
-	Cookie   CookieConfig
+	Sessions    SessionManager
+	NewAPI      NewAPIClient
+	Audit       AuditRecorder
+	Merchants   MerchantRepository
+	Credentials CredentialProtector
+	Cookie      CookieConfig
 }

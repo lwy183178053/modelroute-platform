@@ -83,20 +83,86 @@ function RechargeModal({ close, notify }) {
   );
 }
 
-function MerchantApplyModal({ close, notify }) {
+function MerchantApplyModal({ close, config, notify }) {
+  const [displayName, setDisplayName] = useState('');
+  const [websiteURL, setWebsiteURL] = useState('');
+  const [channelName, setChannelName] = useState('主线路');
+  const [channelType, setChannelType] = useState('1');
+  const [baseURL, setBaseURL] = useState('');
+  const [apiKey, setAPIKey] = useState('');
+  const [models, setModels] = useState('gpt-4o-mini');
+  const [description, setDescription] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const application = await apiRequest('/api/merchant/application', {
+        method: 'POST',
+        body: {
+          display_name: displayName.trim(), website_url: websiteURL.trim(), business_description: description.trim(),
+          channel_name: channelName.trim(), channel_type: Number(channelType), base_url: baseURL.trim(), api_key: apiKey,
+          models: models.split(/[\n,]/).map((value) => value.trim()).filter(Boolean),
+        },
+      });
+      await config.onSaved?.(application);
+      notify('商户申请已提交');
+      close();
+    } catch (requestError) {
+      setError(requestError.message || '提交商户申请失败');
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <Modal title="申请成为商户" description="普通用户提交网站与渠道凭据，管理员验证通过后在同一账号开通商户中心。" onClose={close} footer={<Footer cancel={close} submitText="提交申请" submit={() => { close(); notify('商户申请已提交'); }} icon={Send} />} wide>
-      <div className="form-grid two-column"><Field label="商户名称"><TextInput placeholder="用于市场展示" /></Field><Field label="网站地址"><TextInput placeholder="https://example.com" /></Field><Field label="上游基础地址"><TextInput placeholder="https://api.example.com/v1" /></Field><Field label="上游 API 密钥" hint="提交后加密保存且不再回显"><TextInput placeholder="输入渠道密钥" type="password" /></Field></div>
-      <Field label="业务说明"><textarea className="textarea" placeholder="说明渠道来源、可售模型和服务能力" rows="4" /></Field>
+    <Modal title="申请成为商户" description="普通用户提交网站与渠道凭据，管理员验证通过后在同一账号开通商户中心。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy} icon={Send} onClick={submit} variant="primary">{busy ? '提交中' : '提交申请'}</Button></>} wide>
+      {error && <InlineNotice tone="danger">{error}</InlineNotice>}
+      <div className="form-grid two-column">
+        <Field label="商户名称"><TextInput maxLength="80" onChange={(event) => setDisplayName(event.target.value)} placeholder="用于市场展示" value={displayName} /></Field>
+        <Field label="网站地址"><TextInput onChange={(event) => setWebsiteURL(event.target.value)} placeholder="https://example.com" value={websiteURL} /></Field>
+        <Field label="渠道名称"><TextInput maxLength="100" onChange={(event) => setChannelName(event.target.value)} value={channelName} /></Field>
+        <Field label="渠道类型"><Select onChange={(event) => setChannelType(event.target.value)} value={channelType}><option value="1">OpenAI 兼容</option><option value="14">Anthropic</option><option value="20">OpenRouter</option><option value="24">Gemini</option><option value="43">DeepSeek</option></Select></Field>
+        <Field label="上游基础地址"><TextInput onChange={(event) => setBaseURL(event.target.value)} placeholder="https://api.example.com/v1" value={baseURL} /></Field>
+        <Field label="上游 API 密钥" hint="提交后加密保存且不再回显"><TextInput onChange={(event) => setAPIKey(event.target.value)} placeholder="输入渠道密钥" type="password" value={apiKey} /></Field>
+      </div>
+      <Field label="拟售模型" hint="多个模型使用逗号或换行分隔"><textarea className="textarea" onChange={(event) => setModels(event.target.value)} rows="3" value={models} /></Field>
+      <Field label="业务说明"><textarea className="textarea" onChange={(event) => setDescription(event.target.value)} placeholder="说明渠道来源、可售模型和服务能力" rows="4" value={description} /></Field>
     </Modal>
   );
 }
 
-function SimpleMerchantModal({ type, close, notify }) {
+function SimpleMerchantModal({ type, close, config, notify }) {
   const withdrawal = type === 'withdraw';
+  const [channelName, setChannelName] = useState('');
+  const [channelType, setChannelType] = useState('1');
+  const [baseURL, setBaseURL] = useState('');
+  const [apiKey, setAPIKey] = useState('');
+  const [models, setModels] = useState('gpt-4o-mini');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const submitChannel = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await apiRequest('/api/merchant/channels', { method: 'POST', body: {
+        channel_name: channelName.trim(), channel_type: Number(channelType), base_url: baseURL.trim(), api_key: apiKey,
+        models: models.split(/[\n,]/).map((value) => value.trim()).filter(Boolean),
+      } });
+      await config.onSaved?.();
+      notify('渠道已提交审核');
+      close();
+    } catch (requestError) {
+      setError(requestError.message || '提交渠道失败');
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <Modal title={withdrawal ? '申请人工提现' : '提交新渠道'} description={withdrawal ? '申请后冻结对应余额，由管理员审核并线下打款。' : '新渠道验证通过后才会导入 New API。'} onClose={close} footer={<Footer cancel={close} submitText={withdrawal ? '提交提现申请' : '提交渠道审核'} submit={() => { close(); notify(withdrawal ? '提现申请已提交审核' : '渠道已提交审核'); }} icon={withdrawal ? Landmark : Plus} />}>
-      {withdrawal ? <><Field label="提现金额"><div className="prefix-input"><span>¥</span><TextInput defaultValue="5000.00" type="number" /></div></Field><Field label="收款账户"><Select><option>支付宝 · 138****2621</option><option>银行卡 · 6217 **** 1098</option></Select></Field><InlineNotice tone="warning">可提现余额 ¥18,642.30，本次金额将在申请后冻结。</InlineNotice></> : <><Field label="渠道名称"><TextInput placeholder="例如 OpenAI 企业线路" /></Field><Field label="上游基础地址"><TextInput placeholder="https://api.example.com/v1" /></Field><Field label="上游 API 密钥"><TextInput placeholder="保存后不再回显" type="password" /></Field></>}
+    <Modal title={withdrawal ? '申请人工提现' : '提交新渠道'} description={withdrawal ? '申请后冻结对应余额，由管理员审核并线下打款。' : '新渠道验证通过后才会导入 New API。'} onClose={close} footer={withdrawal ? <Footer cancel={close} submitText="提交提现申请" submit={() => { close(); notify('提现申请已提交审核'); }} icon={Landmark} /> : <><Button onClick={close}>取消</Button><Button disabled={busy} icon={Plus} onClick={submitChannel} variant="primary">{busy ? '提交中' : '提交渠道审核'}</Button></>}>
+      {error && <InlineNotice tone="danger">{error}</InlineNotice>}
+      {withdrawal ? <><Field label="提现金额"><div className="prefix-input"><span>¥</span><TextInput defaultValue="5000.00" type="number" /></div></Field><Field label="收款账户"><Select><option>支付宝 · 138****2621</option><option>银行卡 · 6217 **** 1098</option></Select></Field><InlineNotice tone="warning">可提现余额 ¥18,642.30，本次金额将在申请后冻结。</InlineNotice></> : <><Field label="渠道名称"><TextInput onChange={(event) => setChannelName(event.target.value)} placeholder="例如 OpenAI 企业线路" value={channelName} /></Field><Field label="渠道类型"><Select onChange={(event) => setChannelType(event.target.value)} value={channelType}><option value="1">OpenAI 兼容</option><option value="14">Anthropic</option><option value="20">OpenRouter</option><option value="24">Gemini</option><option value="43">DeepSeek</option></Select></Field><Field label="上游基础地址"><TextInput onChange={(event) => setBaseURL(event.target.value)} placeholder="https://api.example.com/v1" value={baseURL} /></Field><Field label="上游 API 密钥"><TextInput onChange={(event) => setAPIKey(event.target.value)} placeholder="保存后不再回显" type="password" value={apiKey} /></Field><Field label="拟售模型"><textarea className="textarea" onChange={(event) => setModels(event.target.value)} rows="3" value={models} /></Field></>}
     </Modal>
   );
 }
@@ -191,7 +257,7 @@ export default function Modals({ modal, close, notify, onAuthenticated, setModal
   if (type === 'quote') return <QuoteModal close={close} notify={notify} />;
   if (type === 'payment') return <PaymentModal close={close} notify={notify} />;
   if (type === 'recharge') return <RechargeModal close={close} notify={notify} />;
-  if (type === 'merchantApply') return <MerchantApplyModal close={close} notify={notify} />;
-  if (type === 'withdraw' || type === 'channel') return <SimpleMerchantModal type={type} close={close} notify={notify} />;
+  if (type === 'merchantApply') return <MerchantApplyModal close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
+  if (type === 'withdraw' || type === 'channel') return <SimpleMerchantModal type={type} close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
   return null;
 }

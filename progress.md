@@ -335,3 +335,64 @@
 - `progress.md`：追加第 3 阶段生产部署和邮件验收记录。
 - 服务器 `/opt/modelroute-platform/releases/4e60d10`：保存本阶段已部署发布；共享密钥和运行数据位于受限共享目录。
 - 回滚点：服务器将 `/opt/modelroute-platform/current` 切换到上一发布目录 `f2842fc74089` 后执行该目录的 `deploy/scripts/deploy.sh`；仓库按 `4e60d10`、`d79b845` 的顺序逐个执行 `git revert` 可生成回退改动。
+
+## 2026-07-22 - Task: 实现第 4 阶段商户申请与渠道审核
+
+### What was done
+
+- 建立平台商户申请、商户资料、渠道审核版本和 New API 渠道归属四类数据，商户身份与 New API 用户角色分开判断。
+- 普通用户可提交网站、业务说明、上游地址、密钥和拟售模型；有效商户可继续提交新渠道，同一用户只保留一条进行中的商户申请。
+- 使用 AES-256-GCM 加密待审核密钥，并以 HMAC-SHA256 生成唯一指纹；接口不返回密钥、密文或完整指纹，批准和驳回后清除平台密文。
+- 管理员可读取申请、渠道审核、商户和渠道列表，执行上游模型验证、批准导入、驳回、撤销和恢复商户权限，写操作均校验角色、账号状态和请求来源并记录审计。
+- 渠道批准时调用固定版本 New API 创建渠道、搜索编号并执行真实渠道测试；失败时删除已创建渠道并恢复审核状态，成功后以事务保存商户归属。
+- 前端按平台商户身份显示商户中心，接入真实申请、渠道审核版本和 New API 映射；管理员商户与渠道页面接入真实平台接口，移除页面内虚假商户收入、报价和健康数据。
+- 新增生产商户契约脚本和中文接口文档，部署配置增加受限的商户凭据加密主密钥。
+
+### Testing
+
+- 有效商户重复申请测试先因仍调用创建仓储而失败，增加入口身份检查后转为通过；New API 渠道测试失败的删除和审核恢复补偿测试通过。
+- 执行 `go test ./...`、`go vet ./...` 和 `go build ./cmd/...`，全部退出码为 `0`。
+- 在临时 PostgreSQL 17 容器顺序执行两份迁移，核对 `4` 张商户表、`3` 个关键唯一索引和 `6` 个外键后删除临时容器。
+- 执行 `npm.cmd run test:ui`，Vite 转换 `1607` 个模块，普通用户申请、角色导航、管理员验证、真实渠道列表和 New API 映射交互通过。
+- 执行 `npm.cmd run capture`，生成桌面与移动端商户中心、渠道管理和既有关键视图截图；Playwright 根页面溢出检查通过，并人工检查渠道表格和操作区布局。
+- 执行 `python -m unittest discover -s deploy/tests -p 'test_*.py'`，共 `6` 项通过；Compose 配置和全部 Shell 脚本语法检查通过。
+- 执行 `git diff --check` 和聊天中认证凭据字面值扫描，均无异常；线上商户契约保留到生产部署后执行。
+
+### Notes
+
+- `.env.example`：增加商户凭据加密主密钥示例变量。
+- `apps/api/internal/bootstrap/resources.go`：注入 SQL 商户仓储和商户凭据保险箱。
+- `apps/api/internal/bootstrap/resources_test.go`：验证商户服务依赖已完成注入。
+- `apps/api/internal/config/config.go`：加载并校验 Base64 编码的 32 字节加密主密钥。
+- `apps/api/internal/config/config_test.go`：覆盖加密主密钥缺失、格式错误和正确加载。
+- `apps/api/internal/httpapi/auth_handlers.go`：在 `/api/me` 中返回平台商户身份与状态。
+- `apps/api/internal/httpapi/server.go`：注册商户、渠道和管理员审核接口。
+- `apps/api/internal/httpapi/services.go`：定义商户仓储与凭据保护依赖。
+- `apps/api/internal/httpapi/merchant_types.go`：定义商户申请、渠道、身份、状态和仓储契约。
+- `apps/api/internal/httpapi/merchant_handlers.go`：实现申请、审核、New API 导入补偿、权限与输入校验。
+- `apps/api/internal/httpapi/merchant_handlers_test.go`：覆盖密钥保护、上游验证、导入补偿、角色权限和重复申请。
+- `apps/api/internal/httpapi/merchant_store.go`：实现商户 SQL 查询、原子状态转换和审批事务。
+- `apps/api/internal/httpapi/merchant_store_test.go`：覆盖申请事务、审核认领和最终批准事务。
+- `apps/api/internal/migrations/migrate_test.go`：把商户迁移纳入嵌入迁移顺序验证。
+- `apps/api/internal/migrations/sql/000002_merchants.sql`：建立四张商户业务表、状态约束、唯一约束和外键。
+- `apps/api/internal/secretbox/box.go`：实现 AES-256-GCM 加解密和 HMAC-SHA256 指纹。
+- `apps/api/internal/secretbox/box_test.go`：覆盖密文、解密、指纹、错误密钥和篡改检测。
+- `apps/web/src/main.jsx`：按平台返回的商户身份控制导航和申请刷新。
+- `apps/web/src/Modals.jsx`：实现商户申请和新增渠道表单与真实提交。
+- `apps/web/src/views/ConsoleView.jsx`：读取真实申请状态并显示审核进度。
+- `apps/web/src/views/MerchantView.jsx`：展示真实商户身份、审核版本和已导入渠道。
+- `apps/web/src/views/admin/AdminMerchants.jsx`：实现商户申请审核和商户权限操作。
+- `apps/web/src/views/admin/AdminChannels.jsx`：实现渠道审核操作和 New API 渠道归属列表。
+- `apps/web/scripts/ui-smoke.mjs`：覆盖商户申请、管理员验证和真实渠道页面接口调用。
+- `apps/web/scripts/capture.mjs`：增加商户与管理员渠道真实数据形状及两张渠道管理截图。
+- `apps/web/artifacts/merchant-desktop.png`：更新真实商户渠道桌面验收图。
+- `apps/web/artifacts/merchant-mobile.png`：更新真实商户渠道移动端验收图。
+- `apps/web/artifacts/admin-channels-desktop.png`：新增管理员渠道桌面验收图。
+- `apps/web/artifacts/admin-channels-mobile.png`：新增管理员渠道移动端验收图。
+- `compose.yaml`：向 API 和 Worker 容器传递商户凭据加密主密钥。
+- `deploy/tests/test_compose.py`：验证两个平台进程均收到加密主密钥变量。
+- `deploy/scripts/verify-merchants.sh`：新增匿名权限、申请、列表、密钥清除和驳回线上契约验证。
+- `docs/商户与渠道审核接口.md`：记录业务边界、状态机、密钥生命周期、接口和验证方式。
+- `docs/部署运行手册.md`：补充加密主密钥和商户契约验收步骤。
+- `progress.md`：追加本轮实现、验证、文件清单和回滚点。
+- 回滚点：阶段标签 `phase-3-accounts`；第 4 阶段提交后可执行 `git revert <第4阶段提交>` 生成仓库回退改动，生产服务器在本轮记录时尚未部署此阶段。

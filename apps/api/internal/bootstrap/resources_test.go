@@ -25,9 +25,13 @@ func TestBuildHTTPServicesUsesSessionAndOriginConfig(t *testing.T) {
 		SessionCookieName:    "modelroute_session",
 		SessionCookieSecure:  true,
 		SessionTTL:           12 * time.Hour,
+		EncryptionKey:        []byte("0123456789abcdef0123456789abcdef"),
 	}
-	services := buildHTTPServices(database, redisClient, cfg)
-	if services.Sessions == nil || services.NewAPI == nil || services.Audit == nil {
+	services, err := buildHTTPServices(database, redisClient, cfg)
+	if err != nil {
+		t.Fatalf("构建 HTTP 依赖失败：%v", err)
+	}
+	if services.Sessions == nil || services.NewAPI == nil || services.Audit == nil || services.Merchants == nil || services.Credentials == nil {
 		t.Fatalf("HTTP 服务依赖未完整注入：%+v", services)
 	}
 	if services.Cookie.Name != "modelroute_session" || services.Cookie.PublicOrigin != "https://aggregate.lwylink.xyz" || services.Cookie.MaxAge != 12*time.Hour || !services.Cookie.Secure {

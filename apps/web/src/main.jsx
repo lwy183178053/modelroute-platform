@@ -26,7 +26,7 @@ import './styles.css';
 function allowedNavigation(account) {
   const items = [{ id: 'market', label: '模型市场', icon: Waypoints }];
   if (account) items.push({ id: 'console', label: '控制台', icon: Gauge });
-  if (Number(account?.role) >= 10) items.push({ id: 'merchant', label: '商户中心', icon: Store });
+  if (account?.is_merchant || Number(account?.role) >= 10) items.push({ id: 'merchant', label: '商户中心', icon: Store });
   if (Number(account?.role) >= 10) items.push({ id: 'admin', label: '管理后台', icon: Settings });
   return items;
 }
@@ -36,7 +36,7 @@ function Topbar({ account, active, navigate, onLogin, onLogout }) {
   const switchView = (view) => { navigate(view); setMobileOpen(false); };
   const navigation = allowedNavigation(account);
   const displayName = account?.display_name || account?.username || '';
-  const roleName = Number(account?.role) >= 10 ? '管理员' : '普通用户';
+  const roleName = Number(account?.role) >= 10 ? '管理员' : account?.is_merchant ? '商户' : '普通用户';
   return (
     <header className="topbar">
       <div className="topbar-inner">
@@ -96,7 +96,11 @@ function App() {
       setModal('login');
       return;
     }
-    if ((nextView === 'merchant' || nextView === 'admin') && Number(account?.role) < 10) {
+    if (nextView === 'merchant' && !account?.is_merchant && Number(account?.role) < 10) {
+      setView('market');
+      return;
+    }
+    if (nextView === 'admin' && Number(account?.role) < 10) {
       setView('market');
       return;
     }
@@ -122,10 +126,14 @@ function App() {
       <main>
         {view === 'market' && <MarketView navigate={navigate} openRoute={() => setModal(account ? 'route' : 'login')} />}
         {view === 'console' && account && <ConsoleView account={account} navigate={navigate} notify={notify} openModal={setModal} />}
-        {view === 'merchant' && Number(account?.role) >= 10 && <MerchantView notify={notify} openModal={setModal} />}
+        {view === 'merchant' && (account?.is_merchant || Number(account?.role) >= 10) && <MerchantView account={account} notify={notify} openModal={setModal} />}
         {view === 'admin' && Number(account?.role) >= 10 && <AdminView notify={notify} openModal={setModal} section={adminSection} setSection={setAdminSection} />}
       </main>
-      <Modals close={() => setModal(null)} modal={modal} notify={notify} onAuthenticated={(user) => { setAccount(user); setView('console'); }} setModal={setModal} />
+      <Modals close={() => setModal(null)} modal={modal} notify={notify} onAuthenticated={(user) => {
+        setAccount(user);
+        setView('console');
+        apiRequest('/api/me').then(setAccount).catch(() => {});
+      }} setModal={setModal} />
       {toast && <div className="toast" role="status"><span>{toast}</span></div>}
     </div>
   );

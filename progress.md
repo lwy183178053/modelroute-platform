@@ -933,3 +933,29 @@
 - 服务器 `/opt/modelroute-platform/shared/backups/20260722T125523Z`：保存第 8 阶段首次发布前完整备份并已通过恢复演练。
 - 服务器 `/opt/modelroute-platform/shared/backups/20260722T131751Z`：保存最终修复发布前完整备份。
 - 回滚点：优先使用 `/opt/modelroute-platform/releases/5eece405533d` 做同迁移版本代码回退；需要回到第 7 阶段时使用 `/opt/modelroute-platform/releases/b147266e6464`，涉及数据恢复时使用对应发布前备份和 `restore.sh`。
+
+## 2026-07-22 - Task: 轮换 103 SSH 运维凭据
+
+### What was done
+
+- 为 103 生成独立 Ed25519 运维密钥，追加到 root `authorized_keys` 前后均保持目录 `700`、文件 `600`，并完成纯密钥登录验证。
+- 生成新的高强度随机 root 密码，通过受限临时文件和已验证密钥通道提交给服务器，执行完成后删除本机与服务器临时输入文件。
+- 将新密码保存在工作区外的本机受限文件中，并把私钥与密码文件 ACL 收紧为仅当前 Windows 用户完全控制。
+- 分别验证新密码登录成功、旧密码认证失败、专用密钥在轮换后仍可登录，并通过密钥再次读取生产就绪状态。
+
+### Testing
+
+- 专用 Ed25519 密钥指纹检查通过，服务器登记数量为 `1`；纯密钥登录在密码轮换前后均成功。
+- 新密码强制使用密码认证登录成功；旧密码强制使用密码认证返回退出码 `255`。
+- 本机私钥和密码文件 ACL 均只包含当前 Windows 用户；临时口令助手和密码传输文件残留为 `0`。
+- 轮换后 `/api/health/ready` 返回 `200/ready`，生产版本、容器和业务配置未发生变化。
+
+### Notes
+
+- `docs/部署环境审计.md`：记录 SSH 密码轮换、密钥登录、受限文件位置和生产健康证据。
+- `docs/部署运行手册.md`：增加 103 专用运维密钥、密码保管和后续轮换步骤。
+- `progress.md`：追加 SSH 凭据轮换、验证、文件清单和回滚方法。
+- `C:\Users\Administrator\.ssh\modelroute_103_ed25519`：新增 103 专用私钥，仅当前 Windows 用户可访问，不进入 Git。
+- `C:\Users\Administrator\.ssh\modelroute_103_ed25519.pub`：新增对应公钥并登记到服务器 root `authorized_keys`。
+- `C:\Users\Administrator\.ssh\modelroute_103_root_password.txt`：保存轮换后的 root 密码，仅当前 Windows 用户可访问，不进入 Git。
+- 回滚方式：保持专用密钥可用，通过该密钥再次执行受控密码轮换；只有另一条管理通道已验证时，才从服务器 `authorized_keys` 删除本轮公钥并删除上述本机文件。

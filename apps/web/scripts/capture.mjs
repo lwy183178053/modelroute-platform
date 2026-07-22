@@ -32,6 +32,14 @@ async function captureSet(viewport, suffix) {
   const page = await browser.newPage({ viewport, deviceScaleFactor: 1 });
   const runtimeErrors = [];
   page.on('pageerror', (error) => runtimeErrors.push(error.message));
+  await page.route('**/api/**', (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const fulfill = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(data) });
+    if (url.pathname === '/api/me') return fulfill({ success: true, data: { id: 1, username: 'modelroute', display_name: '平台管理员', role: 100, status: 1, group: 'default', quota: 128642000, used_quota: 4268000, request_count: 2846 } });
+    if (url.pathname === '/api/keys' && request.method() === 'GET') return fulfill({ success: true, data: { page: 1, page_size: 20, total: 1, items: [{ id: 9, name: '生产主密钥', key: 'abcd**********wxyz', status: 1, expired_time: -1, unlimited_quota: true }] } });
+    return fulfill({ success: false, error: { code: 'not_mocked', message: url.pathname } }, 404);
+  });
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
 
   const captures = [

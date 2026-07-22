@@ -9,15 +9,19 @@ import {
   Landmark,
   Settings2,
   ShieldCheck,
+  UserRoundCog,
 } from 'lucide-react';
 import { Button, Metric, PageHeader, Section, Status } from '../ui';
 import AdminMerchants from './admin/AdminMerchants';
 import AdminChannels from './admin/AdminChannels';
 import AdminPayment from './admin/AdminPayment';
 import AdminWithdrawals from './admin/AdminWithdrawals';
+import AdminUsers from './admin/AdminUsers';
+import AdminAudit from './admin/AdminAudit';
 
 const sections = [
   { id: 'overview', label: '运营总览', icon: Activity },
+  { id: 'users', label: '用户管理', icon: UserRoundCog },
   { id: 'merchants', label: '商户审核', icon: Building2, count: 3 },
   { id: 'channels', label: '渠道与探活', icon: HeartPulse, count: 2 },
   { id: 'payment', label: '支付与充值', icon: CreditCard, count: 1 },
@@ -69,28 +73,19 @@ function AdminOverview({ setSection }) {
   );
 }
 
-function PlaceholderPanel({ type, notify }) {
-  const audit = type === 'audit';
+function PlaceholderPanel({ notify }) {
   return (
     <Section
-      title={audit ? '平台审计日志' : '平台基础设置'}
-      description={audit ? '管理员敏感操作与配置版本变更留痕' : '官方价格版本、抽成比例与 New API 内部连接'}
-      actions={<Button onClick={() => notify(audit ? '审计日志已导出' : '平台设置已保存')} variant="primary">{audit ? '导出日志' : '保存设置'}</Button>}
+      title="平台基础设置"
+      description="官方价格版本、抽成比例与 New API 内部连接"
+      actions={<Button onClick={() => notify('平台设置已保存')} variant="primary">保存设置</Button>}
     >
-      {audit ? (
-        <div className="table-wrap"><table className="data-table"><thead><tr><th>时间</th><th>管理员</th><th>业务对象</th><th>操作</th><th>结果</th><th>来源地址</th></tr></thead><tbody>
-          <tr><td>09:41:26</td><td>admin_01</td><td>支付配置 v12</td><td>测试网关连接</td><td><Status>成功</Status></td><td>127.0.0.1</td></tr>
-          <tr><td>09:32:08</td><td>admin_02</td><td>渠道 #1063</td><td>手工进入冷却</td><td><Status>成功</Status></td><td>10.0.8.21</td></tr>
-          <tr><td>08:58:44</td><td>admin_01</td><td>商户 SQ-0378</td><td>驳回申请</td><td><Status>成功</Status></td><td>127.0.0.1</td></tr>
-        </tbody></table></div>
-      ) : (
-        <div className="settings-list">
-          <div><span>平台抽成比例</span><strong>10%</strong><Button variant="ghost">编辑</Button></div>
-          <div><span>官方价格版本</span><strong>2026-07-22 v18</strong><Button variant="ghost">发布新版本</Button></div>
-          <div><span>New API 内部地址</span><strong>http://new-api.internal:3000</strong><Button variant="ghost">测试连接</Button></div>
-          <div><span>日志同步水位</span><strong>#9,482,671 · 延迟 16 秒</strong><Button variant="ghost">立即同步</Button></div>
-        </div>
-      )}
+      <div className="settings-list">
+        <div><span>平台抽成比例</span><strong>10%</strong><Button variant="ghost">编辑</Button></div>
+        <div><span>官方价格版本</span><strong>2026-07-22 v18</strong><Button variant="ghost">发布新版本</Button></div>
+        <div><span>New API 内部地址</span><strong>http://new-api.internal:3000</strong><Button variant="ghost">测试连接</Button></div>
+        <div><span>日志同步水位</span><strong>#9,482,671 · 延迟 16 秒</strong><Button variant="ghost">立即同步</Button></div>
+      </div>
     </Section>
   );
 }
@@ -105,11 +100,13 @@ export default function AdminView({ section, setSection, openModal, notify }) {
         </aside>
         <div className="admin-content">
           {section === 'overview' && <AdminOverview setSection={setSection} />}
+          {section === 'users' && <AdminUsers notify={notify} openModal={openModal} />}
           {section === 'merchants' && <AdminMerchants notify={notify} />}
           {section === 'channels' && <AdminChannels notify={notify} />}
           {section === 'payment' && <AdminPayment notify={notify} openModal={openModal} />}
           {section === 'withdrawals' && <AdminWithdrawals notify={notify} />}
-          {(section === 'settings' || section === 'audit') && <PlaceholderPanel type={section} notify={notify} />}
+          {section === 'settings' && <PlaceholderPanel notify={notify} />}
+          {section === 'audit' && <AdminAudit />}
         </div>
       </div>
     </div>

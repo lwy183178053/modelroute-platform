@@ -33,7 +33,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewServer(version, resources.Checks),
+		Handler:           httpapi.NewServerWithServices(version, resources.Checks, resources.Services),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}

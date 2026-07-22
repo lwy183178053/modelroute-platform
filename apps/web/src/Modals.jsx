@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { Check, CreditCard, Landmark, Plus, Send, ShieldCheck, Store } from 'lucide-react';
+import { Check, CreditCard, KeyRound, Landmark, LockKeyhole, Plus, Send, ShieldCheck, Store } from 'lucide-react';
+import AuthModal from './AuthModal';
+import { apiRequest } from './api';
 import { Button, Field, InlineNotice, Modal, Select, TextInput } from './ui';
 
 function Footer({ cancel, submit, submitText, icon = Check }) {
@@ -99,13 +101,97 @@ function SimpleMerchantModal({ type, close, notify }) {
   );
 }
 
-export default function Modals({ modal, close, notify }) {
+function KeyModal({ config, close, notify }) {
+  const key = config.key;
+  const [name, setName] = useState(key?.name || '');
+  const [unlimitedQuota, setUnlimitedQuota] = useState(key?.unlimited_quota ?? true);
+  const [remainQuota, setRemainQuota] = useState(String(key?.remain_quota || 0));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await apiRequest(key ? `/api/keys/${key.id}` : '/api/keys', {
+        method: key ? 'PUT' : 'POST',
+        body: {
+          name: name.trim(),
+          expired_time: key?.expired_time ?? -1,
+          remain_quota: Number(remainQuota || 0),
+          unlimited_quota: unlimitedQuota,
+          model_limits_enabled: Boolean(key?.model_limits_enabled),
+          model_limits: key?.model_limits || '',
+          allow_ips: key?.allow_ips || null,
+          group: key?.group || config.group || 'default',
+          cross_group_retry: Boolean(key?.cross_group_retry),
+        },
+      });
+      await config.onSaved?.();
+      notify(key ? '密钥已更新' : '密钥已创建');
+      close();
+    } catch (requestError) {
+      setError(requestError.message || '保存密钥失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title={key ? '编辑 API 密钥' : '创建 API 密钥'} description="密钥由 New API 创建并管理。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !name.trim()} icon={KeyRound} onClick={submit} variant="primary">{busy ? '保存中' : '保存密钥'}</Button></>}>
+      {error && <InlineNotice tone="danger">{error}</InlineNotice>}
+      <Field label="密钥名称"><TextInput maxLength="50" onChange={(event) => setName(event.target.value)} value={name} /></Field>
+      <label className="toggle-line"><input checked={unlimitedQuota} onChange={(event) => setUnlimitedQuota(event.target.checked)} type="checkbox" /><span><strong>不限额</strong><small>关闭后按下方整数额度限制使用</small></span></label>
+      {!unlimitedQuota && <Field label="可用额度"><TextInput min="0" onChange={(event) => setRemainQuota(event.target.value)} type="number" value={remainQuota} /></Field>}
+    </Modal>
+  );
+}
+
+function AdminUserModal({ config, close, notify }) {
+  const quotaMode = config.type === 'adminQuota';
+  const [mode, setMode] = useState('add');
+  const [value, setValue] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await apiRequest(`/api/admin/users/${config.user.id}/${quotaMode ? 'quota' : 'password'}`, {
+        method: 'POST',
+        body: quotaMode ? { mode, value: Number(value) } : { password },
+      });
+      await config.onSaved?.();
+      notify(quotaMode ? '用户额度已调整' : '用户密码已重置');
+      close();
+    } catch (requestError) {
+      setError(requestError.message || '操作失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title={quotaMode ? '调整用户额度' : '重置用户密码'} description={`${config.user.display_name || config.user.username} · UID ${config.user.id}`} onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || (quotaMode ? value === '' : password.length < 8)} icon={quotaMode ? CreditCard : LockKeyhole} onClick={submit} variant="primary">{busy ? '处理中' : '确认提交'}</Button></>}>
+      {error && <InlineNotice tone="danger">{error}</InlineNotice>}
+      {quotaMode ? <div className="form-grid two-column"><Field label="调整方式"><Select onChange={(event) => setMode(event.target.value)} value={mode}><option value="add">增加</option><option value="subtract">扣减</option><option value="override">设为</option></Select></Field><Field label="整数额度"><TextInput min="0" onChange={(event) => setValue(event.target.value)} type="number" value={value} /></Field></div> : <Field label="新密码" hint="长度为 8 到 20 位"><TextInput maxLength="20" minLength="8" onChange={(event) => setPassword(event.target.value)} type="password" value={password} /></Field>}
+    </Modal>
+  );
+}
+
+export default function Modals({ modal, close, notify, onAuthenticated, setModal }) {
   if (!modal) return null;
-  if (modal === 'route') return <RouteModal close={close} notify={notify} />;
-  if (modal === 'quote') return <QuoteModal close={close} notify={notify} />;
-  if (modal === 'payment') return <PaymentModal close={close} notify={notify} />;
-  if (modal === 'recharge') return <RechargeModal close={close} notify={notify} />;
-  if (modal === 'merchantApply') return <MerchantApplyModal close={close} notify={notify} />;
-  if (modal === 'withdraw' || modal === 'channel') return <SimpleMerchantModal type={modal} close={close} notify={notify} />;
+  const type = typeof modal === 'string' ? modal : modal.type;
+  if (['login', 'register', 'forgot', 'twoFactor', 'resetPassword'].includes(type)) return <AuthModal close={close} mode={type} notify={notify} onAuthenticated={onAuthenticated} reset={typeof modal === 'object' ? modal : null} setModal={setModal} />;
+  if (type === 'key') return <KeyModal close={close} config={modal} notify={notify} />;
+  if (type === 'adminQuota' || type === 'adminPassword') return <AdminUserModal close={close} config={modal} notify={notify} />;
+  if (type === 'route') return <RouteModal close={close} notify={notify} />;
+  if (type === 'quote') return <QuoteModal close={close} notify={notify} />;
+  if (type === 'payment') return <PaymentModal close={close} notify={notify} />;
+  if (type === 'recharge') return <RechargeModal close={close} notify={notify} />;
+  if (type === 'merchantApply') return <MerchantApplyModal close={close} notify={notify} />;
+  if (type === 'withdraw' || type === 'channel') return <SimpleMerchantModal type={type} close={close} notify={notify} />;
   return null;
 }

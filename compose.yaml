@@ -83,6 +83,11 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
       NEW_API_BASE_URL: http://new-api:3000
       DEPENDENCY_TIMEOUT: 3s
+      NEW_API_REQUEST_TIMEOUT: ${NEW_API_REQUEST_TIMEOUT}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN}
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE}
+      SESSION_TTL: ${SESSION_TTL}
       TZ: Asia/Shanghai
     depends_on:
       postgres:
@@ -113,6 +118,11 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
       NEW_API_BASE_URL: http://new-api:3000
       DEPENDENCY_TIMEOUT: 3s
+      NEW_API_REQUEST_TIMEOUT: ${NEW_API_REQUEST_TIMEOUT}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN}
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE}
+      SESSION_TTL: ${SESSION_TTL}
       TZ: Asia/Shanghai
     depends_on:
       platform-api:

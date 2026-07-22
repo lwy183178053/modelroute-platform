@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+
+	"github.com/lwy183178053/modelroute-platform/apps/api/internal/newapi"
 )
 
 type Pinger interface {
@@ -21,19 +23,51 @@ type Dependencies struct {
 type server struct {
 	version      string
 	dependencies Dependencies
+	services     Services
 }
 
 func NewServer(version string, dependencies Dependencies) http.Handler {
-	s := &server{version: version, dependencies: dependencies}
+	return NewServerWithServices(version, dependencies, Services{})
+}
+
+func NewServerWithServices(version string, dependencies Dependencies, services Services) http.Handler {
+	s := &server{version: version, dependencies: dependencies, services: services}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health/live", s.live)
 	mux.HandleFunc("GET /api/health/ready", s.ready)
 	mux.HandleFunc("GET /api/health", s.ready)
 	mux.HandleFunc("GET /api/version", s.versionInfo)
+	mux.HandleFunc("POST /api/auth/login", s.login)
+	mux.HandleFunc("POST /api/auth/login/2fa", s.loginTwoFactor)
+	mux.HandleFunc("POST /api/auth/register", s.register)
+	mux.HandleFunc("POST /api/auth/email-verification", s.sendEmailVerification)
+	mux.HandleFunc("POST /api/auth/password-reset/request", s.requestPasswordReset)
+	mux.HandleFunc("POST /api/auth/password-reset/confirm", s.confirmPasswordReset)
+	mux.HandleFunc("POST /api/auth/logout", s.logout)
+	mux.HandleFunc("GET /api/me", s.me)
+	mux.HandleFunc("GET /api/keys", s.keys)
+	mux.HandleFunc("POST /api/keys", s.createKey)
+	mux.HandleFunc("PUT /api/keys/{id}", s.updateKey)
+	mux.HandleFunc("POST /api/keys/{id}/status", s.updateKeyStatus)
+	mux.HandleFunc("POST /api/keys/{id}/reveal", s.revealKey)
+	mux.HandleFunc("DELETE /api/keys/{id}", s.deleteKey)
+	mux.HandleFunc("GET /api/admin/users", s.adminUsers)
+	mux.HandleFunc("GET /api/admin/users/{id}", s.adminUser)
+	mux.HandleFunc("POST /api/admin/users/{id}/status", s.adminUserStatus)
+	mux.HandleFunc("POST /api/admin/users/{id}/quota", s.adminUserQuota)
+	mux.HandleFunc("POST /api/admin/users/{id}/password", s.adminUserPassword)
+	mux.HandleFunc("GET /api/admin/audit-logs", s.adminAuditLogs)
 	mux.HandleFunc("POST /v1/chat/completions", modelRouteDisabled)
 	mux.HandleFunc("POST /v1/responses", modelRouteDisabled)
 	mux.HandleFunc("POST /v1/embeddings", modelRouteDisabled)
-	return requestID(mux)
+	return requestID(clientMetadata(mux))
+}
+
+func clientMetadata(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := newapi.WithClientIP(r.Context(), clientIP(r))
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 func (s *server) live(w http.ResponseWriter, _ *http.Request) {

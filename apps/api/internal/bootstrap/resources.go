@@ -10,6 +10,8 @@ import (
 	"github.com/lwy183178053/modelroute-platform/apps/api/internal/dependencies"
 	"github.com/lwy183178053/modelroute-platform/apps/api/internal/httpapi"
 	"github.com/lwy183178053/modelroute-platform/apps/api/internal/migrations"
+	"github.com/lwy183178053/modelroute-platform/apps/api/internal/newapi"
+	"github.com/lwy183178053/modelroute-platform/apps/api/internal/platformauth"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -17,6 +19,7 @@ type Resources struct {
 	Database *sql.DB
 	Redis    *redis.Client
 	Checks   httpapi.Dependencies
+	Services httpapi.Services
 }
 
 func Open(ctx context.Context, cfg config.Config) (*Resources, error) {
@@ -57,7 +60,22 @@ func Open(ctx context.Context, cfg config.Config) (*Resources, error) {
 			}),
 			NewAPI: dependencies.NewHTTPPinger(cfg.NewAPIBaseURL+"/api/status", cfg.DependencyTimeout),
 		},
+		Services: buildHTTPServices(database, redisClient, cfg),
 	}, nil
+}
+
+func buildHTTPServices(database *sql.DB, redisClient *redis.Client, cfg config.Config) httpapi.Services {
+	return httpapi.Services{
+		Sessions: platformauth.NewStore(redisClient, cfg.SessionTTL),
+		NewAPI:   newapi.NewClient(cfg.NewAPIBaseURL, cfg.NewAPIRequestTimeout),
+		Audit:    httpapi.NewSQLAuditStore(database),
+		Cookie: httpapi.CookieConfig{
+			Name:         cfg.SessionCookieName,
+			Secure:       cfg.SessionCookieSecure,
+			PublicOrigin: cfg.PublicOrigin,
+			MaxAge:       cfg.SessionTTL,
+		},
+	}
 }
 
 func (r *Resources) Close() {

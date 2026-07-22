@@ -1,20 +1,96 @@
+import { useCallback, useEffect, useState } from 'react';
 import {
   Activity,
   ArrowUpRight,
-  BadgeCheck,
-  CircleDollarSign,
   Coins,
+  Eye,
   KeyRound,
+  Pencil,
   Plus,
   Route,
   Settings2,
   Store,
+  Trash2,
   WalletCards,
 } from 'lucide-react';
-import { recentCalls } from '../data';
-import { Button, CopyValue, InlineNotice, Metric, PageHeader, Section, Status } from '../ui';
+import { apiRequest, formatQuota } from '../api';
+import { Button, CopyValue, EmptyNotice, InlineNotice, Metric, PageHeader, Section, Status } from '../ui';
 
-export default function ConsoleView({ openModal, notify, navigate }) {
+function displayKey(value) {
+  if (!value) return '-';
+  return value.startsWith('sk-') ? value : `sk-${value}`;
+}
+
+export default function ConsoleView({ account, openModal, notify, navigate }) {
+  const [keys, setKeys] = useState([]);
+  const [revealed, setRevealed] = useState({});
+  const [keyLoading, setKeyLoading] = useState(true);
+  const [keyError, setKeyError] = useState('');
+  const displayName = account.display_name || account.username;
+
+  const loadKeys = useCallback(async () => {
+    setKeyLoading(true);
+    setKeyError('');
+    try {
+      const data = await apiRequest('/api/keys?p=1&page_size=50');
+      setKeys(data?.items || []);
+    } catch (error) {
+      setKeyError(error.message || '读取密钥失败');
+    } finally {
+      setKeyLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadKeys(); }, [loadKeys]);
+
+  const fetchFullKey = async (key) => {
+    if (revealed[key.id]) return revealed[key.id];
+    const data = await apiRequest(`/api/keys/${key.id}/reveal`, { method: 'POST' });
+    const value = data?.key || data;
+    setRevealed((values) => ({ ...values, [key.id]: value }));
+    return value;
+  };
+
+  const revealKey = async (key) => {
+    try {
+      await fetchFullKey(key);
+      notify('密钥已显示');
+    } catch (error) {
+      notify(error.message || '读取密钥失败');
+    }
+  };
+
+  const deleteKey = async (key) => {
+    if (!window.confirm(`确认删除密钥“${key.name}”吗？`)) return;
+    try {
+      await apiRequest(`/api/keys/${key.id}`, { method: 'DELETE' });
+      notify('密钥已删除');
+      loadKeys();
+    } catch (error) {
+      notify(error.message || '删除密钥失败');
+    }
+  };
+
+  const setKeyStatus = async (key, enabled) => {
+    try {
+      await apiRequest(`/api/keys/${key.id}/status`, { method: 'POST', body: { enabled } });
+      notify(enabled ? '密钥已启用' : '密钥已停用');
+      loadKeys();
+    } catch (error) {
+      notify(error.message || '修改密钥状态失败');
+    }
+  };
+
+  const copyKey = async (key) => {
+    try {
+      const value = await fetchFullKey(key);
+      await navigator.clipboard.writeText(displayKey(value));
+      notify('密钥已复制');
+    } catch (error) {
+      notify(error.message || '复制密钥失败');
+    }
+  };
+
   return (
     <div className="view-shell">
       <PageHeader
@@ -30,10 +106,10 @@ export default function ConsoleView({ openModal, notify, navigate }) {
       />
 
       <div className="metrics-grid">
-        <Metric label="账户余额" value="¥1,286.42" hint="可用额度 128.6M" icon={WalletCards} />
-        <Metric label="今日消费" value="¥42.68" hint="较昨日下降 12.4%" icon={Coins} tone="blue" />
-        <Metric label="今日调用" value="2,846" hint="成功 2,831 次" icon={Activity} tone="green" />
-        <Metric label="缓存节省" value="¥18.32" hint="命中率 67.8%" icon={CircleDollarSign} tone="amber" />
+        <Metric label="账户额度" value={formatQuota(account.quota)} hint="New API 权威余额" icon={WalletCards} />
+        <Metric label="累计消费" value={formatQuota(account.used_quota)} hint="含缓存计费与退款" icon={Coins} tone="blue" />
+        <Metric label="累计请求" value={String(account.request_count || 0)} hint="New API 用户统计" icon={Activity} tone="green" />
+        <Metric label="账户分组" value={account.group || 'default'} hint={`UID ${account.id}`} icon={Store} tone="amber" />
       </div>
 
       <div className="dashboard-grid dashboard-grid-main">
@@ -42,65 +118,45 @@ export default function ConsoleView({ openModal, notify, navigate }) {
           description="最近 7 天 New API 最终结算额度"
           actions={<select className="mini-select" defaultValue="消费金额"><option>消费金额</option><option>调用次数</option><option>Token 用量</option></select>}
         >
-          <div className="chart-shell" aria-label="最近七天用量柱状图">
-            <div className="chart-scale"><span>¥80</span><span>¥60</span><span>¥40</span><span>¥20</span><span>¥0</span></div>
-            <div className="chart-bars">
-              {[48, 62, 39, 74, 58, 81, 54].map((height, index) => (
-                <div className="chart-column" key={index}><div className="chart-bar" style={{ height: `${height}%` }} /><span>{['周三', '周四', '周五', '周六', '周日', '周一', '今天'][index]}</span></div>
-              ))}
-            </div>
-          </div>
+          <EmptyNotice title="暂无可展示的结算趋势" description="模型路由开放后按 New API 最终日志汇总。" />
         </Section>
 
         <Section title="账户状态" description="统一账号可同时拥有用户与商户身份">
           <div className="account-summary">
-            <div className="account-avatar">林</div>
-            <div><strong>林先生</strong><span>UID 10826 · 管理员账号</span></div>
+            <div className="account-avatar">{displayName.slice(0, 1).toUpperCase()}</div>
+            <div><strong>{displayName}</strong><span>UID {account.id} · {Number(account.role) >= 10 ? '管理员账号' : '普通账号'}</span></div>
             <Status>正常</Status>
           </div>
           <div className="account-rows">
-            <div><span>实名状态</span><strong><BadgeCheck size={15} /> 已认证</strong></div>
-            <div><span>商户身份</span><strong><Store size={15} /> 已开通</strong></div>
-            <div><span>安全等级</span><strong>高</strong></div>
+            <div><span>账号</span><strong>{account.username}</strong></div>
+            <div><span>分组</span><strong>{account.group || 'default'}</strong></div>
+            <div><span>账号角色</span><strong>{Number(account.role) >= 10 ? '管理员' : '普通用户'}</strong></div>
           </div>
-          <Button className="full-button" icon={ArrowUpRight} onClick={() => navigate('merchant')}>进入商户中心</Button>
-          <Button className="full-button" variant="ghost" onClick={() => openModal('merchantApply')}>查看商户申请表</Button>
+          {Number(account.role) >= 10 ? <Button className="full-button" icon={ArrowUpRight} onClick={() => navigate('merchant')}>进入商户中心</Button> : <Button className="full-button" icon={ArrowUpRight} onClick={() => openModal('merchantApply')}>申请成为商户</Button>}
         </Section>
       </div>
 
       <Section
         title="API 密钥与路由"
         description="路由策略按 API 密钥独立绑定，最终扣费继续由 New API 处理"
-        actions={<Button icon={KeyRound} variant="primary">创建密钥</Button>}
+        actions={<Button icon={KeyRound} variant="primary" onClick={() => openModal({ type: 'key', group: account.group, onSaved: loadKeys })}>创建密钥</Button>}
       >
         <InlineNotice>外围平台只在请求进入 New API 前选择商户渠道并替换内部模型别名，不重新计算 Token 或缓存费用。</InlineNotice>
         <div className="table-wrap">
           <table className="data-table">
             <thead><tr><th>名称 / 密钥</th><th>路由方式</th><th>倍率区间</th><th>优先规则</th><th>固定商户</th><th>今日消费</th><th>状态</th><th></th></tr></thead>
-            <tbody>
-              <tr>
-                <td><strong>生产环境</strong><CopyValue onCopy={() => notify('密钥已复制')}>sk-live-7J••••••••sF2</CopyValue></td>
-                <td><span className="route-kind"><Route size={15} /> 智能路由</span></td><td>0.40x - 0.80x</td><td>稳定性优先</td><td>全部合格商户</td><td>¥38.42</td><td><Status>正常</Status></td>
-                <td><Button variant="ghost" onClick={() => openModal('route')}>编辑路由策略</Button></td>
-              </tr>
-              <tr>
-                <td><strong>测试环境</strong><CopyValue onCopy={() => notify('密钥已复制')}>sk-test-2C••••••••mA9</CopyValue></td>
-                <td><span className="route-kind"><Store size={15} /> 固定商户</span></td><td>0.50x - 0.72x</td><td>价格优先</td><td>北辰云智、青川 API</td><td>¥4.26</td><td><Status>正常</Status></td>
-                <td><Button variant="ghost" onClick={() => openModal('route')}>编辑路由策略</Button></td>
-              </tr>
-            </tbody>
+            <tbody>{keys.map((key) => <tr key={key.id}>
+              <td><strong>{key.name}</strong><CopyValue onCopy={() => copyKey(key)}>{displayKey(revealed[key.id] || key.key)}</CopyValue></td>
+              <td><span className="route-kind"><Route size={15} /> 默认路由</span></td><td>-</td><td>-</td><td>-</td><td>-</td><td><div className="status-control"><Status>{Number(key.status) === 1 ? '正常' : '停用'}</Status><label className="compact-switch" title={Number(key.status) === 1 ? '停用密钥' : '启用密钥'}><input aria-label={`启用${key.name}`} checked={Number(key.status) === 1} onChange={(event) => setKeyStatus(key, event.target.checked)} type="checkbox" /><span /></label></div></td>
+              <td><div className="row-actions"><Button icon={Eye} onClick={() => revealKey(key)} variant="ghost">查看</Button><Button icon={Pencil} onClick={() => openModal({ type: 'key', key, group: account.group, onSaved: loadKeys })} variant="ghost">编辑</Button><Button onClick={() => openModal('route')} variant="ghost">编辑路由策略</Button><Button icon={Trash2} onClick={() => deleteKey(key)} variant="danger">删除</Button></div></td>
+            </tr>)}
+            {!keyLoading && keys.length === 0 && <tr><td className="table-message" colSpan="8">{keyError || '尚未创建 API 密钥'}</td></tr>}
+            {keyLoading && <tr><td className="table-message" colSpan="8">正在读取 API 密钥</td></tr>}</tbody>
           </table>
         </div>
       </Section>
 
-      <Section title="最近调用" description="金额、退款与缓存命中结果来自 New API 最终日志" actions={<Button variant="ghost">查看全部日志</Button>}>
-        <div className="table-wrap">
-          <table className="data-table">
-            <thead><tr><th>请求编号</th><th>模型</th><th>成交商户</th><th>Token</th><th>缓存</th><th>最终扣费</th><th>耗时</th><th>时间</th><th>结果</th></tr></thead>
-            <tbody>{recentCalls.map((call) => <tr key={call.id}><td><code>{call.id}</code></td><td><strong>{call.model}</strong></td><td>{call.merchant}</td><td>{call.tokens}</td><td>{call.cache}</td><td><strong>{call.cost}</strong></td><td>{call.duration}</td><td>{call.time}</td><td><Status>{call.state}</Status></td></tr>)}</tbody>
-          </table>
-        </div>
-      </Section>
+      <Section title="最近调用" description="金额、退款与缓存命中结果来自 New API 最终日志"><EmptyNotice title="暂无调用记录" description="路由开放后显示真实结算日志。" /></Section>
     </div>
   );
 }

@@ -230,3 +230,78 @@
 - 服务器 `/etc/caddy/Caddyfile`：追加 `aggregate.lwylink.xyz` 站点；原配置备份为 `/etc/caddy/backups/Caddyfile.before-modelroute.20260722T035149Z`。
 - 服务器 `/opt/modelroute-platform/releases/f2842fc74089`：保存已验收的独立发布；共享密钥与数据仍位于 `/opt/modelroute-platform/shared`。
 - 回滚点：服务器执行 `ln -s releases/635085139bd1 /opt/modelroute-platform/current.rollback && mv -Tf /opt/modelroute-platform/current.rollback /opt/modelroute-platform/current && /opt/modelroute-platform/current/deploy/scripts/deploy.sh` 可恢复上一发布；Caddy 可用上述备份文件恢复后执行 `caddy validate` 与 `systemctl reload caddy`。
+
+## 2026-07-22 - Task: 实现第 3 阶段账号、密钥与管理员用户管理
+
+### What was done
+
+- 建立 Redis 服务端平台会话，浏览器只持有随机平台 Cookie；New API 会话、管理凭据和密钥均不返回浏览器。
+- 接入注册、登录、二次验证、邮箱验证码、找回密码、退出和 `/api/me`，登录后主动刷新完整额度与用量资料。
+- 接入 API 密钥列表、创建、编辑、启停、查看完整密钥和删除；复制掩码密钥前强制读取 New API 完整密钥。
+- 接入管理员用户列表、搜索、详情、封禁、解封、额度调整、密码重置和平台审计日志；封禁和密码重置后清理目标用户会话。
+- 前端按普通用户和管理员角色显示导航，未登录和普通用户不显示商户中心、管理后台；服务端对每个受限接口再次校验角色。
+- 管理员重置密码时保留 New API 中目标用户的账号、显示名称、分组和备注，避免覆盖相邻资料。
+- 将合法客户端来源 IP 传给内网 New API，用于其登录审计和 IP 限流；上游传输错误不再向浏览器暴露内部地址。
+- 将用户额度按当前 New API `500000` 整数额度等于 `1 USD` 的口径显示为美元，后台额度调整仍使用整数。
+- 新增可重复线上账号契约脚本，使用受限密码文件验证管理员登录、用户列表、临时密钥生命周期、审计和退出。
+
+### Testing
+
+- 先执行 UI 冒烟，确认真实账号尚未接入时因找不到“平台管理员”失败；实现后覆盖管理员资料、真实密钥、用户管理、审计、未登录权限和普通用户登录。
+- 密码重置返回值、密钥启停、审计字段名、管理员密码重置保留备注、客户端 IP 转发、内部错误脱敏和完整密钥复制均完成对应失败测试与红绿验证。
+- 执行 `go test ./...`、`go vet ./...`、`go build ./cmd/api ./cmd/worker`，全部退出码为 `0`。
+- 执行 `npm.cmd run test:ui`，Vite 构建 `1607` 个模块后浏览器冒烟通过；测试命令已固定为先构建再预览，避免读取陈旧 `dist`。
+- 执行 `npm.cmd run capture`，生成 8 个业务视图和 4 个弹窗截图，桌面与移动端根页面无横向溢出。
+- 执行 `python -m unittest discover -s deploy/tests -p 'test_*.py' -v`，Compose 隔离和发布版本共 5 项通过。
+- 执行 `docker compose --env-file .env.example config --quiet`、`bash -n deploy/scripts/verify-accounts.sh`、`git diff --check` 和凭据模式扫描，均通过。
+- 本机 Docker 镜像构建在拉取 Docker Hub 匿名令牌时超时，尚未形成本机构建证据；生产服务器发布时必须重新构建并以线上容器验收补齐。
+
+### Notes
+
+- `.env.example`：增加平台来源、会话 Cookie、会话时长和 New API 请求超时变量。
+- `apps/api/cmd/api/main.go`：启动 HTTP 服务时注入账号、会话和审计依赖。
+- `apps/api/go.mod`：增加 Redis 测试服务和 SQL 模拟测试依赖。
+- `apps/api/go.sum`：锁定本阶段新增 Go 依赖校验值。
+- `apps/api/internal/bootstrap/resources.go`：构建并关闭账号服务所需资源。
+- `apps/api/internal/bootstrap/resources_test.go`：验证会话、New API 客户端和审计依赖注入。
+- `apps/api/internal/config/config.go`：加载并校验账号服务运行配置。
+- `apps/api/internal/config/config_test.go`：覆盖会话与公开来源配置校验。
+- `apps/api/internal/httpapi/server.go`：注册账号、密钥和管理员接口，并注入客户端来源信息。
+- `apps/api/internal/httpapi/server_test.go`：覆盖上游传输错误脱敏。
+- `apps/api/internal/httpapi/account_handlers.go`：实现密钥与管理员用户操作。
+- `apps/api/internal/httpapi/account_test.go`：覆盖密钥生命周期、额度、密码、备注保护和审计响应。
+- `apps/api/internal/httpapi/audit_store.go`：实现 PostgreSQL 审计日志写入与分页读取。
+- `apps/api/internal/httpapi/audit_store_test.go`：覆盖审计 SQL 参数和结果解析。
+- `apps/api/internal/httpapi/auth_handlers.go`：实现公开账号流程、平台会话、角色、来源校验和错误转换。
+- `apps/api/internal/httpapi/auth_test.go`：覆盖登录、二次验证、邮箱、重置、权限、跨站请求和会话清理。
+- `apps/api/internal/httpapi/services.go`：定义账号服务依赖、角色和审计契约。
+- `apps/api/internal/newapi/client.go`：实现固定 New API JSON 客户端、Cookie 隔离和来源 IP 透传。
+- `apps/api/internal/newapi/client_test.go`：覆盖 New API 登录、鉴权头、来源 IP 和业务错误。
+- `apps/api/internal/platformauth/store.go`：实现 Redis 会话、用户会话索引和批量清退。
+- `apps/api/internal/platformauth/store_test.go`：覆盖会话令牌哈希、保存、删除和按用户清理。
+- `apps/web/package.json`：让 UI 冒烟和截图命令先构建最新产物。
+- `apps/web/scripts/capture.mjs`：为视觉截图注入管理员和密钥测试数据。
+- `apps/web/scripts/ui-smoke.mjs`：覆盖角色导航、登录、额度刷新、密码重置、密钥和管理员页面。
+- `apps/web/src/api.js`：新增统一平台请求、错误解析和美元额度格式化。
+- `apps/web/src/AuthModal.jsx`：实现登录、注册、邮箱、找回密码、二次验证和新密码展示。
+- `apps/web/src/Modals.jsx`：增加密钥与管理员额度、密码操作弹窗。
+- `apps/web/src/main.jsx`：加载真实账号、过滤导航并实现退出登录。
+- `apps/web/src/styles.css`：增加账号表单、密钥开关、表格状态和移动端样式。
+- `apps/web/src/views/ConsoleView.jsx`：改用真实账号与密钥数据，移除虚假用量和调用记录。
+- `apps/web/src/views/AdminView.jsx`：接入用户管理和真实审计页面。
+- `apps/web/src/views/admin/AdminUsers.jsx`：实现管理员用户查询与操作入口。
+- `apps/web/src/views/admin/AdminAudit.jsx`：实现平台审计日志列表。
+- `apps/web/artifacts/admin-desktop.png`：更新管理员桌面验收图。
+- `apps/web/artifacts/console-desktop.png`：更新真实账号控制台桌面验收图。
+- `apps/web/artifacts/console-mobile.png`：更新真实账号控制台移动端验收图。
+- `apps/web/artifacts/market-desktop.png`：更新登录态市场桌面验收图。
+- `apps/web/artifacts/merchant-desktop.png`：更新登录态商户桌面验收图。
+- `apps/web/artifacts/payment-config-desktop.png`：更新登录态支付弹窗桌面验收图。
+- `apps/web/artifacts/route-modal-desktop.png`：更新登录态路由弹窗桌面验收图。
+- `apps/web/artifacts/route-modal-mobile.png`：更新登录态路由弹窗移动端验收图。
+- `compose.yaml`：向 API 和 Worker 传递账号会话配置。
+- `deploy/scripts/verify-accounts.sh`：新增不打印管理员密码的线上账号契约验证。
+- `docs/账号与管理员接口.md`：记录账号边界、权限、接口和运行配置。
+- `docs/部署运行手册.md`：补充账号服务环境变量和线上契约步骤。
+- `progress.md`：追加本阶段实现、验证、文件清单和回滚说明。
+- 回滚点：阶段标签 `phase-2-foundation`；本阶段提交后可执行 `git revert <第3阶段提交>` 回退仓库，生产服务器继续保留上一发布目录用于软链接回滚。

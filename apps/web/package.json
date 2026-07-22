@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test:ui": "node scripts/ui-smoke.mjs",
-    "capture": "node scripts/capture.mjs"
+    "test:ui": "vite build && node scripts/ui-smoke.mjs",
+    "capture": "vite build && node scripts/capture.mjs"
   },
   "dependencies": {
     "@lobehub/icons": "^2.24.0",

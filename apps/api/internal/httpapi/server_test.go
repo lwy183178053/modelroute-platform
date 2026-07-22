@@ -6,8 +6,20 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
+
+func TestWriteUpstreamErrorHidesInternalTransportDetails(t *testing.T) {
+	response := httptest.NewRecorder()
+	writeUpstreamError(response, errors.New(`请求 New API：Get "http://new-api:3000/api/user/self": connection refused`), http.StatusBadGateway)
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("状态码=%d", response.Code)
+	}
+	if strings.Contains(response.Body.String(), "new-api:3000") || !strings.Contains(response.Body.String(), "内部服务连接异常") {
+		t.Fatalf("响应未脱敏：%s", response.Body.String())
+	}
+}
 
 type stubDependency struct {
 	err error

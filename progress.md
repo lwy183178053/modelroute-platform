@@ -626,3 +626,19 @@
 - `docs/部署运行手册.md`：补充支付配置、发布与生产验收步骤。
 - `progress.md`：追加第 6 阶段本地实现、验证、文件清单和回滚点。
 - 回滚点：阶段标签 `phase-5-routing`；第 6 阶段提交后可执行 `git revert <第6阶段提交>` 生成代码回退改动。生产服务器在本轮记录时仍运行第 5 阶段发布 `6dd0565`，支付迁移尚未发布。
+
+## 2026-07-22 - Task: 修正支付生产验收脚本可执行位
+
+### What was done
+
+- 将新增的支付生产验收脚本标记为 Git 可执行文件，使部署后可按运行手册直接执行。
+
+### Testing
+
+- 执行 `sh -n deploy/scripts/verify-payments.sh` 通过；`git ls-files -s` 显示脚本模式为 `100755`，`git diff --cached --check` 无异常。
+
+### Notes
+
+- `deploy/scripts/verify-payments.sh`：将文件模式从 `100644` 修正为 `100755`，脚本正文未变化。
+- `progress.md`：追加本轮发布前修正记录。
+- 回滚点：提交 `064b9ee`；本轮提交可单独执行 `git revert <本轮提交>` 恢复文件模式。

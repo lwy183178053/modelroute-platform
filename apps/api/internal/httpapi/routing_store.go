@@ -1037,6 +1037,55 @@ ORDER BY o.id DESC
 	return offers, nil
 }
 
+func (s *SQLRoutingStore) PublicModelNames(ctx context.Context, aliases []string) (map[string]string, error) {
+	result := make(map[string]string)
+	if len(aliases) == 0 {
+		return result, nil
+	}
+	unique := make([]string, 0, len(aliases))
+	seen := make(map[string]struct{}, len(aliases))
+	for _, alias := range aliases {
+		if alias == "" {
+			continue
+		}
+		if _, exists := seen[alias]; exists {
+			continue
+		}
+		seen[alias] = struct{}{}
+		unique = append(unique, alias)
+	}
+	if len(unique) == 0 {
+		return result, nil
+	}
+	placeholders := make([]string, len(unique))
+	arguments := make([]any, len(unique))
+	for index, alias := range unique {
+		placeholders[index] = fmt.Sprintf("$%d", index+1)
+		arguments[index] = alias
+	}
+	rows, err := s.database.QueryContext(ctx, `
+SELECT o.internal_alias, cm.public_name
+FROM offer_versions o
+JOIN canonical_models cm ON cm.id = o.canonical_model_id
+WHERE o.internal_alias IN (`+strings.Join(placeholders, ",")+`)
+`, arguments...)
+	if err != nil {
+		return nil, fmt.Errorf("查询内部别名公开模型：%w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var alias, model string
+		if err := rows.Scan(&alias, &model); err != nil {
+			return nil, fmt.Errorf("解析内部别名公开模型：%w", err)
+		}
+		result[alias] = model
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历内部别名公开模型：%w", err)
+	}
+	return result, nil
+}
+
 func timeOrNil(value time.Time) any {
 	if value.IsZero() {
 		return nil

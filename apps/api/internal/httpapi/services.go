@@ -34,6 +34,14 @@ type AuditRecorder interface {
 	List(context.Context, int, int) ([]AuditEntry, int, error)
 }
 
+type UsageAliasResolver interface {
+	PublicModelNames(context.Context, []string) (map[string]string, error)
+}
+
+type AdminOverviewReader interface {
+	Snapshot(context.Context, time.Time) (AdminOverviewSnapshot, error)
+}
+
 type AuditEntry struct {
 	ID          int64     `json:"id"`
 	ActorUserID int       `json:"actor_user_id"`
@@ -69,6 +77,8 @@ type Services struct {
 	PaymentCredit  HealthCycleRunner
 	Settlement     SettlementRepository
 	SettlementSync HealthCycleRunner
+	UsageAliases   UsageAliasResolver
+	Overview       AdminOverviewReader
 	Cookie         CookieConfig
 }
 

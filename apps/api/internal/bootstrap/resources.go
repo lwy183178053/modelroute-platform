@@ -82,16 +82,18 @@ func buildHTTPServices(database *sql.DB, redisClient *redis.Client, cfg config.C
 	payments := httpapi.NewSQLPaymentStore(database)
 	settlement := httpapi.NewSQLSettlementStore(database)
 	services := httpapi.Services{
-		Sessions:    platformauth.NewStore(redisClient, cfg.SessionTTL),
-		NewAPI:      newAPIClient,
-		AdminNewAPI: adminNewAPI,
-		Audit:       httpapi.NewSQLAuditStore(database),
-		Merchants:   httpapi.NewSQLMerchantStore(database),
-		Credentials: credentials,
-		Routing:     routing,
-		OfferSync:   httpapi.NewPriceSynchronizer(routing, adminNewAPI),
-		Payments:    payments,
-		Settlement:  settlement,
+		Sessions:     platformauth.NewStore(redisClient, cfg.SessionTTL),
+		NewAPI:       newAPIClient,
+		AdminNewAPI:  adminNewAPI,
+		Audit:        httpapi.NewSQLAuditStore(database),
+		Merchants:    httpapi.NewSQLMerchantStore(database),
+		Credentials:  credentials,
+		Routing:      routing,
+		OfferSync:    httpapi.NewPriceSynchronizer(routing, adminNewAPI),
+		Payments:     payments,
+		Settlement:   settlement,
+		UsageAliases: routing,
+		Overview:     httpapi.NewSQLAdminOverviewStore(database),
 		Cookie: httpapi.CookieConfig{
 			Name:         cfg.SessionCookieName,
 			Secure:       cfg.SessionCookieSecure,

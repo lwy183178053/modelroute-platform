@@ -47,6 +47,25 @@ async function mockAdminAPI(targetPage, state) {
       state.routeSaveBody = request.postDataJSON();
       return json({ success: true, data: { id: 71, newapi_token_id: 9, ...state.routeSaveBody } });
     }
+    if (url.pathname === '/api/usage' && request.method() === 'GET') {
+      return json({ success: true, data: {
+        start_timestamp: 1784131200,
+        end_timestamp: 1784736000,
+        stats: { quota: 1250000, rpm: 2, tpm: 1800 },
+        trend: [
+          { created_at: 1784131200, model_name: 'gpt-4o-mini', quota: 250000, count: 2 },
+          { created_at: 1784217600, model_name: 'gpt-4o-mini', quota: 1000000, count: 5 },
+        ],
+        logs: { page: 1, page_size: 20, total: 1, items: [
+          { id: 901, created_at: 1784692800, type: 2, model_name: 'gpt-4o-mini', quota: 500000, prompt_tokens: 2400, completion_tokens: 680, token_name: '真实主密钥', request_id: 'req-user-1001', other: '{"cache_tokens":1200}' },
+        ] },
+      } });
+    }
+    if (url.pathname === '/api/redemptions/redeem' && request.method() === 'POST') {
+      state.userRedemptionCalls += 1;
+      state.userRedemptionBody = request.postDataJSON();
+      return json({ success: true, data: 500000 });
+    }
     if (url.pathname === '/api/merchant/offers' && request.method() === 'GET') {
       return json({ success: true, data: [{ offer_id: 201, merchant_channel_id: 51, channel_name: 'OpenAI 主线路', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, offer_status: 'active', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] });
     }
@@ -97,6 +116,94 @@ async function mockAdminAPI(targetPage, state) {
     if (url.pathname === '/api/admin/audit-logs') {
       return json({ success: true, data: { page: 1, page_size: 20, total: 1, items: [{ id: 3, actor_user_id: 1, actor_role: '100', action: 'user.disable', object_type: 'user', object_id: '7', result: 'success', source_ip: '127.0.0.1', created_at: '2026-07-22T12:00:00Z' }] } });
     }
+    if (url.pathname === '/api/admin/overview' && request.method() === 'GET') {
+      return json({ success: true, data: {
+        generated_at: '2026-07-22T16:00:00Z', sync_delay_seconds: 16,
+        summary: {
+          today_gross_quota: 9000000, today_merchant_quota: 8100000, today_platform_quota: 900000,
+          today_refund_quota: 500000, today_request_count: 128, today_successful_requests: 126,
+          pending_merchant_applications: 1, pending_channel_reviews: 1, pending_withdrawals: 2,
+          open_reconciliation: 1, total_channels: 2, active_channels: 1, cooling_channels: 1,
+          disabled_channels: 1, payment_enabled: true, last_synced_through: 1784719984,
+          last_sync_success_at: '2026-07-22T15:59:44Z', last_sync_error: '',
+        },
+        services: {
+          database: { status: 'healthy', latency_ms: 3 },
+          redis: { status: 'healthy', latency_ms: 2 },
+          new_api: { status: 'healthy', latency_ms: 24 },
+        },
+      } });
+    }
+    if (url.pathname === '/api/admin/usage' && request.method() === 'GET') {
+      return json({ success: true, data: {
+        start_timestamp: 1784131200, end_timestamp: 1784736000,
+        stats: { quota: 4750000, rpm: 7, tpm: 9200 },
+        trend: [{ created_at: 1784692800, model_name: 'gpt-4o-mini', quota: 1750000, count: 18 }],
+        logs: { page: 1, page_size: 20, total: 1, items: [
+          { id: 9901, user_id: 7, username: 'alice', created_at: 1784692800, type: 2, model_name: 'gpt-4o-mini', quota: 700000, prompt_tokens: 3100, completion_tokens: 920, token_name: '生产密钥', request_id: 'req-admin-9001', channel: 41, other: '{"cache_tokens":800}' },
+        ] },
+      } });
+    }
+    if (url.pathname === '/api/admin/platform-settings' && request.method() === 'GET') {
+      return json({ success: true, data: {
+        smtp: { server: 'smtp.example.com', port: 465, account: 'notice@example.com', from: 'ModelRoute <notice@example.com>', ssl_enabled: true, starttls_enabled: false, insecure_skip_verify: false, force_auth_login: false, password_write_only: true },
+        registration: { email_verification_enabled: true, register_enabled: true, password_login_enabled: true, password_register_enabled: true },
+      } });
+    }
+    if (url.pathname === '/api/admin/platform-settings' && request.method() === 'PUT') {
+      state.platformSettingCalls += 1;
+      state.platformSettingBody = request.postDataJSON();
+      return json({ success: true, data: { ...state.platformSettingBody, smtp: { ...state.platformSettingBody.smtp, password: undefined, password_write_only: true } } });
+    }
+    if (url.pathname === '/api/admin/groups' && request.method() === 'GET') {
+      return json({ success: true, data: [{ name: 'default', ratio_bps: 10000 }, { name: 'vip', ratio_bps: 8000 }] });
+    }
+    if (url.pathname === '/api/admin/groups' && request.method() === 'PUT') {
+      state.groupSettingCalls += 1;
+      state.groupSettingBody = request.postDataJSON();
+      return json({ success: true, data: state.groupSettingBody.groups });
+    }
+    if (url.pathname === '/api/admin/redemptions' && request.method() === 'GET') {
+      return json({ success: true, data: { page: 1, page_size: 20, total: 1, items: [
+        { id: 6, name: '七月活动码', key: 'MR-JULY-2026', status: 1, quota: 500000, count: 2, expired_time: 1785168000, created_time: 1784649600 },
+      ] } });
+    }
+    if (url.pathname === '/api/admin/redemptions' && request.method() === 'POST') {
+      state.redemptionCreateCalls += 1;
+      state.redemptionCreateBody = request.postDataJSON();
+      return json({ success: true, data: ['MR-NEW-A', 'MR-NEW-B'] }, 201);
+    }
+    if (url.pathname === '/api/admin/redemptions/6' && request.method() === 'PUT') {
+      state.redemptionUpdateCalls += 1;
+      state.redemptionUpdateBody = request.postDataJSON();
+      return json({ success: true, data: { id: 6, status: 1, ...state.redemptionUpdateBody } });
+    }
+    if (url.pathname === '/api/admin/redemptions/6/status' && request.method() === 'POST') {
+      state.redemptionStatusCalls += 1;
+      state.redemptionStatusBody = request.postDataJSON();
+      return json({ success: true, data: { id: 6, status: state.redemptionStatusBody.enabled ? 1 : 2 } });
+    }
+    if (url.pathname === '/api/admin/redemptions/6' && request.method() === 'DELETE') {
+      state.redemptionDeleteCalls += 1;
+      return json({ success: true, data: null });
+    }
+    if (url.pathname === '/api/admin/redemptions/invalid' && request.method() === 'DELETE') {
+      state.redemptionCleanupCalls += 1;
+      return json({ success: true, data: 1 });
+    }
+    if (url.pathname === '/api/admin/system-tasks' && request.method() === 'GET') {
+      return json({ success: true, data: [
+        { task_id: 'systask_1', type: 'log_cleanup', status: 'succeeded', created_at: 1784649600, updated_at: 1784649660 },
+      ] });
+    }
+    if (url.pathname === '/api/admin/system-tasks/systask_1' && request.method() === 'GET') {
+      return json({ success: true, data: { task_id: 'systask_1', type: 'log_cleanup', status: 'succeeded', progress: 100, result: { deleted: 286 }, created_at: 1784649600, updated_at: 1784649660 } });
+    }
+    if (url.pathname === '/api/admin/system-tasks/log-cleanup' && request.method() === 'POST') {
+      state.logCleanupCalls += 1;
+      state.logCleanupBody = request.postDataJSON();
+      return json({ success: true, data: { task_id: 'systask_2', type: 'log_cleanup', status: 'pending' } }, 202);
+    }
     if (url.pathname === '/api/merchant/channels') {
       return json({ success: true, data: { merchant: { merchant_id: 31, user_id: 1, merchant_status: 'active', is_merchant: true }, items: [{ id: 51, merchant_id: 31, review_id: 21, newapi_channel_id: 41, channel_name: 'OpenAI 主线路', channel_type: 1, base_url: 'https://api.merchant.example', models: ['gpt-4o-mini'], credential_fingerprint: 'a1b2c3...d4e5f6', status: 'active', created_at: '2026-07-22T14:00:00Z' }] } });
     }
@@ -118,6 +225,18 @@ async function mockAdminAPI(targetPage, state) {
     if (url.pathname === '/api/admin/channels/52/health/reset' && request.method() === 'POST') {
       state.healthResetCalls += 1;
       return json({ success: true, data: { channel_id: 52, health_state: 'pending' } });
+    }
+    if (/^\/api\/admin\/channels\/\d+\/runtime$/.test(url.pathname) && request.method() === 'GET') {
+      const channelID = Number(url.pathname.split('/')[4]);
+      return json({ success: true, data: { newapi_channel_id: channelID === 51 ? 41 : 42, status: channelID === 51 ? 1 : 2, balance_usd_micros: channelID === 51 ? 12500000 : 3200000, balance_updated_time: 1784649600, response_time_ms: channelID === 51 ? 420 : 910, test_time: 1784649500 } });
+    }
+    if (/^\/api\/admin\/channels\/\d+\/test$/.test(url.pathname) && request.method() === 'POST') {
+      state.channelTestCalls += 1;
+      return json({ success: true, data: { status: 'succeeded', result: { time: 420 } } });
+    }
+    if (/^\/api\/admin\/channels\/\d+\/balance\/refresh$/.test(url.pathname) && request.method() === 'POST') {
+      state.channelBalanceCalls += 1;
+      return json({ success: true, data: { status: 'succeeded', result: { balance: 12.5 } } });
     }
     if (url.pathname === '/api/admin/payment-settings' && request.method() === 'GET') {
       return json({ success: true, data: { id: 11, version: 3, gateway_url: 'https://zpayz.cn', merchant_pid_masked: '202***********878', key_configured: true, payment_methods: ['alipay', 'wxpay'], minimum_usd_cents: 1000, maximum_usd_cents: 2000000, exchange_rate_cny_cents_per_usd: 720, enabled: true, notify_url: 'https://aggregate.lwylink.xyz/api/payments/easypay/notify', return_url: 'https://aggregate.lwylink.xyz/payments/return', created_at: '2026-07-22T09:00:00Z' } });
@@ -184,7 +303,11 @@ try {
     healthResetCalls: 0, paymentSettingCalls: 0, paymentSettingBody: null, paymentRetryCalls: 0,
     withdrawalCreateCalls: 0, withdrawalCreateBody: null, withdrawalActionCalls: 0,
     withdrawalActionPath: '', withdrawalActionBody: null, reconciliationIgnoreCalls: 0,
-    reconciliationIgnoreBody: null,
+    reconciliationIgnoreBody: null, userRedemptionCalls: 0, userRedemptionBody: null,
+    platformSettingCalls: 0, platformSettingBody: null, groupSettingCalls: 0, groupSettingBody: null,
+    redemptionCreateCalls: 0, redemptionCreateBody: null, redemptionUpdateCalls: 0, redemptionUpdateBody: null,
+    redemptionStatusCalls: 0, redemptionStatusBody: null, redemptionDeleteCalls: 0, redemptionCleanupCalls: 0,
+    logCleanupCalls: 0, logCleanupBody: null, channelTestCalls: 0, channelBalanceCalls: 0,
   };
   await mockAdminAPI(page, adminMockState);
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
@@ -207,7 +330,15 @@ try {
   }
 
   await page.getByRole('button', { name: '控制台', exact: true }).click();
-  await page.getByText('真实主密钥').waitFor();
+  await page.getByText('req-user-1001').waitFor();
+  await page.getByText('缓存 1,200 Token').waitFor();
+  assert(await page.locator('[aria-label="最近 7 天用量趋势"]').count() === 1, '控制台未渲染真实用量趋势');
+  assert(!(await page.locator('body').innerText()).includes('mkt-ov-'), '控制台泄露了内部报价别名');
+  await page.getByLabel('兑换码', { exact: true }).fill('MR-USER-CODE');
+  await page.getByRole('button', { name: '立即兑换' }).click();
+  await page.getByText('兑换码充值成功').waitFor();
+  assert(adminMockState.userRedemptionCalls === 1 && adminMockState.userRedemptionBody.key === 'MR-USER-CODE', '用户兑换码没有调用真实接口');
+  await page.getByText('真实主密钥').first().waitFor();
   assert(await page.getByRole('checkbox', { name: '启用真实主密钥' }).isChecked(), '有效密钥的启用开关未选中');
   await page.getByRole('button', { name: '复制' }).first().click();
   await page.getByText('密钥已复制').waitFor();
@@ -247,6 +378,12 @@ try {
   assert(adminMockState.offerCreateBody.multiplier_bps === 6500, '报价倍率没有转换为整数基点');
 
   await page.getByRole('button', { name: '管理后台', exact: true }).click();
+  await page.getByText('$18.00', { exact: true }).first().waitFor();
+  await page.getByText('126 / 128').waitFor();
+  assert(await page.getByRole('button', { name: /商户审核/ }).getByText('1', { exact: true }).count() === 1, '管理员侧栏未显示真实商户待办数量');
+  await page.getByRole('button', { name: '调用日志' }).click();
+  await page.getByText('req-admin-9001').waitFor();
+  await page.getByText('alice', { exact: true }).waitFor();
   await page.getByRole('button', { name: '模型与定价' }).click();
   await page.getByText('价格版本 v2').waitFor();
   await page.getByRole('button', { name: '新增标准模型' }).click();
@@ -273,12 +410,71 @@ try {
   await page.getByText('Anthropic 备用线路').waitFor();
   await page.getByText('New API 41').waitFor();
   await page.getByText('已停用').waitFor();
+  const importedAdminChannels = page.getByRole('heading', { name: '已导入渠道' }).locator('xpath=ancestor::section');
+  await importedAdminChannels.getByText('$12.50', { exact: true }).waitFor();
+  await importedAdminChannels.getByRole('button', { name: '测试渠道' }).first().click();
+  await page.getByText('渠道测试完成').waitFor();
+  await importedAdminChannels.getByRole('button', { name: '刷新余额' }).first().click();
+  await page.getByText('渠道余额已刷新').waitFor();
+  assert(adminMockState.channelTestCalls === 1 && adminMockState.channelBalanceCalls === 1, '渠道测试或余额刷新没有调用真实接口');
   await page.getByRole('button', { name: '恢复渠道' }).click();
   await page.getByText('渠道已进入恢复探测').waitFor();
   assert(adminMockState.healthResetCalls === 1, '恢复渠道没有调用真实健康接口');
   await page.getByRole('button', { name: '验证' }).click();
   await page.getByText('渠道验证通过').waitFor();
   assert(adminMockState.channelVerifyCalls === 1, '管理员渠道页验证没有调用真实渠道审核接口');
+  await page.getByRole('button', { name: '平台设置' }).click();
+  await page.getByRole('heading', { name: '邮件与注册' }).waitFor();
+  assert(await page.getByLabel('SMTP 服务器').inputValue() === 'smtp.example.com', '平台设置未加载 SMTP 配置');
+  await page.getByRole('button', { name: '保存邮件与注册' }).click();
+  await page.getByText('邮件与注册设置已保存').waitFor();
+  assert(adminMockState.platformSettingCalls === 1 && adminMockState.platformSettingBody.smtp.password === '', '邮件注册设置没有按只写密码规则提交');
+  await page.getByRole('button', { name: '分组倍率' }).click();
+  await page.getByRole('heading', { name: '分组倍率' }).waitFor();
+  await page.getByLabel('vip 分组倍率').fill('0.75');
+  await page.getByRole('button', { name: '保存分组倍率' }).click();
+  await page.getByText('分组倍率已保存').waitFor();
+  assert(adminMockState.groupSettingCalls === 1 && adminMockState.groupSettingBody.groups.find((group) => group.name === 'vip')?.ratio_bps === 7500, '分组倍率没有转换为整数基点');
+  await page.getByRole('button', { name: '兑换码管理' }).click();
+  await page.getByText('MR-JULY-2026').waitFor();
+  await page.getByRole('button', { name: '新建兑换码' }).click();
+  const redemptionDialog = page.getByRole('dialog', { name: '新建兑换码' });
+  await redemptionDialog.getByLabel('名称').fill('批量活动码');
+  await redemptionDialog.getByLabel('单码额度（美元）').fill('2');
+  await redemptionDialog.getByLabel('生成数量').fill('2');
+  await redemptionDialog.getByRole('button', { name: '创建兑换码' }).click();
+  await page.getByText('兑换码已创建').waitFor();
+  assert(adminMockState.redemptionCreateCalls === 1 && adminMockState.redemptionCreateBody.quota === 1000000 && adminMockState.redemptionCreateBody.count === 2, '兑换码额度或数量没有按整数规则提交');
+  await page.getByRole('button', { name: '停用', exact: true }).first().click();
+  await page.getByText('兑换码已停用').waitFor();
+  assert(adminMockState.redemptionStatusCalls === 1 && adminMockState.redemptionStatusBody.enabled === false, '兑换码启停没有调用真实接口');
+  await page.getByRole('button', { name: '编辑', exact: true }).first().click();
+  const editRedemptionDialog = page.getByRole('dialog', { name: '编辑兑换码' });
+  await editRedemptionDialog.getByLabel('名称').fill('更新活动码');
+  await editRedemptionDialog.getByLabel('单码额度（美元）').fill('1.4');
+  await editRedemptionDialog.getByRole('button', { name: '保存兑换码' }).click();
+  await page.getByText('兑换码已更新').waitFor();
+  assert(adminMockState.redemptionUpdateCalls === 1 && adminMockState.redemptionUpdateBody.quota === 700000 && !('count' in adminMockState.redemptionUpdateBody), '编辑兑换码参数不符合整数额度规则');
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: '删除', exact: true }).first().click();
+  await page.getByText('兑换码已删除').waitFor();
+  assert(adminMockState.redemptionDeleteCalls === 1, '删除兑换码没有调用真实接口');
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: '清理失效' }).click();
+  await page.getByText('已清理 1 条失效兑换码').waitFor();
+  assert(adminMockState.redemptionCleanupCalls === 1, '清理失效兑换码没有调用真实接口');
+  await page.getByRole('button', { name: '系统任务' }).click();
+  await page.getByText('systask_1').waitFor();
+  await page.getByRole('button', { name: '查看详情' }).click();
+  const taskDetailDialog = page.getByRole('dialog', { name: '系统任务详情' });
+  await taskDetailDialog.getByText('已删除日志 286 条').waitFor();
+  await taskDetailDialog.getByRole('button', { name: '关闭' }).last().click();
+  await page.getByRole('button', { name: '创建日志清理任务' }).click();
+  const cleanupDialog = page.getByRole('dialog', { name: '创建日志清理任务' });
+  await cleanupDialog.getByLabel('清理截止时间').fill('2026-07-20T00:00');
+  await cleanupDialog.getByRole('button', { name: '创建任务' }).click();
+  await page.getByText('日志清理任务已创建').waitFor();
+  assert(adminMockState.logCleanupCalls === 1 && Number.isInteger(adminMockState.logCleanupBody.before_timestamp), '日志清理任务没有提交整数时间戳');
   await page.getByRole('button', { name: '支付与充值' }).click();
   await page.getByRole('heading', { name: '易支付设置' }).waitFor();
   assert(

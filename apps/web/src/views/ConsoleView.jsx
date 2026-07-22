@@ -10,11 +10,13 @@ import {
   Route,
   Settings2,
   Store,
+  TicketCheck,
   Trash2,
   WalletCards,
 } from 'lucide-react';
 import { apiRequest, formatQuota } from '../api';
-import { Button, CopyValue, EmptyNotice, InlineNotice, Metric, PageHeader, Section, Status } from '../ui';
+import { Button, CopyValue, Field, InlineNotice, Metric, PageHeader, Section, Status, TextInput } from '../ui';
+import { UsageLogTable, UsageTrend, useUsage } from './UsagePanels';
 
 function displayKey(value) {
   if (!value) return '-';
@@ -44,7 +46,7 @@ function merchantOptions(offers) {
   return [...merchants.values()].sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
 }
 
-export default function ConsoleView({ account, openModal, notify, navigate }) {
+export default function ConsoleView({ account, openModal, notify, navigate, onAccountRefresh }) {
   const [keys, setKeys] = useState([]);
   const [revealed, setRevealed] = useState({});
   const [keyLoading, setKeyLoading] = useState(true);
@@ -52,6 +54,9 @@ export default function ConsoleView({ account, openModal, notify, navigate }) {
   const [merchants, setMerchants] = useState([]);
   const [merchantApplication, setMerchantApplication] = useState(undefined);
   const [paymentOrders, setPaymentOrders] = useState([]);
+  const [redemptionCode, setRedemptionCode] = useState('');
+  const [redeeming, setRedeeming] = useState(false);
+  const usage = useUsage('/api/usage');
   const displayName = account.display_name || account.username;
 
   const loadKeys = useCallback(async () => {
@@ -98,6 +103,23 @@ export default function ConsoleView({ account, openModal, notify, navigate }) {
   }, []);
 
   useEffect(() => { loadPaymentOrders(); }, [loadPaymentOrders]);
+
+  const redeem = async (event) => {
+    event.preventDefault();
+    const key = redemptionCode.trim();
+    if (!key) return;
+    setRedeeming(true);
+    try {
+      await apiRequest('/api/redemptions/redeem', { method: 'POST', body: { key } });
+      setRedemptionCode('');
+      notify('兑换码充值成功');
+      await onAccountRefresh?.();
+    } catch (error) {
+      notify(error.message || '兑换码充值失败');
+    } finally {
+      setRedeeming(false);
+    }
+  };
 
   const fetchFullKey = async (key) => {
     if (revealed[key.id]) return revealed[key.id];
@@ -169,13 +191,7 @@ export default function ConsoleView({ account, openModal, notify, navigate }) {
       </div>
 
       <div className="dashboard-grid dashboard-grid-main">
-        <Section
-          title="用量趋势"
-          description="最近 7 天 New API 最终结算额度"
-          actions={<select className="mini-select" defaultValue="消费金额"><option>消费金额</option><option>调用次数</option><option>Token 用量</option></select>}
-        >
-          <EmptyNotice title="暂无可展示的结算趋势" description="模型路由开放后按 New API 最终日志汇总。" />
-        </Section>
+        <UsageTrend data={usage.data} error={usage.error} loading={usage.loading} />
 
         <Section title="账户状态" description="统一账号可同时拥有用户与商户身份">
           <div className="account-summary">
@@ -194,6 +210,15 @@ export default function ConsoleView({ account, openModal, notify, navigate }) {
           {merchantApplication?.status === 'rejected' && <InlineNotice tone="warning">上次申请已驳回：{merchantApplication.review_reason || '请核对资料后重新提交'}</InlineNotice>}
         </Section>
       </div>
+
+      <Section title="兑换码充值" description="兑换成功后额度直接进入 New API 账户余额">
+        <form className="redemption-form" onSubmit={redeem}>
+          <Field label="兑换码">
+            <TextInput autoComplete="off" maxLength="128" onChange={(event) => setRedemptionCode(event.target.value)} placeholder="输入兑换码" value={redemptionCode} />
+          </Field>
+          <Button disabled={redeeming || !redemptionCode.trim()} icon={TicketCheck} type="submit" variant="primary">{redeeming ? '正在兑换' : '立即兑换'}</Button>
+        </form>
+      </Section>
 
       <Section
         title="API 密钥与路由"
@@ -226,7 +251,7 @@ export default function ConsoleView({ account, openModal, notify, navigate }) {
         </tbody></table></div>
       </Section>
 
-      <Section title="最近调用" description="金额、退款与缓存命中结果来自 New API 最终日志"><EmptyNotice title="暂无调用记录" description="路由开放后显示真实结算日志。" /></Section>
+      <UsageLogTable data={usage.data} error={usage.error} loading={usage.loading} onRefresh={usage.load} />
     </div>
   );
 }

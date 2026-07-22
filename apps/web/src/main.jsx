@@ -92,6 +92,11 @@ function App() {
   }, [toast]);
 
   const notify = (message) => setToast(message);
+  const refreshAccount = async () => {
+    const data = await apiRequest('/api/me');
+    setAccount(data);
+    return data;
+  };
   const navigate = (nextView) => {
     if (nextView !== 'market' && !account) {
       setModal('login');
@@ -130,7 +135,7 @@ function App() {
       <main>
         {view === 'paymentReturn' && <PaymentReturnView navigate={navigate} />}
         {view === 'market' && <MarketView navigate={navigate} />}
-        {view === 'console' && account && <ConsoleView account={account} navigate={navigate} notify={notify} openModal={setModal} />}
+        {view === 'console' && account && <ConsoleView account={account} navigate={navigate} notify={notify} onAccountRefresh={refreshAccount} openModal={setModal} />}
         {view === 'merchant' && (account?.is_merchant || Number(account?.role) >= 10) && <MerchantView account={account} notify={notify} openModal={setModal} />}
         {view === 'admin' && Number(account?.role) >= 10 && <AdminView notify={notify} openModal={setModal} section={adminSection} setSection={setAdminSection} />}
       </main>

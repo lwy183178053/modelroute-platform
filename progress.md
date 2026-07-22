@@ -767,3 +767,89 @@
 - 服务器 `/opt/modelroute-platform/releases/b147266e6464`：保存第 7 阶段已验收运行发布。
 - 服务器 `/opt/modelroute-platform/shared/backups/20260722T104834Z`：保存发布前两个数据库、Compose、版本和修改前环境文件备份。
 - 回滚点：服务器将 `/opt/modelroute-platform/current` 原子切换到 `/opt/modelroute-platform/releases/5aa9fa406f47` 并执行该目录的 `deploy/scripts/deploy.sh`；需要连数据库回退时，使用上述发布前备份和 `restore.sh`，再恢复 `environment.before.env`。
+
+## 2026-07-22 - Task: 实现第 8 阶段运营管理与上线加固
+
+### What was done
+
+- 用自研页面接入用户真实用量趋势、缓存 Token、调用日志和兑换码充值，继续以 New API 最终日志、整数额度和原生兑换结果为准。
+- 用自研管理员页面覆盖真实运营总览、全平台用量、SMTP 与注册登录设置、分组倍率、兑换码生命周期、系统任务和渠道运行操作；所有写操作继续经过管理员身份、同源校验和审计记录。
+- 在所有用户与管理员用量响应中把内部报价别名还原为标准模型名，映射缺失时使用统一公共名称，避免内部别名进入浏览器。
+- 增加只读运营验收、只读健康端点压测、临时数据库恢复演练和受控版本回滚工具，并为当前固定 New API 版本建立独立容器契约环境。
+- 使用真实 New API 容器验证初始化、用户、令牌、渠道、模型映射、倍率、Chat、Responses、Embeddings、流式响应、缓存计费、退款日志和无渠道错误；候选环境结束后删除容器、网络和卷。
+- 新增中文运营与升级验收文档并更新版本和部署手册；本轮只完成本地实现与验证，生产仍运行第 7 阶段版本 `b147266e6464`。
+
+### Testing
+
+- 使用本机 PostgreSQL 17 测试库执行 `go test -count=1 ./...` 和 `go test -race -count=1 ./...`，全部通过；执行 `go vet ./...` 与 `go build ./cmd/...`，退出码均为 `0`。
+- 执行 `npm.cmd run test:ui`，Vite 转换 `1614` 个模块，用户用量、兑换码、管理员总览、设置、分组、兑换码、任务、渠道操作和内部别名隐藏契约全部通过。
+- 执行 `npm.cmd run capture` 生成桌面与移动端回归截图；根页面无横向溢出，人工检查新增运营页面未发现文字遮挡。
+- 执行 `python -m unittest discover -s deploy/tests -v` 共 `16` 项，全部通过；候选契约 Python 程序编译、主 Compose 和候选 Compose 解析、所有部署 Shell 脚本语法检查均通过。
+- 执行真实 New API 候选容器契约通过；验证上游最高正式标签仍为 `v1.0.0-rc.21`，标签对象为 `8a784d7c8f8da9041b30c6c6ea4c3b3df0d683de`，源码提交为 `bde9b2f44887d34ec54799ae191d50f97914359e`。
+- 生产只读验收、压力测试、备份恢复和版本回滚演练将在本阶段提交发布后执行，本条记录不提前声明生产可用。
+
+### Notes
+
+- `apps/api/internal/bootstrap/resources.go`：注入管理员运营总览仓储和内部报价别名解析依赖。
+- `apps/api/internal/httpapi/routing_store.go`：增加内部报价别名到标准模型名的批量解析。
+- `apps/api/internal/httpapi/server.go`：注册用量、运营设置、分组、兑换码、系统任务和渠道运行接口。
+- `apps/api/internal/httpapi/services.go`：扩展运营管理、总览和别名解析依赖契约。
+- `apps/api/internal/httpapi/operations_handlers.go`：实现设置、分组、兑换码、系统任务与渠道运行操作。
+- `apps/api/internal/httpapi/operations_handlers_test.go`：覆盖运营接口权限、同源、整数额度、密码隐藏和别名隐藏。
+- `apps/api/internal/httpapi/overview_handlers.go`：实现管理员运营总览响应和依赖健康状态。
+- `apps/api/internal/httpapi/overview_store.go`：从平台账本、路由、审核与同步数据生成真实运营快照。
+- `apps/api/internal/httpapi/overview_store_postgres_test.go`：验证运营快照使用最终整数账本和真实队列数据。
+- `apps/api/internal/httpapi/usage_handlers.go`：代理并清洗用户与管理员 New API 用量和日志响应。
+- `apps/web/scripts/capture.mjs`：增加第 8 阶段真实接口数据形状和运营页面截图场景。
+- `apps/web/scripts/ui-smoke.mjs`：覆盖第 8 阶段页面、操作、权限与内部别名隐藏契约。
+- `apps/web/src/data.js`：删除最后一批已由真实运营接口替代的演示数据。
+- `apps/web/src/main.jsx`：传递账户刷新能力并接入新增真实页面。
+- `apps/web/src/styles.css`：补充用量、兑换码和运营页面的响应式样式。
+- `apps/web/src/ui.jsx`：补充运营状态所需的统一显示语义。
+- `apps/web/src/views/AdminView.jsx`：接入真实运营总览及设置、分组、兑换码、任务和用量导航。
+- `apps/web/src/views/ConsoleView.jsx`：展示真实用量、调用日志与兑换码充值入口。
+- `apps/web/src/views/admin/AdminChannels.jsx`：展示渠道运行数据并提供测试和余额刷新操作。
+- `apps/web/src/views/UsagePanels.jsx`：封装用户与管理员共用的真实用量趋势和日志表格。
+- `apps/web/src/views/admin/AdminGroups.jsx`：实现整数基点分组倍率管理页面。
+- `apps/web/src/views/admin/AdminRedemptions.jsx`：实现兑换码创建、编辑、启停、删除和清理页面。
+- `apps/web/src/views/admin/AdminSettings.jsx`：实现 SMTP 与注册登录设置页面并保持密码只写不读。
+- `apps/web/src/views/admin/AdminTasks.jsx`：实现系统任务列表、详情和日志清理任务页面。
+- `apps/web/src/views/admin/AdminUsage.jsx`：实现全平台真实用量与调用日志页面。
+- `apps/web/artifacts/admin-channels-desktop.png`：更新渠道运行操作桌面回归图。
+- `apps/web/artifacts/admin-channels-mobile.png`：更新渠道运行操作移动端回归图。
+- `apps/web/artifacts/admin-desktop.png`：更新真实运营总览桌面回归图。
+- `apps/web/artifacts/admin-mobile.png`：更新真实运营总览移动端回归图。
+- `apps/web/artifacts/admin-models-desktop.png`：随最终页面构建更新模型管理桌面回归图。
+- `apps/web/artifacts/admin-models-mobile.png`：随最终页面构建更新模型管理移动端回归图。
+- `apps/web/artifacts/admin-withdrawals-desktop.png`：随最终页面构建更新提现管理桌面回归图。
+- `apps/web/artifacts/admin-withdrawals-mobile.png`：随最终页面构建更新提现管理移动端回归图。
+- `apps/web/artifacts/console-desktop.png`：更新用户用量和兑换码桌面回归图。
+- `apps/web/artifacts/console-mobile.png`：更新用户用量和兑换码移动端回归图。
+- `apps/web/artifacts/merchant-mobile.png`：随最终页面构建更新商户中心移动端回归图。
+- `apps/web/artifacts/payment-config-desktop.png`：随最终页面构建更新支付配置桌面回归图。
+- `apps/web/artifacts/route-modal-desktop.png`：随最终页面构建更新路由弹窗桌面回归图。
+- `apps/web/artifacts/route-modal-mobile.png`：随最终页面构建更新路由弹窗移动端回归图。
+- `apps/web/artifacts/admin-groups-desktop.png`：新增分组倍率桌面回归图。
+- `apps/web/artifacts/admin-groups-mobile.png`：新增分组倍率移动端回归图。
+- `apps/web/artifacts/admin-redemptions-desktop.png`：新增兑换码管理桌面回归图。
+- `apps/web/artifacts/admin-redemptions-mobile.png`：新增兑换码管理移动端回归图。
+- `apps/web/artifacts/admin-settings-desktop.png`：新增平台设置桌面回归图。
+- `apps/web/artifacts/admin-settings-mobile.png`：新增平台设置移动端回归图。
+- `apps/web/artifacts/admin-tasks-desktop.png`：新增系统任务桌面回归图。
+- `apps/web/artifacts/admin-tasks-mobile.png`：新增系统任务移动端回归图。
+- `apps/web/artifacts/admin-usage-desktop.png`：新增管理员用量桌面回归图。
+- `apps/web/artifacts/admin-usage-mobile.png`：新增管理员用量移动端回归图。
+- `deploy/newapi-contract/compose.yaml`：定义与生产隔离的 New API 候选契约环境。
+- `deploy/newapi-contract/fake_upstream.py`：提供三类协议、流式和缓存用量固定上游响应。
+- `deploy/newapi-contract/run_contract.py`：执行真实 New API 初始化、管理、转发、计费和错误契约。
+- `deploy/scripts/load-test.sh`：增加只请求健康端点的有界并发压测。
+- `deploy/scripts/rollback-release.sh`：增加确认变量、目录边界和失败恢复保护的版本回滚。
+- `deploy/scripts/verify-backup-restore.sh`：在自动生成的临时数据库执行备份恢复演练。
+- `deploy/scripts/verify-newapi-contract.sh`：启动、执行并清理独立 New API 候选契约环境。
+- `deploy/scripts/verify-operations.sh`：增加第 8 阶段只读生产运营验收。
+- `deploy/tests/test_release_tools.py`：锁定运营验收、压测、恢复、回滚和候选契约工具边界。
+- `docs/New API版本与许可.md`：记录固定版本、源码提交、镜像摘要和候选契约结果。
+- `docs/部署运行手册.md`：增加第 8 阶段发布、运营验收、压测、恢复演练和回滚步骤。
+- `docs/运营管理与升级验收.md`：记录运营功能、权限边界、升级契约和发布工具用法。
+- `progress.md`：追加第 8 阶段本地实现、验证、文件清单和回滚点。
+- 回滚点：阶段标签 `phase-7-settlement`；第 8 阶段提交后可执行 `git revert <第8阶段提交>` 生成代码回退改动。生产服务器在本轮记录时仍运行第 7 阶段版本 `b147266e6464`。

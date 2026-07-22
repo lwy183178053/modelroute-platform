@@ -53,11 +53,11 @@ export function IconButton({ label, icon: Icon = MoreHorizontal, ...props }) {
 
 export function Status({ children }) {
   const text = String(children);
-  const tone = ['健康', '成功', '在售', '已完成', '已入账', '已开通', '正常'].includes(text)
+  const tone = ['健康', '成功', '在售', '已完成', '已结算', '已入账', '已开通', '正常'].includes(text)
     ? 'success'
     : ['冷却', '降级', '待审核', '待验证', '待支付', '待打款', '已支付', '等待入账', '入账中'].includes(text)
       ? 'warning'
-      : ['入账异常', '结果未知', '验证失败', '已退款', '停用', '已关闭'].includes(text)
+      : ['入账异常', '结果未知', '验证失败', '执行失败', '已退款', '停用', '已关闭'].includes(text)
         ? 'danger'
         : 'neutral';
   const Icon = tone === 'success' ? CheckCircle2 : tone === 'warning' ? Clock3 : tone === 'danger' ? XCircle : LoaderCircle;

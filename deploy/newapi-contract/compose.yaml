@@ -1,0 +1,71 @@
+name: modelroute-newapi-contract
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: contract
+      POSTGRES_PASSWORD: contract-password
+      POSTGRES_DB: newapi
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U contract -d newapi"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [contract]
+
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [contract]
+
+  fake-upstream:
+    image: python:3.13-alpine
+    command: ["python", "/fixture/fake_upstream.py"]
+    volumes:
+      - ./fake_upstream.py:/fixture/fake_upstream.py:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8081/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [contract]
+
+  new-api:
+    image: ${NEW_API_CANDIDATE_IMAGE:-calciumion/new-api:v1.0.0-rc.21@sha256:428018a37c0b26c163a3367c18401161707cd0e08d0f26a3dde9ff0caa05e34c}
+    environment:
+      SQL_DSN: postgresql://contract:contract-password@postgres:5432/newapi
+      REDIS_CONN_STRING: redis://redis:6379/0
+      SESSION_SECRET: contract-session-secret-2026
+      CRYPTO_SECRET: contract-crypto-secret-2026
+      ERROR_LOG_ENABLED: "true"
+      LOG_CONSUME_ENABLED: "true"
+      BATCH_UPDATE_ENABLED: "false"
+      STREAMING_TIMEOUT: "30"
+      TZ: Asia/Shanghai
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      fake-upstream:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3000/api/status | grep -q '\"success\":true'"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+    ports:
+      - "127.0.0.1:${NEW_API_CONTRACT_PORT:-33100}:3000"
+    networks: [contract, loopback]
+
+networks:
+  contract:
+    internal: true
+  loopback:

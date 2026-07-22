@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Check, RefreshCw, ShieldCheck, X } from 'lucide-react';
+import { Activity, Check, RefreshCw, ShieldCheck, WalletCards, X } from 'lucide-react';
 import { apiRequest } from '../../api';
 import { Button, InlineNotice, Section, Status } from '../../ui';
 
@@ -21,6 +21,7 @@ export default function AdminChannels({ notify }) {
   const [reviews, setReviews] = useState([]);
   const [channels, setChannels] = useState([]);
   const [offers, setOffers] = useState([]);
+  const [runtimes, setRuntimes] = useState({});
   const [error, setError] = useState('');
   const [busyID, setBusyID] = useState('');
 
@@ -33,8 +34,11 @@ export default function AdminChannels({ notify }) {
         apiRequest('/api/offers'),
       ]);
       setReviews(reviewData?.items || []);
-      setChannels(channelData?.items || []);
+      const channelItems = channelData?.items || [];
+      setChannels(channelItems);
       setOffers(offerData || []);
+      const runtimeResults = await Promise.allSettled(channelItems.map((channel) => apiRequest(`/api/admin/channels/${channel.id}/runtime`)));
+      setRuntimes(Object.fromEntries(channelItems.flatMap((channel, index) => runtimeResults[index].status === 'fulfilled' ? [[channel.id, runtimeResults[index].value]] : [])));
     } catch (requestError) {
       setError(requestError.message || '读取渠道数据失败');
     }
@@ -74,6 +78,20 @@ export default function AdminChannels({ notify }) {
     }
   };
 
+  const operateChannel = async (channel, operation) => {
+    setBusyID(`${channel.id}-${operation}`);
+    try {
+      const path = operation === 'test' ? 'test' : 'balance/refresh';
+      await apiRequest(`/api/admin/channels/${channel.id}/${path}`, { method: 'POST' });
+      notify(operation === 'test' ? '渠道测试完成' : '渠道余额已刷新');
+      await load();
+    } catch (requestError) {
+      notify(requestError.message || (operation === 'test' ? '渠道测试失败' : '刷新渠道余额失败'));
+    } finally {
+      setBusyID('');
+    }
+  };
+
   return (
     <div className="admin-section-stack">
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}
@@ -89,13 +107,14 @@ export default function AdminChannels({ notify }) {
       </Section>
 
       <Section title="已导入渠道" description="展示平台归属、New API 映射和当前报价健康，不回显上游密钥">
-        <div className="table-wrap"><table className="data-table"><thead><tr><th>渠道</th><th>商户</th><th>New API 编号</th><th>类型</th><th>模型</th><th>密钥指纹</th><th>状态</th><th>报价健康</th><th>操作</th></tr></thead><tbody>
+        <div className="table-wrap"><table className="data-table"><thead><tr><th>渠道</th><th>商户</th><th>New API 编号</th><th>类型</th><th>模型</th><th>密钥指纹</th><th>状态</th><th>报价健康</th><th>运行数据</th><th>操作</th></tr></thead><tbody>
           {channels.map((channel) => {
             const channelOffers = offers.filter((offer) => offer.merchant_channel_id === channel.id);
             const canRecover = channel.status === 'disabled' || channelOffers.some((offer) => offer.health_state === 'disabled');
-            return <tr key={channel.id}><td><strong>{channel.channel_name}</strong><small>C{channel.id} · R{channel.review_id}</small></td><td>M{channel.merchant_id}</td><td><code>New API {channel.newapi_channel_id}</code></td><td>{channelTypeNames[channel.channel_type] || `类型 ${channel.channel_type}`}</td><td>{channel.models?.join('、') || '-'}</td><td><code>{channel.credential_fingerprint || '-'}</code></td><td><Status>{statusNames[channel.status] || channel.status}</Status></td><td>{channelOffers.length ? channelOffers.map((offer) => <span key={offer.offer_id}><Status>{healthNames[offer.health_state] || offer.health_state}</Status><small>{offer.model}</small></span>) : '-'}</td><td>{canRecover ? <Button disabled={Boolean(busyID)} icon={RefreshCw} variant="ghost" onClick={() => recover(channel)}>恢复渠道</Button> : '-'}</td></tr>;
+            const runtime = runtimes[channel.id];
+            return <tr key={channel.id}><td><strong>{channel.channel_name}</strong><small>C{channel.id} · R{channel.review_id}</small></td><td>M{channel.merchant_id}</td><td><code>New API {channel.newapi_channel_id}</code></td><td>{channelTypeNames[channel.channel_type] || `类型 ${channel.channel_type}`}</td><td>{channel.models?.join('、') || '-'}</td><td><code>{channel.credential_fingerprint || '-'}</code></td><td><Status>{statusNames[channel.status] || channel.status}</Status></td><td>{channelOffers.length ? channelOffers.map((offer) => <span key={offer.offer_id}><Status>{healthNames[offer.health_state] || offer.health_state}</Status><small>{offer.model}</small></span>) : '-'}</td><td>{runtime ? <><strong>${(Number(runtime.balance_usd_micros || 0) / 1_000_000).toFixed(2)}</strong><small>{runtime.response_time_ms || 0} ms · 状态 {runtime.status}</small></> : <small>运行数据未就绪</small>}</td><td><div className="row-actions"><Button disabled={Boolean(busyID)} icon={Activity} onClick={() => operateChannel(channel, 'test')} variant="ghost">测试渠道</Button><Button disabled={Boolean(busyID)} icon={WalletCards} onClick={() => operateChannel(channel, 'balance')} variant="ghost">刷新余额</Button>{canRecover && <Button disabled={Boolean(busyID)} icon={RefreshCw} variant="ghost" onClick={() => recover(channel)}>恢复渠道</Button>}</div></td></tr>;
           })}
-          {channels.length === 0 && <tr><td className="table-message" colSpan="9">暂无已导入渠道</td></tr>}
+          {channels.length === 0 && <tr><td className="table-message" colSpan="10">暂无已导入渠道</td></tr>}
         </tbody></table></div>
       </Section>
     </div>

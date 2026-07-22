@@ -27,6 +27,21 @@ async function mockAdminAPI(targetPage, state) {
     if (url.pathname === '/api/me') {
       return json({ success: true, data: { id: 1, username: 'modelroute', display_name: '平台管理员', role: 100, status: 1, group: 'default', quota: 128642000, used_quota: 4268000, is_merchant: true, merchant_id: 31, merchant_status: 'active' } });
     }
+    if (url.pathname === '/api/announcements' && request.method() === 'GET') {
+      return json({ success: true, data: { unread_count: state.announcementReadCalls ? 0 : 1, items: [{ id: 9, title: '商户结算安排', body: '本周五统一处理人工提现。', audiences: ['admin'], pinned: true, status: 'published', is_read: state.announcementReadCalls > 0, publish_at: '2026-07-22T08:00:00Z' }] } });
+    }
+    if (url.pathname === '/api/announcements/9/read' && request.method() === 'POST') {
+      state.announcementReadCalls += 1;
+      return json({ success: true, data: null });
+    }
+    if (url.pathname === '/api/admin/announcements' && request.method() === 'GET') {
+      return json({ success: true, data: [{ id: 9, title: '商户结算安排', body: '本周五统一处理人工提现。', audiences: ['admin'], pinned: true, status: 'published', publish_at: '2026-07-22T08:00:00Z', created_at: '2026-07-22T07:00:00Z' }] });
+    }
+    if (url.pathname === '/api/admin/announcements' && request.method() === 'POST') {
+      state.announcementCreateCalls += 1;
+      state.announcementCreateBody = request.postDataJSON();
+      return json({ success: true, data: { id: 10, status: 'draft', ...state.announcementCreateBody } }, 201);
+    }
     if (url.pathname === '/api/models') {
       return json({ success: true, data: [{ id: 101, public_name: 'gpt-4o-mini', provider: 'OpenAI', protocol: 'chat_completions', status: 'active', price: { id: 501, version: 2, billing_mode: 'token', model_ratio_micros: 600000, completion_ratio_micros: 4000000, cache_ratio_micros: 500000, create_cache_ratio_micros: 0, image_ratio_micros: 0, audio_ratio_micros: 0, audio_completion_ratio_micros: 0 } }] });
     }
@@ -308,6 +323,7 @@ try {
     redemptionCreateCalls: 0, redemptionCreateBody: null, redemptionUpdateCalls: 0, redemptionUpdateBody: null,
     redemptionStatusCalls: 0, redemptionStatusBody: null, redemptionDeleteCalls: 0, redemptionCleanupCalls: 0,
     logCleanupCalls: 0, logCleanupBody: null, channelTestCalls: 0, channelBalanceCalls: 0,
+    announcementReadCalls: 0, announcementCreateCalls: 0, announcementCreateBody: null,
   };
   await mockAdminAPI(page, adminMockState);
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
@@ -316,6 +332,15 @@ try {
   await page.getByText('gpt-4o-mini').first().waitFor();
   await page.getByText('北辰云智').first().waitFor();
   assert(await page.getByText('GPT-5.2').count() === 0, '模型市场仍展示演示报价');
+  assert(await page.getByRole('button', { name: '帮助中心' }).count() === 0, '顶部仍保留无行为帮助按钮');
+  await page.getByRole('button', { name: '公告', exact: true }).click();
+  await page.getByRole('heading', { name: '公告中心' }).waitFor();
+  await page.getByRole('button', { name: /商户结算安排/ }).click();
+  await page.getByText('本周五统一处理人工提现。').waitFor();
+  assert(adminMockState.announcementReadCalls === 1, '打开公告详情没有标记已读');
+  await page.getByRole('button', { name: '关闭公告' }).click();
+  await page.getByRole('button', { name: /平台管理员/ }).click();
+  await page.getByRole('heading', { name: '账户概览' }).waitFor();
 
   const views = [
     ['控制台', '账户概览'],
@@ -381,6 +406,16 @@ try {
   await page.getByText('$18.00', { exact: true }).first().waitFor();
   await page.getByText('126 / 128').waitFor();
   assert(await page.getByRole('button', { name: /商户审核/ }).getByText('1', { exact: true }).count() === 1, '管理员侧栏未显示真实商户待办数量');
+  await page.getByRole('button', { name: '公告管理' }).click();
+  await page.getByText('商户结算安排').waitFor();
+  await page.getByRole('button', { name: '新建公告' }).click();
+  const announcementDialog = page.getByRole('dialog', { name: '新建公告' });
+  await announcementDialog.getByLabel('公告标题').fill('系统维护通知');
+  await announcementDialog.getByLabel('公告正文').fill('今晚进行短时维护。');
+  await announcementDialog.getByRole('checkbox', { name: '普通用户' }).check();
+  await announcementDialog.getByRole('button', { name: '保存草稿' }).click();
+  await page.getByText('公告草稿已保存').waitFor();
+  assert(adminMockState.announcementCreateCalls === 1 && adminMockState.announcementCreateBody.audiences.includes('user'), '公告创建没有提交受众');
   await page.getByRole('button', { name: '调用日志' }).click();
   await page.getByText('req-admin-9001').waitFor();
   await page.getByText('alice', { exact: true }).waitFor();

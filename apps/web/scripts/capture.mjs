@@ -37,6 +37,8 @@ async function captureSet(viewport, suffix) {
     const url = new URL(request.url());
     const fulfill = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(data) });
     if (url.pathname === '/api/me') return fulfill({ success: true, data: { id: 1, username: 'modelroute', display_name: '平台管理员', role: 100, status: 1, group: 'default', quota: 128642000, used_quota: 4268000, request_count: 2846, is_merchant: true, merchant_id: 31, merchant_status: 'active' } });
+    if (url.pathname === '/api/announcements') return fulfill({ success: true, data: { unread_count: 1, items: [{ id: 9, title: '商户结算安排', body: '本周五统一处理人工提现，请核对收款信息。', audiences: ['admin'], pinned: true, status: 'published', is_read: false, publish_at: '2026-07-22T08:00:00Z' }] } });
+    if (url.pathname === '/api/admin/announcements') return fulfill({ success: true, data: [{ id: 9, title: '商户结算安排', body: '本周五统一处理人工提现，请核对收款信息。', audiences: ['admin'], pinned: true, status: 'published', publish_at: '2026-07-22T08:00:00Z', created_at: '2026-07-22T07:00:00Z' }] });
     if (url.pathname === '/api/models' || url.pathname === '/api/admin/models') return fulfill({ success: true, data: [{ id: 101, public_name: 'gpt-4o-mini', provider: 'OpenAI', protocol: 'chat_completions', status: 'active', price: { id: 501, version: 2, billing_mode: 'token', model_ratio_micros: 600000, completion_ratio_micros: 4000000, cache_ratio_micros: 500000, create_cache_ratio_micros: 0, image_ratio_micros: 0, audio_ratio_micros: 0, audio_completion_ratio_micros: 0 } }] });
     if (url.pathname === '/api/offers') return fulfill({ success: true, data: [
       { offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', merchant_channel_id: 51, channel_name: 'OpenAI 主线路', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 },
@@ -104,10 +106,25 @@ async function captureSet(viewport, suffix) {
     if ((await stat(path)).size < 20_000) throw new Error(`${filename}-${suffix} 截图文件过小`);
   }
 
+  await page.getByRole('button', { name: '公告', exact: true }).click();
+  await page.getByRole('heading', { name: '公告中心' }).waitFor();
+  await verifyLayout(page, `announcement-panel-${suffix}`);
+  let path = `${outputDir}announcement-panel-${suffix}.png`;
+  await page.screenshot({ path, fullPage: false });
+  if ((await stat(path)).size < 20_000) throw new Error(`announcement-panel-${suffix} 截图文件过小`);
+  await page.getByRole('button', { name: '关闭公告' }).click();
+
+  await page.getByRole('button', { name: '公告管理' }).click();
+  await page.getByText('商户结算安排').waitFor();
+  await verifyLayout(page, `admin-announcements-${suffix}`);
+  path = `${outputDir}admin-announcements-${suffix}.png`;
+  await page.screenshot({ path, fullPage: true });
+  if ((await stat(path)).size < 20_000) throw new Error(`admin-announcements-${suffix} 截图文件过小`);
+
   await page.getByRole('button', { name: '调用日志' }).click();
   await page.getByText('req-admin-9001').waitFor();
   await verifyLayout(page, `admin-usage-${suffix}`);
-  let path = `${outputDir}admin-usage-${suffix}.png`;
+  path = `${outputDir}admin-usage-${suffix}.png`;
   await page.screenshot({ path, fullPage: true });
   if ((await stat(path)).size < 20_000) throw new Error(`admin-usage-${suffix} 截图文件过小`);
 

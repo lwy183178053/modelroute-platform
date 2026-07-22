@@ -103,6 +103,7 @@ func buildHTTPServices(database *sql.DB, redisClient *redis.Client, cfg config.C
 		Settlement:    settlement,
 		UsageAliases:  routing,
 		Overview:      httpapi.NewSQLAdminOverviewStore(database),
+		Announcements: httpapi.NewSQLAnnouncementStore(database),
 		Cookie: httpapi.CookieConfig{
 			Name:         cfg.SessionCookieName,
 			Secure:       cfg.SessionCookieSecure,

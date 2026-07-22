@@ -997,3 +997,75 @@
 - `docs/superpowers/plans/2026-07-22-ModelRoute完整实施计划.md`：把原计划修正为唯一管理员直属普通商户。
 - `progress.md`：追加本阶段实现、验证、文件清单和回滚点。
 - 回滚点：基线提交 `13a03b1`；本阶段提交后可执行 `git revert <本阶段提交>` 生成代码回退改动。第 6 号迁移包含数据库结构变更，生产尚未发布；未来发布后若需跨迁移回退，应使用同一发布前的平台库与 New API 库备份恢复。
+
+## 2026-07-22 - Task: 接入公告中心与管理员公告管理
+
+### What was done
+
+- 新增普通用户、商户和管理员互斥受众的公告系统，支持草稿、定时发布、已发布、已下架、置顶、自动过期和幂等已读。
+- 顶部铃铛接入真实公告列表和未读角标，打开详情时标记已读；移除无行为帮助按钮和头像下拉三角，头像点击直接进入控制台。
+- 管理后台增加公告管理页，可新建、编辑、发布和下架纯文本公告，所有写操作记录公告对象审计。
+- 新增第 7 号迁移和 PostgreSQL 可见性测试，定时生效与过期隐藏直接由查询时间判断，不新增 Worker 状态任务。
+
+### Testing
+
+- 后端测试先在旧实现上稳定失败，失败点为缺少第 7 号迁移、公告仓储、接口和服务注入；公告审计回归测试还确认旧辅助函数会把对象误记为用户，修正后全部转绿。
+- 前端冒烟测试先在旧界面上稳定失败，失败点为仍存在无行为帮助按钮；实现后验证公告已读、头像跳转、公告管理和创建受众提交均通过。
+- 使用本机 PostgreSQL 17 测试库执行 `go test -count=1 ./...`，真实覆盖定时前不可见、到时可见、过期隐藏、受众隔离和重复已读幂等。
+- 执行 `go vet ./...`、`go build ./cmd/...` 和 `go test -race -count=1 ./internal/httpapi ./internal/bootstrap`，全部通过。
+- 执行 `npm.cmd run test:ui` 和 `npm.cmd run capture`，桌面与移动端公告面板和公告管理页均生成有效截图，根页面无横向溢出；人工目检未发现文字遮挡或控件重叠。
+
+### Notes
+
+- `apps/api/internal/bootstrap/resources.go`：注入公告 SQL 仓储。
+- `apps/api/internal/httpapi/announcement_handlers.go`：实现用户公告、已读和管理员公告写接口。
+- `apps/api/internal/httpapi/announcement_handlers_test.go`：覆盖互斥受众、定时创建和公告审计对象。
+- `apps/api/internal/httpapi/announcement_store.go`：实现公告可见性、已读幂等和管理状态写入。
+- `apps/api/internal/httpapi/announcement_store_postgres_test.go`：覆盖真实 PostgreSQL 时间与已读行为。
+- `apps/api/internal/httpapi/announcement_types.go`：定义公告领域类型、受众和仓储契约。
+- `apps/api/internal/httpapi/server.go`：注册用户与管理员公告路由。
+- `apps/api/internal/httpapi/services.go`：增加公告服务依赖。
+- `apps/api/internal/migrations/migrate_test.go`：锁定第 7 号公告迁移。
+- `apps/api/internal/migrations/sql/000007_announcements.sql`：创建公告和公告已读表。
+- `apps/web/src/main.jsx`：接入公告面板、未读角标、头像跳转并删除无行为顶部控件。
+- `apps/web/src/styles.css`：增加公告面板、公告管理和移动端样式。
+- `apps/web/src/views/AdminView.jsx`：增加公告管理侧栏入口。
+- `apps/web/src/views/admin/AdminAnnouncements.jsx`：实现公告列表、表单和状态操作。
+- `apps/web/scripts/ui-smoke.mjs`：覆盖顶部公告、已读、头像跳转和管理员创建公告。
+- `apps/web/scripts/capture.mjs`：增加桌面和移动端公告截图场景。
+- `apps/web/artifacts/announcement-panel-desktop.png`：新增桌面公告面板回归图。
+- `apps/web/artifacts/announcement-panel-mobile.png`：新增移动端公告面板回归图。
+- `apps/web/artifacts/admin-announcements-desktop.png`：新增桌面公告管理回归图。
+- `apps/web/artifacts/admin-announcements-mobile.png`：新增移动端公告管理回归图。
+- `apps/web/artifacts/admin-channels-desktop.png`：更新顶部公告入口后的桌面回归图。
+- `apps/web/artifacts/admin-channels-mobile.png`：更新顶部公告入口后的移动端回归图。
+- `apps/web/artifacts/admin-desktop.png`：更新管理员顶部栏桌面回归图。
+- `apps/web/artifacts/admin-mobile.png`：更新管理员顶部栏移动端回归图。
+- `apps/web/artifacts/admin-groups-desktop.png`：更新公告侧栏后的桌面回归图。
+- `apps/web/artifacts/admin-groups-mobile.png`：更新公告侧栏后的移动端回归图。
+- `apps/web/artifacts/admin-models-desktop.png`：更新公告侧栏后的桌面回归图。
+- `apps/web/artifacts/admin-models-mobile.png`：更新公告侧栏后的移动端回归图。
+- `apps/web/artifacts/admin-redemptions-desktop.png`：更新公告侧栏后的桌面回归图。
+- `apps/web/artifacts/admin-redemptions-mobile.png`：更新公告侧栏后的移动端回归图。
+- `apps/web/artifacts/admin-settings-desktop.png`：更新公告侧栏后的桌面回归图。
+- `apps/web/artifacts/admin-settings-mobile.png`：更新公告侧栏后的移动端回归图。
+- `apps/web/artifacts/admin-tasks-desktop.png`：更新公告侧栏后的桌面回归图。
+- `apps/web/artifacts/admin-tasks-mobile.png`：更新公告侧栏后的移动端回归图。
+- `apps/web/artifacts/admin-usage-desktop.png`：更新公告侧栏后的桌面回归图。
+- `apps/web/artifacts/admin-usage-mobile.png`：更新公告侧栏后的移动端回归图。
+- `apps/web/artifacts/admin-withdrawals-desktop.png`：更新公告侧栏后的桌面回归图。
+- `apps/web/artifacts/admin-withdrawals-mobile.png`：更新公告侧栏后的移动端回归图。
+- `apps/web/artifacts/console-desktop.png`：更新头像与公告入口后的桌面回归图。
+- `apps/web/artifacts/console-mobile.png`：更新移动端公告入口回归图。
+- `apps/web/artifacts/market-desktop.png`：更新登录态顶部栏桌面回归图。
+- `apps/web/artifacts/market-mobile.png`：更新登录态顶部栏移动端回归图。
+- `apps/web/artifacts/merchant-desktop.png`：更新商户顶部栏桌面回归图。
+- `apps/web/artifacts/merchant-mobile.png`：更新商户顶部栏移动端回归图。
+- `apps/web/artifacts/payment-config-desktop.png`：更新支付弹窗顶部公告入口回归图。
+- `apps/web/artifacts/route-modal-desktop.png`：更新路由弹窗顶部公告入口回归图。
+- `apps/web/artifacts/withdrawal-modal-desktop.png`：更新提现弹窗顶部公告入口回归图。
+- `apps/web/artifacts/withdrawal-modal-mobile.png`：更新提现弹窗移动端公告入口回归图。
+- `docs/公告管理.md`：记录公告规则、接口、数据、页面和验证方式。
+- `docs/部署运行手册.md`：把最低迁移验收更新到第 7 号公告迁移。
+- `progress.md`：追加公告阶段实现、验证、文件清单和回滚点。
+- 回滚点：上一阶段提交 `c24973f`；本阶段提交后可执行 `git revert <本阶段提交>` 生成代码回退改动。生产尚未执行第 7 号迁移；未来发布后跨迁移回退必须使用发布前双数据库备份。

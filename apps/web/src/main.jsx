@@ -2,8 +2,6 @@ import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   Bell,
-  ChevronDown,
-  CircleHelp,
   Gauge,
   LogIn,
   LogOut,
@@ -34,10 +32,48 @@ function allowedNavigation(account) {
 
 function Topbar({ account, active, navigate, onLogin, onLogout }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [announcements, setAnnouncements] = useState({ items: [], unread_count: 0 });
+  const [announcementOpen, setAnnouncementOpen] = useState(false);
+  const [selectedAnnouncement, setSelectedAnnouncement] = useState(null);
   const switchView = (view) => { navigate(view); setMobileOpen(false); };
   const navigation = allowedNavigation(account);
   const displayName = account?.display_name || account?.username || '';
   const roleName = Number(account?.role) >= 10 ? '管理员' : account?.is_merchant ? '商户' : '普通用户';
+
+  useEffect(() => {
+    let activeRequest = true;
+    if (!account) {
+      setAnnouncements({ items: [], unread_count: 0 });
+      setAnnouncementOpen(false);
+      return undefined;
+    }
+    apiRequest('/api/announcements')
+      .then((data) => { if (activeRequest) setAnnouncements(data || { items: [], unread_count: 0 }); })
+      .catch(() => {});
+    return () => { activeRequest = false; };
+  }, [account?.id]);
+
+  const openAnnouncement = async (item) => {
+    setSelectedAnnouncement(item);
+    if (item.is_read) return;
+    try {
+      await apiRequest(`/api/announcements/${item.id}/read`, { method: 'POST' });
+      setAnnouncements((current) => ({
+        ...current,
+        unread_count: Math.max(0, Number(current.unread_count || 0) - 1),
+        items: current.items.map((entry) => entry.id === item.id ? { ...entry, is_read: true } : entry),
+      }));
+      setSelectedAnnouncement((current) => current?.id === item.id ? { ...current, is_read: true } : current);
+    } catch {
+      // The announcement remains readable even if the read receipt needs a later retry.
+    }
+  };
+
+  const closeAnnouncements = () => {
+    setAnnouncementOpen(false);
+    setSelectedAnnouncement(null);
+  };
+
   return (
     <header className="topbar">
       <div className="topbar-inner">
@@ -54,9 +90,29 @@ function Topbar({ account, active, navigate, onLogin, onLogout }) {
         <div className="topbar-tools">
           {account ? <>
             <div className="balance-chip"><WalletCards size={16} /><span>额度</span><strong>{formatQuota(account.quota)}</strong></div>
-            <IconButton label="帮助中心" icon={CircleHelp} />
-            <span className="notification-wrap"><IconButton label="通知" icon={Bell} /></span>
-            <button className="profile-button" type="button"><span className="avatar">{displayName.slice(0, 1).toUpperCase()}</span><span><strong>{displayName}</strong><small>{roleName}</small></span><ChevronDown size={15} /></button>
+            <span className="notification-wrap">
+              <IconButton aria-expanded={announcementOpen} label="公告" icon={Bell} onClick={() => setAnnouncementOpen((value) => !value)} />
+              {Number(announcements.unread_count || 0) > 0 && <b>{Math.min(99, Number(announcements.unread_count))}</b>}
+              {announcementOpen && <div className="announcement-popover" role="dialog" aria-label="公告中心">
+                <div className="announcement-popover-header">
+                  <div><h2>公告中心</h2><span>{announcements.unread_count || 0} 条未读</span></div>
+                  <IconButton label="关闭公告" icon={X} onClick={closeAnnouncements} />
+                </div>
+                {selectedAnnouncement ? <div className="announcement-detail">
+                  <button onClick={() => setSelectedAnnouncement(null)} type="button">返回公告列表</button>
+                  <strong>{selectedAnnouncement.title}</strong>
+                  <time>{selectedAnnouncement.publish_at ? new Date(selectedAnnouncement.publish_at).toLocaleString('zh-CN', { hour12: false }) : ''}</time>
+                  <p>{selectedAnnouncement.body}</p>
+                </div> : <div className="announcement-list">
+                  {announcements.items.map((item) => <button className={item.is_read ? '' : 'unread'} key={item.id} onClick={() => openAnnouncement(item)} type="button">
+                    <span>{item.pinned && <i>置顶</i>}<strong>{item.title}</strong></span>
+                    <small>{item.publish_at ? new Date(item.publish_at).toLocaleString('zh-CN', { hour12: false }) : ''}</small>
+                  </button>)}
+                  {announcements.items.length === 0 && <div className="announcement-empty">暂无公告</div>}
+                </div>}
+              </div>}
+            </span>
+            <button aria-label={`${displayName}，进入控制台`} className="profile-button" onClick={() => switchView('console')} title="进入控制台" type="button"><span className="avatar">{displayName.slice(0, 1).toUpperCase()}</span><span><strong>{displayName}</strong><small>{roleName}</small></span></button>
             <IconButton label="退出登录" icon={LogOut} onClick={onLogout} />
           </> : account === null ? <Button className="login-button" icon={LogIn} onClick={onLogin} variant="primary">登录</Button> : null}
           <IconButton className="mobile-menu" label={mobileOpen ? '关闭菜单' : '打开菜单'} icon={mobileOpen ? X : Menu} onClick={() => setMobileOpen((value) => !value)} />

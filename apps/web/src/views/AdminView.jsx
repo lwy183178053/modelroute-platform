@@ -11,6 +11,7 @@ import {
   Landmark,
   Layers3,
   ListChecks,
+  Megaphone,
   Settings2,
   ShieldCheck,
   TicketCheck,
@@ -30,6 +31,7 @@ import AdminRedemptions from './admin/AdminRedemptions';
 import AdminSettings from './admin/AdminSettings';
 import AdminTasks from './admin/AdminTasks';
 import AdminUsage from './admin/AdminUsage';
+import AdminAnnouncements from './admin/AdminAnnouncements';
 
 const baseSections = [
   { id: 'overview', label: '运营总览', icon: Activity },
@@ -43,6 +45,7 @@ const baseSections = [
   { id: 'redemptions', label: '兑换码管理', icon: TicketCheck },
   { id: 'withdrawals', label: '提现审核', icon: Landmark },
   { id: 'tasks', label: '系统任务', icon: ListChecks },
+  { id: 'announcements', label: '公告管理', icon: Megaphone },
   { id: 'settings', label: '平台设置', icon: Settings2 },
   { id: 'audit', label: '审计日志', icon: FileClock },
 ];
@@ -162,6 +165,7 @@ export default function AdminView({ section, setSection, openModal, notify }) {
           {section === 'redemptions' && <AdminRedemptions notify={notify} />}
           {section === 'withdrawals' && <AdminWithdrawals notify={notify} openModal={openModal} />}
           {section === 'tasks' && <AdminTasks notify={notify} />}
+          {section === 'announcements' && <AdminAnnouncements notify={notify} />}
           {section === 'settings' && <AdminSettings notify={notify} />}
           {section === 'audit' && <AdminAudit />}
         </div>

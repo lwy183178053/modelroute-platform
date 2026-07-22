@@ -80,6 +80,7 @@ type Services struct {
 	SettlementSync HealthCycleRunner
 	UsageAliases   UsageAliasResolver
 	Overview       AdminOverviewReader
+	Announcements  AnnouncementRepository
 	Cookie         CookieConfig
 }
 

@@ -164,3 +164,69 @@
 - `progress.md`：追加本轮实现、验证、文件清单和回滚点。
 - 旧 `ui-preview` 目录受本机句柄占用且清理被执行策略拦截，当前由 Git 忽略；正式工程只使用 `apps/web`。
 - 回滚点：阶段标签 `phase-1-baseline`；执行 `git revert phase-1-baseline` 可回退本阶段仓库改动，服务器本阶段没有写操作。
+
+## 2026-07-22 - Task: 完成 ModelRoute 第 2 阶段部署底座与生产验收
+
+### What was done
+
+- 建立 Go API、后台 Worker、PostgreSQL 事务迁移、Redis 与 New API 依赖探针，提供存活、就绪和版本接口。
+- 固定 New API `v1.0.0-rc.21` 镜像摘要，建立平台库与 New API 库的独立账号、数据库和内部网络。
+- 建立六服务 Docker Compose、Nginx 网关、备份恢复、发布验收和宿主机 Caddy 接入配置。
+- 将网关限制在 `127.0.0.1:28100`，New API、PostgreSQL 和 Redis 均未发布宿主机端口。
+- 修复网关网络、IPv6 健康检查和发布版本注入问题；经 `current` 软链接部署时仍以真实发布目录名作为 `/api/version`。
+- 在生产服务器部署独立 ModelRoute 发布，复用受限共享环境文件和持久化目录，未改动 Sub2API 与 SDK 的容器、数据库和路由。
+- 为 `aggregate.lwylink.xyz` 备份并追加 Caddy 站点，完成配置校验和平滑重载，修复 Cloudflare `525`。
+- 执行平台库与 New API 库备份并验证 SHA-256，生产环境文件权限保持为 `600`。
+
+### Testing
+
+- 执行 `go test ./...`、`go vet ./...` 和 API/Worker 构建，全部退出码为 `0`。
+- 执行 `npm.cmd run build`，Vite 转换 `1603` 个模块；执行 `npm.cmd run test:ui`，四个视图和关键交互通过。
+- 执行部署测试，Compose 隔离、固定 New API 摘要、网关 IPv4 健康检查和发布版本注入共 `5` 项通过。
+- 发布版本测试先观察到四次 Compose 调用均未收到版本的预期失败，再实现最小修复并确认测试通过。
+- 对全部 Shell 脚本执行语法检查，对 Compose 执行 `config --quiet`，并执行 `git diff --check`。
+- 在服务器执行 `verify.sh http://127.0.0.1:28100` 与 `verify.sh https://aggregate.lwylink.xyz`，页面、存活、就绪和 `/v1` 关闭状态均通过。
+- 检查六个 ModelRoute 容器，网关、New API、平台 API、PostgreSQL 和 Redis 均为健康状态，Worker 持续运行。
+- 验证生产平台迁移记录为 `1`，共享 `.env` 权限为 `600`，New API、PostgreSQL 和 Redis 只有容器内部端口。
+- 生成备份 `20260722T035043Z`，`platform.dump`、`newapi.dump`、Compose 配置和版本文件的 SHA-256 全部校验通过。
+- 执行 `caddy validate`、源站 SNI 请求和公网 HTTPS 请求；ModelRoute 返回 `200`，原有 `api.lwylink.xyz` 与 `sdk.lwylink.xyz` 仍返回 `200`，Caddy 无新增错误日志。
+- 验证 `/api/version` 返回发布提交 `f2842fc74089`，并扫描仓库确认 SSH、SMTP 和易支付凭据明文未进入源码、文档或构建输入。
+
+### Notes
+
+- `.dockerignore`：限制 Docker 构建上下文中的依赖、构建产物、密钥和运行数据。
+- `.env.example`：定义 Compose 所需变量名及非生产示例值。
+- `.gitattributes`：固定 Shell 脚本使用 LF 行尾。
+- `.gitignore`：排除环境密钥、运行数据、构建产物和 Python 缓存。
+- `apps/api/Dockerfile`：构建并输出带发布版本的 API 与 Worker 镜像。
+- `apps/api/cmd/api/main.go`：启动迁移、依赖资源和 HTTP API。
+- `apps/api/cmd/worker/main.go`：启动后台 Worker 并维持依赖连接。
+- `apps/api/go.mod`：声明 Go 模块与服务依赖。
+- `apps/api/go.sum`：锁定 Go 依赖校验值。
+- `apps/api/internal/bootstrap/resources.go`：统一建立和关闭 PostgreSQL、Redis 与 New API 依赖。
+- `apps/api/internal/config/config.go`：加载并校验服务运行配置。
+- `apps/api/internal/config/config_test.go`：覆盖必填配置和超时配置验证。
+- `apps/api/internal/dependencies/checks.go`：实现 Redis 与 New API 存活探针。
+- `apps/api/internal/dependencies/checks_test.go`：覆盖 New API 探针成功与失败响应。
+- `apps/api/internal/httpapi/server.go`：实现健康、版本和首期 `/v1` 关闭响应。
+- `apps/api/internal/httpapi/server_test.go`：覆盖存活、依赖故障和 OpenAI 兼容错误格式。
+- `apps/api/internal/migrations/migrate.go`：实现带锁的事务迁移器。
+- `apps/api/internal/migrations/migrate_test.go`：验证迁移文件嵌入和命名顺序。
+- `apps/api/internal/migrations/sql/000001_foundation.sql`：建立平台基础迁移记录和服务状态表。
+- `compose.yaml`：编排六个服务、隔离网络、健康检查和持久化目录。
+- `deploy/caddy/aggregate.Caddyfile`：提供 ModelRoute 宿主机反向代理站点块。
+- `deploy/gateway/Dockerfile`：构建 React 静态资源并生成 Nginx 网关镜像。
+- `deploy/gateway/default.conf`：分流网页、平台 API 和首期三个模型入口。
+- `deploy/postgres/init-databases.sh`：首次创建相互隔离的平台库和 New API 库。
+- `deploy/scripts/backup.sh`：导出两个数据库及部署元数据并生成 SHA-256 清单。
+- `deploy/scripts/deploy.sh`：校验、构建、启动 Compose，并从真实发布目录注入版本。
+- `deploy/scripts/restore.sh`：提供带显式确认的数据库恢复流程。
+- `deploy/scripts/verify.sh`：验证网页、健康接口和 `/v1` 关闭状态。
+- `deploy/tests/test_compose.py`：验证端口、网络、摘要和网关健康检查约束。
+- `deploy/tests/test_deploy.py`：验证经 `current` 软链接发布时的版本注入行为。
+- `docs/New API版本与许可.md`：记录固定镜像摘要、源码提交和许可证边界。
+- `docs/部署运行手册.md`：记录发布、备份、恢复、Caddy 和版本核对步骤。
+- `progress.md`：追加本阶段施工、验证、文件清单和回滚点。
+- 服务器 `/etc/caddy/Caddyfile`：追加 `aggregate.lwylink.xyz` 站点；原配置备份为 `/etc/caddy/backups/Caddyfile.before-modelroute.20260722T035149Z`。
+- 服务器 `/opt/modelroute-platform/releases/f2842fc74089`：保存已验收的独立发布；共享密钥与数据仍位于 `/opt/modelroute-platform/shared`。
+- 回滚点：服务器执行 `ln -s releases/635085139bd1 /opt/modelroute-platform/current.rollback && mv -Tf /opt/modelroute-platform/current.rollback /opt/modelroute-platform/current && /opt/modelroute-platform/current/deploy/scripts/deploy.sh` 可恢复上一发布；Caddy 可用上述备份文件恢复后执行 `caddy validate` 与 `systemctl reload caddy`。

@@ -22,6 +22,21 @@ def shell_path(path):
 
 
 class ReleaseToolContractTest(unittest.TestCase):
+    def test_merchant_verifier_uses_temporary_common_user(self):
+        verifier = read_script("verify-merchants.sh")
+        for marker in (
+            "ADMIN_COOKIE_JAR=",
+            "USER_COOKIE_JAR=",
+            "NEW_API_COOKIE_JAR=",
+            "NEW_API_BASE_URL=",
+            '"role": 1',
+            'me.get("is_platform_merchant") is False',
+            '-b "$USER_COOKIE_JAR"',
+            '"$NEW_API_BASE_URL/api/user/"',
+            '-X DELETE "$NEW_API_BASE_URL/api/user/$TEST_USER_ID"',
+        ):
+            self.assertIn(marker, verifier)
+
     def test_official_model_seed_catalog_is_included_in_release(self):
         catalog = ROOT / "apps" / "api" / "internal" / "modelseed" / "data" / "2026-07-23-v1.json"
         self.assertTrue(catalog.is_file())

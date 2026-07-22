@@ -1279,3 +1279,27 @@
 
 - `progress.md`：追加最终提交前全量验证证据和提交范围说明。
 - 回滚点：与上一条生产升级记录相同；本条只追加验证证据，可随本轮提交整体执行 `git revert <本轮提交>`。
+
+## 2026-07-23 - Task: 建立 ModelRoute V2 空库数据基线
+
+### What was done
+
+- 将 8 份旧平台迁移替换为单一 V2 空库基线，不保留旧字段兼容分支。
+- 建立单模型渠道、15 分钟检测凭证、商户模型唯一报价、渠道级内部别名、文本价格阶梯和图片价格矩阵。
+- 将商户与路由倍率统一为 `0..50000` 基点，健康渠道默认不安排主动探活。
+- 将支付结构简化为人民币分和 New API 整数额度，移除美元金额与汇率字段。
+
+### Testing
+
+- 先运行 `go test ./internal/migrations`，测试按预期因仍存在 8 份旧迁移而失败；替换 V2 基线后同一测试通过。
+- 使用临时 `postgres:17-alpine` 容器执行完整基线 SQL，`ON_ERROR_STOP=1` 下成功创建 33 张业务表。
+- 查询确认 `channel_health.next_probe_at` 允许为空；临时 PostgreSQL 容器已停止并自动清理。
+
+### Notes
+
+- `apps/api/internal/migrations/migrate_test.go`：锁定单一 V2 基线、关键表、倍率边界和已删除字段。
+- `apps/api/internal/migrations/sql/000001_v2_baseline.sql`：提供平台 V2 全新空库结构。
+- `apps/api/internal/migrations/sql/000001_foundation.sql` 至 `000008_absolute_pricing.sql`：删除旧迁移，避免重置环境继续携带旧业务结构。
+- `docs/V2数据基线.md`：记录 V2 数据关系、健康、支付和回滚边界。
+- `progress.md`：追加本阶段实现、验证、文件清单和回滚点。
+- 回滚点：代码基线提交 `480487f`；本阶段提交后可执行 `git revert <本阶段提交>` 回退仓库改动。103 尚未执行 V2 重置，本阶段回退不涉及生产数据恢复。

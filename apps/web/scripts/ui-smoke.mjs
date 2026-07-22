@@ -15,7 +15,7 @@ const browser = await chromium.launch({ executablePath, headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 page.setDefaultTimeout(10000);
 
-async function mockAdminAPI(targetPage, state) {
+async function mockAdminAPI(targetPage, state, account = null) {
   await targetPage.route('**/api/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -25,7 +25,7 @@ async function mockAdminAPI(targetPage, state) {
       body: JSON.stringify(data),
     });
     if (url.pathname === '/api/me') {
-      return json({ success: true, data: { id: 1, username: 'modelroute', display_name: '平台管理员', role: 100, status: 1, group: 'default', quota: 128642000, used_quota: 4268000, is_merchant: true, merchant_id: 31, merchant_status: 'active' } });
+      return json({ success: true, data: account || { id: 1, username: 'modelroute', display_name: '平台管理员', role: 100, status: 1, group: 'default', quota: 128642000, used_quota: 4268000, is_merchant: true, merchant_id: 31, merchant_status: 'active' } });
     }
     if (url.pathname === '/api/announcements' && request.method() === 'GET') {
       return json({ success: true, data: { unread_count: state.announcementReadCalls ? 0 : 1, items: [{ id: 9, title: '商户结算安排', body: '本周五统一处理人工提现。', audiences: ['admin'], pinned: true, status: 'published', is_read: state.announcementReadCalls > 0, publish_at: '2026-07-22T08:00:00Z' }] } });
@@ -43,12 +43,12 @@ async function mockAdminAPI(targetPage, state) {
       return json({ success: true, data: { id: 10, status: 'draft', ...state.announcementCreateBody } }, 201);
     }
     if (url.pathname === '/api/models') {
-      return json({ success: true, data: [{ id: 101, public_name: 'gpt-4o-mini', provider: 'OpenAI', protocol: 'chat_completions', status: 'active', price: { id: 501, version: 2, billing_mode: 'token', model_ratio_micros: 600000, completion_ratio_micros: 4000000, cache_ratio_micros: 500000, create_cache_ratio_micros: 0, image_ratio_micros: 0, audio_ratio_micros: 0, audio_completion_ratio_micros: 0 } }] });
+      return json({ success: true, data: [{ id: 101, public_name: 'gpt-4o-mini', provider: 'OpenAI', protocol: 'chat_completions', lifecycle: 'stable', status: 'active', price: { id: 501, version: 2, billing_mode: 'token', pricing_scheme: 'absolute', currency: 'USD', usd_exchange_rate_micros: 1000000, source_url: 'https://openai.com/api/pricing/', checked_at: '2026-07-22T08:00:00Z', tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 150000, output_price_micros: 600000, cache_read_price_micros: 75000, cache_write_5m_price_micros: 200000, cache_write_1h_price_micros: null }] } }] });
     }
     if (url.pathname === '/api/offers') {
       return json({ success: true, data: [
-        { offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', merchant_channel_id: 51, channel_name: 'OpenAI 主线路', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 },
-        { offer_id: 202, merchant_id: 32, merchant_name: '矩阵算力', merchant_channel_id: 52, channel_name: 'OpenAI 备用线路', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 5800, health_state: 'degraded', availability_ppm: 987500, ttft_p95_ms: 1650 },
+        { offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', merchant_channel_id: 51, channel_name: 'OpenAI 主线路', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, discount_bps: 7200, price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_microusd: 108000, output_price_microusd: 432000, cache_read_price_microusd: 54000, cache_write_5m_price_microusd: 144000, cache_write_1h_price_microusd: null }], health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 },
+        { offer_id: 202, merchant_id: 32, merchant_name: '矩阵算力', merchant_channel_id: 52, channel_name: 'OpenAI 备用线路', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 5800, discount_bps: 5800, price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_microusd: 87000, output_price_microusd: 348000, cache_read_price_microusd: 43500, cache_write_5m_price_microusd: 116000, cache_write_1h_price_microusd: null }], health_state: 'degraded', availability_ppm: 987500, ttft_p95_ms: 1650 },
       ] });
     }
     if (url.pathname === '/api/keys' && request.method() === 'GET') {
@@ -82,10 +82,10 @@ async function mockAdminAPI(targetPage, state) {
       return json({ success: true, data: 500000 });
     }
     if (url.pathname === '/api/merchant/offers' && request.method() === 'GET') {
-      return json({ success: true, data: [{ offer_id: 201, merchant_channel_id: 51, channel_name: 'OpenAI 主线路', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, offer_status: 'active', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] });
+      return json({ success: true, data: [{ offer_id: 201, merchant_channel_id: 51, channel_name: 'OpenAI 主线路', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, discount_bps: 7200, price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_microusd: 108000, output_price_microusd: 432000, cache_read_price_microusd: 54000, cache_write_5m_price_microusd: 144000, cache_write_1h_price_microusd: null }], offer_status: 'active', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] });
     }
     if (url.pathname === '/api/merchant/health' && request.method() === 'GET') {
-      return json({ success: true, data: [{ offer_id: 201, merchant_channel_id: 51, channel_name: 'OpenAI 主线路', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, offer_status: 'active', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] });
+      return json({ success: true, data: [{ offer_id: 201, merchant_channel_id: 51, channel_name: 'OpenAI 主线路', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, discount_bps: 7200, price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_microusd: 108000, output_price_microusd: 432000, cache_read_price_microusd: 54000, cache_write_5m_price_microusd: 144000, cache_write_1h_price_microusd: null }], offer_status: 'active', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] });
     }
     if (url.pathname === '/api/merchant/balance' && request.method() === 'GET') {
       return json({ success: true, data: { merchant_id: 31, available_quota: 9000000, frozen_quota: 2500000, lifetime_earned_quota: 14000000, lifetime_refunded_quota: 500000, lifetime_paid_quota: 2000000 } });
@@ -110,7 +110,7 @@ async function mockAdminAPI(targetPage, state) {
       return json({ success: true, data: { id: 203, status: 'active', ...state.offerCreateBody } }, 201);
     }
     if (url.pathname === '/api/admin/models' && request.method() === 'GET') {
-      return json({ success: true, data: [{ id: 101, public_name: 'gpt-4o-mini', provider: 'OpenAI', protocol: 'chat_completions', status: 'active', price: { id: 501, version: 2, billing_mode: 'token', model_ratio_micros: 600000, completion_ratio_micros: 4000000, cache_ratio_micros: 500000, create_cache_ratio_micros: 0, image_ratio_micros: 0, audio_ratio_micros: 0, audio_completion_ratio_micros: 0 } }] });
+      return json({ success: true, data: [{ id: 101, public_name: 'gpt-4o-mini', provider: 'OpenAI', protocol: 'chat_completions', lifecycle: 'stable', status: 'active', price: { id: 501, version: 2, billing_mode: 'token', pricing_scheme: 'absolute', currency: 'USD', usd_exchange_rate_micros: 1000000, source_url: 'https://openai.com/api/pricing/', checked_at: '2026-07-22T08:00:00Z', tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 150000, output_price_micros: 600000, cache_read_price_micros: 75000, cache_write_5m_price_micros: 200000, cache_write_1h_price_micros: null }] } }] });
     }
     if (url.pathname === '/api/admin/models' && request.method() === 'POST') {
       state.modelCreateCalls += 1;
@@ -379,12 +379,21 @@ try {
   assert(adminMockState.routeSaveBody.mode === 'fixed' && adminMockState.routeSaveBody.merchant_ids.includes(31), '固定路由参数不正确');
 
   await page.getByRole('button', { name: '商户中心', exact: true }).click();
+  const merchantSidebar = page.getByRole('complementary', { name: '商户功能' });
+  for (const label of ['经营概览', '渠道管理', '模型报价', '健康状态', '结算账本', '提现记录']) {
+    assert(await merchantSidebar.getByRole('button', { name: label, exact: true }).count() === 1, `商户侧栏缺少${label}`);
+  }
+  assert(!(await page.locator('body').innerText()).includes('管理员账号当前未绑定商户资料'), '管理员仍显示专用商户缺失提示');
+  await merchantSidebar.getByRole('button', { name: '渠道管理', exact: true }).click();
   await page.getByText('OpenAI 主线路').last().waitFor();
   await page.getByText('41', { exact: true }).waitFor();
   const importedChannels = page.getByRole('heading', { name: '已导入渠道' }).locator('xpath=ancestor::section');
   await importedChannels.getByText('正常', { exact: true }).waitFor();
-  await page.getByText('0.7200x').waitFor();
-  await page.getByText('$18.00', { exact: true }).waitFor();
+  await merchantSidebar.getByRole('button', { name: '模型报价', exact: true }).click();
+  await page.getByText('72.00%').waitFor();
+  await page.getByText('$0.108 输入 / $0.432 输出').waitFor();
+  await merchantSidebar.getByRole('button', { name: '提现记录', exact: true }).click();
+  await page.getByText('MW202607220001', { exact: true }).waitFor();
   await page.getByRole('button', { name: '申请提现' }).click();
   const withdrawalDialog = page.getByRole('dialog', { name: '申请人工提现' });
   await withdrawalDialog.getByLabel('提现金额（美元）').fill('5');
@@ -393,11 +402,12 @@ try {
   await withdrawalDialog.getByRole('button', { name: '提交提现申请' }).click();
   assert(adminMockState.withdrawalCreateCalls === 1, '商户提现没有调用真实接口');
   assert(adminMockState.withdrawalCreateBody.amount_quota === 2500000, '提现美元金额没有转换为 New API 整数额度');
+  await merchantSidebar.getByRole('button', { name: '模型报价', exact: true }).click();
   await page.getByRole('button', { name: '创建报价' }).click();
   const quoteDialog = page.getByRole('dialog', { name: '创建模型报价' });
   await quoteDialog.getByLabel('标准模型').selectOption('101');
   await quoteDialog.getByLabel('商户渠道').selectOption('51');
-  await quoteDialog.getByLabel('成交倍率').fill('0.65');
+  await quoteDialog.getByLabel('官方价折扣').fill('65');
   await quoteDialog.getByRole('button', { name: '提交报价' }).click();
   assert(adminMockState.offerCreateCalls === 1, '创建报价没有调用真实接口');
   assert(adminMockState.offerCreateBody.multiplier_bps === 6500, '报价倍率没有转换为整数基点');
@@ -424,14 +434,31 @@ try {
   await page.getByRole('button', { name: '新增标准模型' }).click();
   const modelDialog = page.getByRole('dialog', { name: '新增标准模型' });
   await modelDialog.getByLabel('模型名称').fill('text-embedding-3-small');
-  await modelDialog.getByLabel('模型厂商').fill('OpenAI');
+  await modelDialog.getByLabel('模型厂商').selectOption('OpenAI');
   await modelDialog.getByLabel('协议').selectOption('embeddings');
+  await modelDialog.getByLabel('生命周期').selectOption('stable');
+  await modelDialog.getByLabel('核价来源').fill('https://openai.com/api/pricing/');
+  await modelDialog.getByLabel('第 1 档输入价格').fill('0.02');
+  assert(await modelDialog.getByLabel('第 1 档输出价格').count() === 0, 'Embeddings 表单仍显示输出价格');
   await modelDialog.getByRole('button', { name: '创建模型' }).click();
   assert(adminMockState.modelCreateCalls === 1, '新增标准模型没有调用真实接口');
+  assert(adminMockState.modelCreateBody.provider === 'OpenAI' && adminMockState.modelCreateBody.lifecycle === 'stable', '模型厂商或生命周期没有按下拉选项提交');
+  assert(adminMockState.modelCreateBody.price.currency === 'USD' && adminMockState.modelCreateBody.price.usd_exchange_rate_micros === 1000000, '美元价格没有锁定独立汇率');
+  assert(adminMockState.modelCreateBody.price.tiers.length === 1 && adminMockState.modelCreateBody.price.tiers[0].input_price_micros === 20000 && adminMockState.modelCreateBody.price.tiers[0].output_price_micros == null, 'Embedding 价格没有按每百万 Token 整数微单位提交');
   await page.getByRole('button', { name: '发布价格' }).first().click();
   const priceDialog = page.getByRole('dialog', { name: '发布官方价格' });
+  await priceDialog.getByLabel('原币币种').selectOption('CNY');
+  await priceDialog.getByLabel('每 1 原币折合美元').fill('0.137');
+  await priceDialog.getByLabel('核价来源').fill('https://example.com/cny-pricing');
+  await priceDialog.getByRole('button', { name: '新增价格阶梯' }).click();
+  await priceDialog.getByLabel('第 1 档上下文上限').fill('200000');
+  await priceDialog.getByLabel('第 2 档输入价格').fill('0.3');
+  await priceDialog.getByLabel('第 2 档输出价格').fill('1.2');
+  assert(await priceDialog.getByRole('button', { name: '删除第 2 档' }).count() === 1, '价格阶梯缺少删除操作');
   await priceDialog.getByRole('button', { name: '发布价格' }).click();
   assert(adminMockState.pricePublishCalls === 1, '发布官方价格没有调用真实接口');
+  assert(adminMockState.pricePublishBody.currency === 'CNY' && adminMockState.pricePublishBody.usd_exchange_rate_micros === 137000, '人民币模型价格没有提交独立核价汇率');
+  assert(adminMockState.pricePublishBody.tiers.length === 2 && adminMockState.pricePublishBody.tiers[0].maximum_input_tokens === 200000 && adminMockState.pricePublishBody.tiers[1].minimum_input_tokens === 200001, '价格阶梯没有按连续区间提交');
   await page.getByRole('button', { name: '用户管理' }).click();
   await page.getByText('alice@example.com').waitFor();
   await page.getByRole('button', { name: '审计日志' }).click();
@@ -547,6 +574,23 @@ try {
   await ignoreDialog.getByRole('button', { name: '确认忽略' }).click();
   assert(adminMockState.reconciliationIgnoreCalls === 1, '忽略对账异常没有调用真实接口');
 
+  const merchantPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await mockAdminAPI(merchantPage, { announcementReadCalls: 0 }, {
+    id: 8, username: 'merchant', display_name: '普通商户', role: 1, status: 1, group: 'default',
+    quota: 500000, used_quota: 120000, is_merchant: true, merchant_id: 31, merchant_status: 'active',
+  });
+  await merchantPage.goto(baseUrl, { waitUntil: 'networkidle' });
+  assert(await merchantPage.getByRole('button', { name: '管理后台', exact: true }).count() === 0, '普通商户显示了管理后台入口');
+  await merchantPage.getByRole('button', { name: '打开菜单' }).click();
+  await merchantPage.getByRole('button', { name: '商户中心', exact: true }).click();
+  const ordinaryMerchantSidebar = merchantPage.getByRole('complementary', { name: '商户功能' });
+  for (const label of ['经营概览', '渠道管理', '模型报价', '健康状态', '结算账本', '提现记录']) {
+    assert(await ordinaryMerchantSidebar.getByRole('button', { name: label, exact: true }).count() === 1, `普通商户侧栏缺少${label}`);
+  }
+  await ordinaryMerchantSidebar.getByRole('button', { name: '模型报价', exact: true }).click();
+  await merchantPage.getByText('$0.108 输入 / $0.432 输出').waitFor();
+  await merchantPage.close();
+
   const anonymousPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
   let anonymousLoggedIn = false;
   let merchantApplication = null;
@@ -558,8 +602,8 @@ try {
     const fulfill = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(data) });
     if (url.pathname === '/api/me' && anonymousLoggedIn) return fulfill({ success: true, data: { id: 7, username: 'alice', display_name: 'Alice', role: 1, status: 1, group: 'default', quota: 500000, used_quota: 120000, is_merchant: false, merchant_status: 'none' } });
     if (url.pathname === '/api/me') return fulfill({ success: false, error: { code: 'authentication_required', message: '请先登录' } }, 401);
-    if (url.pathname === '/api/models') return fulfill({ success: true, data: [{ id: 101, public_name: 'gpt-4o-mini', provider: 'OpenAI', protocol: 'chat_completions', status: 'active', price: { version: 2, billing_mode: 'token', model_ratio_micros: 600000, completion_ratio_micros: 4000000 } }] });
-    if (url.pathname === '/api/offers') return fulfill({ success: true, data: [{ offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', merchant_channel_id: 51, channel_name: 'OpenAI 主线路', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] });
+    if (url.pathname === '/api/models') return fulfill({ success: true, data: [{ id: 101, public_name: 'gpt-4o-mini', provider: 'OpenAI', protocol: 'chat_completions', lifecycle: 'stable', status: 'active', price: { version: 2, pricing_scheme: 'absolute', currency: 'USD', usd_exchange_rate_micros: 1000000, source_url: 'https://openai.com/api/pricing/', tiers: [{ minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 150000, output_price_micros: 600000 }] } }] });
+    if (url.pathname === '/api/offers') return fulfill({ success: true, data: [{ offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', merchant_channel_id: 51, channel_name: 'OpenAI 主线路', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, discount_bps: 7200, price_tiers: [{ minimum_input_tokens: 0, maximum_input_tokens: null, input_price_microusd: 108000, output_price_microusd: 432000 }], health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] });
     if (url.pathname === '/api/auth/login' && request.method() === 'POST') {
       anonymousLoggedIn = true;
       return fulfill({ success: true, data: { id: 7, username: 'alice', display_name: 'Alice', role: 1, status: 1, group: 'default' } });
@@ -649,7 +693,7 @@ try {
   await resetDialog.getByText('TempPass1234').waitFor();
   await resetPage.close();
 
-  console.log('UI 冒烟测试通过：角色导航、真实账号数据、路由策略、报价、支付、结算和人工提现交互正常。');
+  console.log('UI 冒烟测试通过：角色导航、统一商户工作区、绝对价格、路由、支付、结算和人工提现交互正常。');
 } finally {
   await browser.close();
   await stopLocalPreview(previewServer);

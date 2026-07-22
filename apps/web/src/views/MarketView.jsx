@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Activity, BookOpen, Boxes, Clock3, Gauge, Search, Store } from 'lucide-react';
-import { apiRequest } from '../api';
+import { apiRequest, formatOfferPrice } from '../api';
 import { Button, InlineNotice, Metric, PageHeader, ProviderLogo, Section, Select, Status, TextInput } from '../ui';
 
 const healthNames = {
@@ -21,8 +21,12 @@ function formatLatency(value) {
   return milliseconds >= 1000 ? `${(milliseconds / 1000).toFixed(2)}s` : `${milliseconds}ms`;
 }
 
-function formatMultiplier(value) {
-  return `${(Number(value || 0) / 10_000).toFixed(4)}x`;
+function formatDiscount(value) {
+  return `${(Number(value || 0) / 100).toFixed(2)}%`;
+}
+
+function offerInputPrice(offer) {
+  return Number(offer.price_tiers?.[0]?.input_price_microusd ?? Number.MAX_SAFE_INTEGER);
 }
 
 export default function MarketView({ navigate }) {
@@ -61,9 +65,9 @@ export default function MarketView({ navigate }) {
         && `${offer.model}${offer.merchant_name}${offer.channel_name}`.toLowerCase().includes(query.trim().toLowerCase());
     });
     return [...filtered].sort((left, right) => {
-      if (sort === 'price') return left.multiplier_bps - right.multiplier_bps;
+      if (sort === 'price') return offerInputPrice(left) - offerInputPrice(right);
       if (sort === 'availability') return right.availability_ppm - left.availability_ppm;
-      return right.availability_ppm - left.availability_ppm || left.ttft_p95_ms - right.ttft_p95_ms || left.multiplier_bps - right.multiplier_bps;
+      return right.availability_ppm - left.availability_ppm || left.ttft_p95_ms - right.ttft_p95_ms || offerInputPrice(left) - offerInputPrice(right);
     });
   }, [marketOffers, modelMap, protocol, provider, query, sort]);
 
@@ -114,7 +118,7 @@ export default function MarketView({ navigate }) {
 
         <div className="table-wrap market-table-wrap">
           <table className="data-table market-table">
-            <thead><tr><th>排名</th><th>模型与商户</th><th>协议</th><th>状态</th><th>可用率</th><th>P95 首字</th><th>成交倍率</th><th>渠道</th><th></th></tr></thead>
+            <thead><tr><th>排名</th><th>模型与商户</th><th>协议</th><th>状态</th><th>可用率</th><th>P95 首字</th><th>折后价格 / 百万 Token</th><th>官方价折扣</th><th>渠道</th><th></th></tr></thead>
             <tbody>
               {offers.map((offer, index) => {
                 const model = modelMap.get(offer.model);
@@ -125,7 +129,8 @@ export default function MarketView({ navigate }) {
                   <td><Status>{healthNames[offer.health_state] || offer.health_state}</Status></td>
                   <td><strong className="success-text">{formatAvailability(offer.availability_ppm)}</strong></td>
                   <td>{formatLatency(offer.ttft_p95_ms)}</td>
-                  <td><span className="price-multiple">{formatMultiplier(offer.multiplier_bps)}</span></td>
+                  <td><strong>{formatOfferPrice(offer.price_tiers)}</strong>{offer.price_tiers?.length > 1 && <small>{offer.price_tiers.length} 个上下文阶梯</small>}</td>
+                  <td><span className="price-multiple">{formatDiscount(offer.discount_bps || offer.multiplier_bps)}</span></td>
                   <td><strong>{offer.channel_name}</strong><small>C{offer.merchant_channel_id}</small></td>
                   <td><Button variant="ghost" onClick={() => navigate('console')}>用于路由</Button></td>
                 </tr>;

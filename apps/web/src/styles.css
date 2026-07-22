@@ -338,6 +338,18 @@ main { min-height: calc(100vh - 66px); }
 .announcement-table td:first-child { max-width: 320px; }
 .announcement-table td:first-child strong { display: flex; align-items: center; gap: 3px; }
 .announcement-table td:first-child small { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-identity-grid { margin-bottom: 18px; }
+.price-metadata-grid { margin-bottom: 18px; }
+.provider-select-field { min-width: 0; display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: center; gap: 8px; }
+.provider-select-field .select-wrap { width: 100%; }
+.price-tier-heading { margin: 4px 0 0; padding: 14px 0 10px; border-top: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.price-tier-heading h3 { margin: 0; font-size: 13px; line-height: 20px; }
+.price-tier-heading span { color: var(--muted); font-size: 10px; line-height: 16px; }
+.price-tier-list { margin-bottom: 16px; border-top: 1px solid var(--line); }
+.price-tier-row { padding: 14px 0; border-bottom: 1px solid var(--line); }
+.price-tier-row-header { min-height: 34px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.price-tier-row-header strong { font-size: 12px; }
+.price-tier-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .inline-notice .copy-value { margin-top: 0; }
 .toast { position: fixed; z-index: 150; left: 50%; bottom: 28px; transform: translateX(-50%); min-height: 40px; max-width: min(420px, calc(100vw - 32px)); padding: 10px 16px; border: 1px solid #bcd8d2; border-radius: 7px; background: #163b34; color: white; box-shadow: 0 8px 28px rgba(23,33,31,.2); display: grid; place-items: center; font-size: 12px; text-align: center; }
 
@@ -438,7 +450,8 @@ main { min-height: calc(100vh - 66px); }
   .modal-layer { padding: 10px; align-items: end; }
   .modal { max-height: calc(100vh - 20px); }
   .modal-header, .modal-body, .modal-footer { padding-left: 14px; padding-right: 14px; }
-  .form-grid.two-column, .choice-grid, .radio-row { grid-template-columns: 1fr; }
+  .form-grid.two-column, .choice-grid, .radio-row, .price-tier-grid { grid-template-columns: 1fr; }
+  .price-tier-heading { align-items: flex-start; }
   .quote-summary { grid-template-columns: 1fr; }.quote-summary div, .quote-summary div:last-child { border-right: 0; border-bottom: 1px solid var(--line); }.quote-summary div:last-child { border-bottom: 0; }
   .amount-presets { grid-template-columns: repeat(2, 1fr); }
   .checkbox-line, .payment-methods { align-items: flex-start; gap: 10px 18px; }

@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { BadgeDollarSign, CloudCog, HeartPulse, Landmark, Plus, ServerCog, WalletCards, Waypoints } from 'lucide-react';
-import { apiRequest, formatQuota } from '../api';
+import {
+  BadgeDollarSign, CloudCog, HeartPulse, Landmark, LayoutDashboard,
+  Plus, ReceiptText, ServerCog, WalletCards, Waypoints,
+} from 'lucide-react';
+import { apiRequest, formatOfferPrice, formatQuota } from '../api';
 import { Button, InlineNotice, Metric, PageHeader, Section, Status } from '../ui';
 
 const statusNames = {
@@ -20,14 +23,21 @@ const healthNames = {
   pending: '待探测', healthy: '健康', degraded: '降级', cooling: '冷却', recovering: '恢复中', disabled: '已停用',
 };
 
+const protocolNames = { chat_completions: '聊天补全', responses: 'Responses', embeddings: '嵌入' };
+
 const channelTypeNames = {
   1: 'OpenAI 兼容', 14: 'Anthropic', 20: 'OpenRouter', 24: 'Gemini',
   25: 'Moonshot', 27: 'Perplexity', 40: 'SiliconFlow', 42: 'Mistral', 43: 'DeepSeek', 48: 'xAI',
 };
 
-function formatMultiplier(value) {
-  return `${(Number(value || 0) / 10_000).toFixed(4)}x`;
-}
+const merchantSections = [
+  { id: 'overview', label: '经营概览', icon: LayoutDashboard },
+  { id: 'channels', label: '渠道管理', icon: Waypoints },
+  { id: 'offers', label: '模型报价', icon: BadgeDollarSign },
+  { id: 'health', label: '健康状态', icon: HeartPulse },
+  { id: 'ledger', label: '结算账本', icon: ReceiptText },
+  { id: 'withdrawals', label: '提现记录', icon: Landmark },
+];
 
 function formatAvailability(value) {
   return `${(Number(value || 0) / 10_000).toFixed(2)}%`;
@@ -50,7 +60,12 @@ function formatQuotaDelta(value) {
   return `${amount > 0 ? '+' : '-'}${formatQuota(Math.abs(amount))}`;
 }
 
+function formatDiscount(value) {
+  return `${(Number(value || 0) / 100).toFixed(2)}%`;
+}
+
 export default function MerchantView({ account, openModal }) {
+  const [section, setSection] = useState('overview');
   const [channels, setChannels] = useState([]);
   const [reviews, setReviews] = useState([]);
   const [merchant, setMerchant] = useState(null);
@@ -101,73 +116,87 @@ export default function MerchantView({ account, openModal }) {
   const canSubmit = Boolean(account?.is_merchant && merchant?.merchant_id);
 
   return (
-    <div className="view-shell">
+    <div className="view-shell merchant-view">
       <PageHeader
         eyebrow={`商户中心${merchant?.merchant_id ? ` · M${merchant.merchant_id}` : ''}`}
         title="商户经营概览"
-        description="管理渠道、报价版本以及当前探活和真实请求健康状态。"
-        actions={canSubmit && <><Button icon={Plus} onClick={() => openModal({ type: 'channel', onSaved: load })}>提交新渠道</Button><Button disabled={!channels.length || !models.length} icon={BadgeDollarSign} onClick={() => openModal({ type: 'quote', channels: channels.filter((channel) => channel.status === 'active'), models: models.filter((model) => model.status === 'active'), onSaved: load })}>创建报价</Button><Button disabled={!balance?.available_quota} icon={Landmark} variant="primary" onClick={() => openModal({ type: 'withdraw', balance, onSaved: load })}>申请提现</Button></>}
+        description="管理渠道、模型报价、运行健康、结算账本和人工提现。"
+        actions={merchant && <Status>{merchant.merchant_status === 'active' ? '正常' : statusNames[merchant.merchant_status] || merchant.merchant_status}</Status>}
       />
 
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}
-      {!canSubmit && Number(account?.role) >= 10 && <InlineNotice>管理员账号当前未绑定商户资料，可在商户审核页管理全平台申请。</InlineNotice>}
+      {!error && !loading && !canSubmit && <InlineNotice tone="warning">当前商户资料尚未就绪</InlineNotice>}
 
-      <div className="metrics-grid">
-        <Metric label="已导入渠道" value={String(channels.length)} hint={`正常 ${activeCount} 个`} icon={Waypoints} />
-        <Metric label="审核处理中" value={String(pendingCount)} hint="密钥提交后不再回显" icon={CloudCog} tone="amber" />
-        <Metric label="在售报价" value={String(activeOffers)} hint={`${offers.length} 个报价版本`} icon={ServerCog} tone="blue" />
-        <Metric label="健康报价" value={String(healthyOffers)} hint={merchant?.merchant_status === 'active' ? '商户身份正常' : '商户身份待处理'} icon={HeartPulse} tone="green" />
+      <div className="admin-layout merchant-layout">
+        <aside className="admin-sidebar" aria-label="商户功能">
+          {merchantSections.map(({ id, label, icon: Icon }) => (
+            <button aria-label={label} className={section === id ? 'active' : ''} key={id} onClick={() => setSection(id)} type="button">
+              <Icon size={17} /><span>{label}</span>
+            </button>
+          ))}
+        </aside>
+
+        <div className="admin-content">
+          {section === 'overview' && <>
+            <div className="metrics-grid">
+              <Metric label="已导入渠道" value={String(channels.length)} hint={`正常 ${activeCount} 个`} icon={Waypoints} />
+              <Metric label="审核处理中" value={String(pendingCount)} hint="密钥提交后不再回显" icon={CloudCog} tone="amber" />
+              <Metric label="在售报价" value={String(activeOffers)} hint={`${offers.length} 个报价版本`} icon={ServerCog} tone="blue" />
+              <Metric label="健康报价" value={String(healthyOffers)} hint={merchant?.merchant_status === 'active' ? '商户身份正常' : '商户身份待处理'} icon={HeartPulse} tone="green" />
+            </div>
+            <div className="metrics-grid">
+              <Metric label="可提现余额" value={formatQuota(balance?.available_quota)} hint="提交后立即冻结" icon={WalletCards} />
+              <Metric label="冻结余额" value={formatQuota(balance?.frozen_quota)} hint="等待审核或线下打款" icon={Landmark} tone="amber" />
+              <Metric label="累计结算" value={formatQuota(balance?.lifetime_earned_quota)} hint={`退款冲正 ${formatQuota(balance?.lifetime_refunded_quota)}`} icon={BadgeDollarSign} tone="green" />
+              <Metric label="累计提现" value={formatQuota(balance?.lifetime_paid_quota)} hint="只统计已确认打款" icon={Landmark} tone="blue" />
+            </div>
+          </>}
+
+          {section === 'channels' && <>
+            <Section title="渠道审核版本" description="新渠道、密钥变更和基础地址变更均保留独立审核记录" actions={canSubmit && <Button icon={Plus} variant="primary" onClick={() => openModal({ type: 'channel', onSaved: load })}>提交新渠道</Button>}>
+              <div className="table-wrap"><table className="data-table"><thead><tr><th>审核编号</th><th>渠道</th><th>类型</th><th>基础地址</th><th>拟售模型</th><th>凭据</th><th>状态</th><th>结果</th></tr></thead><tbody>
+                {reviews.map((review) => <tr key={review.id}><td><code>R{review.id}</code></td><td><strong>{review.channel_name}</strong></td><td>{channelTypeNames[review.channel_type] || `类型 ${review.channel_type}`}</td><td><code>{review.base_url}</code></td><td>{review.requested_models?.join('、') || '-'}</td><td>{review.credential_configured ? '已加密保存' : '已清除正文'}</td><td><Status>{statusNames[review.status] || review.status}</Status></td><td>{review.verification_error || review.review_reason || '-'}</td></tr>)}
+                {!loading && reviews.length === 0 && <tr><td className="table-message" colSpan="8">暂无渠道审核记录</td></tr>}
+                {loading && <tr><td className="table-message" colSpan="8">正在读取渠道审核记录</td></tr>}
+              </tbody></table></div>
+            </Section>
+            <Section title="已导入渠道" description="审核通过后由平台创建 New API 渠道并保存归属关系">
+              <div className="table-wrap"><table className="data-table"><thead><tr><th>渠道</th><th>New API 编号</th><th>类型</th><th>基础地址</th><th>模型</th><th>密钥指纹</th><th>状态</th></tr></thead><tbody>
+                {channels.map((channel) => <tr key={channel.id}><td><strong>{channel.channel_name}</strong><small>C{channel.id} · R{channel.review_id}</small></td><td><code>{channel.newapi_channel_id}</code></td><td>{channelTypeNames[channel.channel_type] || `类型 ${channel.channel_type}`}</td><td><code>{channel.base_url}</code></td><td>{channel.models?.join('、') || '-'}</td><td><code>{channel.credential_fingerprint || '-'}</code></td><td><Status>{statusNames[channel.status] || channel.status}</Status></td></tr>)}
+                {!loading && channels.length === 0 && <tr><td className="table-message" colSpan="7">暂无已导入渠道</td></tr>}
+              </tbody></table></div>
+            </Section>
+          </>}
+
+          {section === 'offers' && <Section title="模型报价" description="折扣调价生成新版本，New API 同步成功后才进入用户路由" actions={canSubmit && <Button disabled={!channels.length || !models.length} icon={BadgeDollarSign} variant="primary" onClick={() => openModal({ type: 'quote', channels: channels.filter((channel) => channel.status === 'active'), models: models.filter((model) => model.status === 'active'), onSaved: load })}>创建报价</Button>}>
+            <div className="table-wrap"><table className="data-table"><thead><tr><th>报价</th><th>模型</th><th>渠道</th><th>官方价折扣</th><th>折后价格 / 百万 Token</th><th>版本状态</th><th>健康</th><th>同步结果</th></tr></thead><tbody>
+              {offers.map((offer) => <tr key={offer.offer_id}><td><code>O{offer.offer_id}</code></td><td><strong>{offer.model}</strong><small>{protocolNames[offer.protocol] || offer.protocol}</small></td><td>{offer.channel_name}<small>C{offer.merchant_channel_id}</small></td><td><span className="price-multiple">{formatDiscount(offer.discount_bps || offer.multiplier_bps)}</span></td><td><strong>{formatOfferPrice(offer.price_tiers)}</strong>{offer.price_tiers?.length > 1 && <small>{offer.price_tiers.length} 个上下文阶梯</small>}</td><td><Status>{offer.offer_status === 'active' ? '在售' : statusNames[offer.offer_status] || offer.offer_status}</Status></td><td><Status>{healthNames[offer.health_state] || offer.health_state}</Status></td><td>{offer.sync_error || '-'}</td></tr>)}
+              {!loading && offers.length === 0 && <tr><td className="table-message" colSpan="8">暂无报价版本</td></tr>}
+            </tbody></table></div>
+          </Section>}
+
+          {section === 'health' && <Section title="渠道健康" description="主动探活和真实请求只记录状态、耗时、渠道与请求编号">
+            <div className="table-wrap"><table className="data-table"><thead><tr><th>模型</th><th>渠道</th><th>状态</th><th>可用率</th><th>P95 首字</th></tr></thead><tbody>
+              {health.map((item) => <tr key={`${item.offer_id}-${item.merchant_channel_id}`}><td><strong>{item.model}</strong></td><td>{item.channel_name}</td><td><Status>{healthNames[item.health_state] || item.health_state}</Status></td><td>{formatAvailability(item.availability_ppm)}</td><td>{formatLatency(item.ttft_p95_ms)}</td></tr>)}
+              {!loading && health.length === 0 && <tr><td className="table-message" colSpan="5">暂无健康记录</td></tr>}
+            </tbody></table></div>
+          </Section>}
+
+          {section === 'ledger' && <Section title="结算账本" description="消费、缓存命中和退款金额以 New API 最终日志额度为准">
+            <div className="table-wrap"><table className="data-table"><thead><tr><th>类型</th><th>关联对象</th><th>可用变动</th><th>冻结变动</th><th>变动后余额</th><th>时间</th></tr></thead><tbody>
+              {ledger.map((entry) => <tr key={entry.id}><td><Status>{ledgerNames[entry.entry_type] || entry.entry_type}</Status></td><td><strong>{entry.model_name || entry.withdrawal_no || '-'}</strong><small>{entry.newapi_log_id ? `New API 日志 ${entry.newapi_log_id}` : entry.description}</small></td><td>{formatQuotaDelta(entry.available_delta)}</td><td>{formatQuotaDelta(entry.frozen_delta)}</td><td>{formatQuota(entry.available_after)}<small>冻结 {formatQuota(entry.frozen_after)}</small></td><td>{formatDate(entry.created_at)}</td></tr>)}
+              {!loading && ledger.length === 0 && <tr><td className="table-message" colSpan="6">暂无结算账本记录</td></tr>}
+            </tbody></table></div>
+          </Section>}
+
+          {section === 'withdrawals' && <Section title="提现记录" description="平台只处理冻结和审核，实际款项由管理员线下支付并登记凭证" actions={canSubmit && <Button disabled={!balance?.available_quota} icon={Landmark} variant="primary" onClick={() => openModal({ type: 'withdraw', balance, onSaved: load })}>申请提现</Button>}>
+            <div className="table-wrap"><table className="data-table"><thead><tr><th>申请编号</th><th>金额</th><th>收款方式</th><th>收款账户</th><th>状态</th><th>申请时间</th></tr></thead><tbody>
+              {withdrawals.map((item) => <tr key={item.id}><td><code>{item.withdrawal_no}</code></td><td><strong>{formatQuota(item.amount_quota)}</strong></td><td>{item.recipient_type === 'alipay' ? '支付宝' : item.recipient_type === 'bank' ? '银行卡' : '其他'}</td><td><code>{item.recipient_account_masked}</code></td><td><Status>{withdrawalStatusNames[item.status] || item.status}</Status></td><td>{formatDate(item.created_at)}</td></tr>)}
+              {!loading && withdrawals.length === 0 && <tr><td className="table-message" colSpan="6">暂无提现申请</td></tr>}
+            </tbody></table></div>
+          </Section>}
+        </div>
       </div>
-
-      <div className="metrics-grid">
-        <Metric label="可提现余额" value={formatQuota(balance?.available_quota)} hint="提交后立即冻结" icon={WalletCards} />
-        <Metric label="冻结余额" value={formatQuota(balance?.frozen_quota)} hint="等待审核或线下打款" icon={Landmark} tone="amber" />
-        <Metric label="累计结算" value={formatQuota(balance?.lifetime_earned_quota)} hint={`退款冲正 ${formatQuota(balance?.lifetime_refunded_quota)}`} icon={BadgeDollarSign} tone="green" />
-        <Metric label="累计提现" value={formatQuota(balance?.lifetime_paid_quota)} hint="只统计已确认打款" icon={Landmark} tone="blue" />
-      </div>
-
-      <Section title="结算账本" description="消费、缓存命中和退款金额以 New API 最终日志额度为准">
-        <div className="table-wrap"><table className="data-table"><thead><tr><th>类型</th><th>关联对象</th><th>可用变动</th><th>冻结变动</th><th>变动后余额</th><th>时间</th></tr></thead><tbody>
-          {ledger.map((entry) => <tr key={entry.id}><td><Status>{ledgerNames[entry.entry_type] || entry.entry_type}</Status></td><td><strong>{entry.model_name || entry.withdrawal_no || '-'}</strong><small>{entry.newapi_log_id ? `New API 日志 ${entry.newapi_log_id}` : entry.description}</small></td><td>{formatQuotaDelta(entry.available_delta)}</td><td>{formatQuotaDelta(entry.frozen_delta)}</td><td>{formatQuota(entry.available_after)}<small>冻结 {formatQuota(entry.frozen_after)}</small></td><td>{formatDate(entry.created_at)}</td></tr>)}
-          {!loading && ledger.length === 0 && <tr><td className="table-message" colSpan="6">暂无结算账本记录</td></tr>}
-        </tbody></table></div>
-      </Section>
-
-      <Section title="提现记录" description="平台只处理冻结和审核，实际款项由管理员线下支付并登记凭证">
-        <div className="table-wrap"><table className="data-table"><thead><tr><th>申请编号</th><th>金额</th><th>收款方式</th><th>收款账户</th><th>状态</th><th>申请时间</th></tr></thead><tbody>
-          {withdrawals.map((item) => <tr key={item.id}><td><code>{item.withdrawal_no}</code></td><td><strong>{formatQuota(item.amount_quota)}</strong></td><td>{item.recipient_type === 'alipay' ? '支付宝' : item.recipient_type === 'bank' ? '银行卡' : '其他'}</td><td><code>{item.recipient_account_masked}</code></td><td><Status>{withdrawalStatusNames[item.status] || item.status}</Status></td><td>{formatDate(item.created_at)}</td></tr>)}
-          {!loading && withdrawals.length === 0 && <tr><td className="table-message" colSpan="6">暂无提现申请</td></tr>}
-        </tbody></table></div>
-      </Section>
-
-      <Section title="渠道审核版本" description="新渠道、密钥变更和基础地址变更均保留独立审核记录">
-        <div className="table-wrap"><table className="data-table"><thead><tr><th>审核编号</th><th>渠道</th><th>类型</th><th>基础地址</th><th>拟售模型</th><th>凭据</th><th>状态</th><th>结果</th></tr></thead><tbody>
-          {reviews.map((review) => <tr key={review.id}><td><code>R{review.id}</code></td><td><strong>{review.channel_name}</strong></td><td>{channelTypeNames[review.channel_type] || `类型 ${review.channel_type}`}</td><td><code>{review.base_url}</code></td><td>{review.requested_models?.join('、') || '-'}</td><td>{review.credential_configured ? '已加密保存' : '已清除正文'}</td><td><Status>{statusNames[review.status] || review.status}</Status></td><td>{review.verification_error || review.review_reason || '-'}</td></tr>)}
-          {!loading && reviews.length === 0 && <tr><td className="table-message" colSpan="8">暂无渠道审核记录</td></tr>}
-          {loading && <tr><td className="table-message" colSpan="8">正在读取渠道审核记录</td></tr>}
-        </tbody></table></div>
-      </Section>
-
-      <Section title="已导入渠道" description="审核通过后由平台创建 New API 渠道并保存归属关系">
-        <div className="table-wrap"><table className="data-table"><thead><tr><th>渠道</th><th>New API 编号</th><th>类型</th><th>基础地址</th><th>模型</th><th>密钥指纹</th><th>状态</th></tr></thead><tbody>
-          {channels.map((channel) => <tr key={channel.id}><td><strong>{channel.channel_name}</strong><small>C{channel.id} · R{channel.review_id}</small></td><td><code>{channel.newapi_channel_id}</code></td><td>{channelTypeNames[channel.channel_type] || `类型 ${channel.channel_type}`}</td><td><code>{channel.base_url}</code></td><td>{channel.models?.join('、') || '-'}</td><td><code>{channel.credential_fingerprint || '-'}</code></td><td><Status>{statusNames[channel.status] || channel.status}</Status></td></tr>)}
-          {!loading && channels.length === 0 && <tr><td className="table-message" colSpan="7">暂无已导入渠道</td></tr>}
-        </tbody></table></div>
-      </Section>
-
-      <Section title="模型报价" description="调价生成新版本，New API 同步成功后才进入用户路由">
-        <div className="table-wrap"><table className="data-table"><thead><tr><th>报价</th><th>模型</th><th>渠道</th><th>倍率</th><th>版本状态</th><th>健康</th><th>同步结果</th></tr></thead><tbody>
-          {offers.map((offer) => <tr key={offer.offer_id}><td><code>O{offer.offer_id}</code></td><td><strong>{offer.model}</strong><small>{offer.protocol}</small></td><td>{offer.channel_name}<small>C{offer.merchant_channel_id}</small></td><td><span className="price-multiple">{formatMultiplier(offer.multiplier_bps)}</span></td><td><Status>{offer.offer_status === 'active' ? '在售' : statusNames[offer.offer_status] || offer.offer_status}</Status></td><td><Status>{healthNames[offer.health_state] || offer.health_state}</Status></td><td>{offer.sync_error || '-'}</td></tr>)}
-          {!loading && offers.length === 0 && <tr><td className="table-message" colSpan="7">暂无报价版本</td></tr>}
-        </tbody></table></div>
-      </Section>
-
-      <Section title="渠道健康" description="主动探活和真实请求只记录状态、耗时、渠道与请求编号">
-        <div className="table-wrap"><table className="data-table"><thead><tr><th>模型</th><th>渠道</th><th>状态</th><th>可用率</th><th>P95 首字</th></tr></thead><tbody>
-          {health.map((item) => <tr key={`${item.offer_id}-${item.merchant_channel_id}`}><td><strong>{item.model}</strong></td><td>{item.channel_name}</td><td><Status>{healthNames[item.health_state] || item.health_state}</Status></td><td>{formatAvailability(item.availability_ppm)}</td><td>{formatLatency(item.ttft_p95_ms)}</td></tr>)}
-          {!loading && health.length === 0 && <tr><td className="table-message" colSpan="5">暂无健康记录</td></tr>}
-        </tbody></table></div>
-      </Section>
     </div>
   );
 }

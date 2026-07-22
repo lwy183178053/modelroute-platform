@@ -42,3 +42,21 @@ export function formatQuota(value) {
     style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2,
   }).format(quota / 500_000);
 }
+
+export function formatPriceMicros(value, currency = 'USD') {
+  if (value == null) return '-';
+  return new Intl.NumberFormat(currency === 'CNY' ? 'zh-CN' : 'en-US', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 6,
+  }).format(Number(value) / 1_000_000);
+}
+
+export function formatOfferPrice(tiers) {
+  const tier = tiers?.[0];
+  if (!tier) return '-';
+  const input = formatPriceMicros(tier.input_price_microusd);
+  const output = tier.output_price_microusd == null ? '' : ` / ${formatPriceMicros(tier.output_price_microusd)} 输出`;
+  return `${input} 输入${output}`;
+}

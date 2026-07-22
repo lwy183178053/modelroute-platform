@@ -1114,3 +1114,49 @@
 - `docs/部署运行手册.md`：把最低迁移验收更新到第 8 号迁移。
 - `progress.md`：追加本阶段实现、验证、文件清单和回滚点。
 - 回滚点：上一阶段提交 `b42bd57`；本阶段提交后可执行 `git revert <本阶段提交>` 生成代码回退改动。生产尚未执行第 8 号迁移或写入新表达式；未来发布后若跨迁移回退，必须恢复同一发布时间点的平台库与 New API 库备份。
+
+## 2026-07-23 - Task: 统一商户工作区并接入绝对模型价格界面
+
+### What was done
+
+- 普通商户和唯一管理员统一使用同一个商户中心组件，增加经营概览、渠道管理、模型报价、健康状态、结算账本和提现记录六个侧栏入口；管理员只额外保留管理后台。
+- 管理员模型表单删除倍率、固定计费和自由厂商输入，改为固定厂商与协议、生命周期、美元或人民币、独立核价汇率、核价来源、核价时间及每百万 Token 绝对价格。
+- 支持连续上下文价格阶梯的新增和删除，自动生成下一档起点；Embeddings 只显示输入价格，文本协议支持输入、输出、缓存读取、5 分钟缓存写入和 1 小时缓存写入。
+- 商户报价输入改为官方价折扣百分比，模型市场和商户报价页同时显示折扣及折后输入、输出美元单价；内部报价别名仍不进入浏览器。
+- 更新桌面与移动端截图场景，新增商户报价工作区和管理员绝对价格弹窗专项截图；本阶段只修改外围前端，New API 源码、请求链路和计费链路保持不变。
+
+### Testing
+
+- 先扩展 `ui-smoke.mjs` 并在旧界面运行，稳定失败于“商户侧栏缺少经营概览”；实现后同一脚本验证唯一管理员和普通商户的六个入口一致、普通商户无管理后台、65% 折扣转换为 `6500` 基点、Embedding 单价请求体和两档连续价格请求体，最终通过。
+- 执行 `npm.cmd run test:ui`，Vite 构建完成，角色导航、统一商户工作区、绝对价格、路由、支付、结算和人工提现交互全部通过。
+- 执行 `npm.cmd run capture`，生成 1440x1000 桌面和 390x844 移动端截图；脚本确认根页面无横向溢出和运行时错误，人工检查商户侧栏、模型市场、模型列表与价格弹窗，未发现文字遮挡或控件重叠。
+- 执行 `go test -count=1 ./...`、`go vet ./...` 和 `go build ./cmd/...`，全部通过。
+- 执行 16 个部署 Python 测试、`docker compose --env-file .env.example config --quiet` 和 `git diff --check`，全部通过。
+
+### Notes
+
+- `apps/web/src/api.js`：增加整数微价格和折后报价的统一显示格式。
+- `apps/web/src/Modals.jsx`：把商户报价改为折扣百分比输入，并预览官方价与折后美元价。
+- `apps/web/src/views/MarketView.jsx`：按折后首档价格排序并展示折后绝对价格和官方价折扣。
+- `apps/web/src/views/MerchantView.jsx`：实现普通商户与管理员共用的六栏商户工作区。
+- `apps/web/src/views/admin/AdminModels.jsx`：实现固定厂商、协议、生命周期和多阶梯绝对价格表单。
+- `apps/web/src/styles.css`：增加厂商选择器、价格元数据和响应式阶梯编辑样式。
+- `apps/web/scripts/ui-smoke.mjs`：覆盖统一商户权限、绝对价格提交、Embedding 和连续阶梯行为。
+- `apps/web/scripts/capture.mjs`：改用绝对价格模拟数据并增加商户报价和模型价格弹窗截图。
+- `docs/绝对价格与分层计费.md`：补充管理员价格界面和市场展示口径。
+- `docs/模型报价路由与健康.md`：补充官方价折扣和统一商户工作区规则。
+- `docs/账号与管理员接口.md`：补充唯一管理员与普通商户共用六栏页面的权限边界。
+- `apps/web/artifacts/market-desktop.png`：更新桌面模型市场真实折后价格截图。
+- `apps/web/artifacts/market-mobile.png`：更新移动端模型市场真实折后价格截图。
+- `apps/web/artifacts/merchant-desktop.png`：更新桌面商户经营概览和侧栏截图。
+- `apps/web/artifacts/merchant-mobile.png`：更新移动端商户经营概览和横向侧栏截图。
+- `apps/web/artifacts/merchant-offers-desktop.png`：新增桌面商户模型报价工作区截图。
+- `apps/web/artifacts/merchant-offers-mobile.png`：新增移动端商户模型报价工作区截图。
+- `apps/web/artifacts/admin-models-desktop.png`：更新桌面管理员模型绝对价格列表截图。
+- `apps/web/artifacts/admin-models-mobile.png`：更新移动端管理员模型绝对价格列表截图。
+- `apps/web/artifacts/admin-model-price-desktop.png`：新增桌面管理员绝对价格弹窗截图。
+- `apps/web/artifacts/admin-model-price-mobile.png`：新增移动端管理员绝对价格弹窗截图。
+- `apps/web/artifacts/withdrawal-modal-desktop.png`：更新统一商户工作区背景下的桌面提现弹窗截图。
+- `apps/web/artifacts/withdrawal-modal-mobile.png`：更新统一商户工作区背景下的移动端提现弹窗截图。
+- `progress.md`：追加本阶段实现、验证、文件清单和回滚点。
+- 回滚点：基线提交 `83a0c01`；本阶段提交后可执行 `git revert <本阶段提交>` 生成代码回退改动。本阶段没有数据库迁移且尚未发布生产，不需要恢复数据库。

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Check, CreditCard, KeyRound, Landmark, LockKeyhole, Plus, RotateCcw, Send, ShieldCheck, Store } from 'lucide-react';
 import AuthModal from './AuthModal';
-import { apiRequest, formatQuota } from './api';
+import { apiRequest, formatPriceMicros, formatQuota } from './api';
 import { Button, Field, InlineNotice, Modal, Select, TextInput } from './ui';
 
 function Footer({ cancel, submit, submitText, icon = Check }) {
@@ -90,21 +90,27 @@ function RouteModal({ close, config, notify }) {
 function QuoteModal({ close, config, notify }) {
   const [modelID, setModelID] = useState(String(config.models?.[0]?.id || ''));
   const [channelID, setChannelID] = useState(String(config.channels?.[0]?.id || ''));
-  const [ratio, setRatio] = useState('0.72');
+  const [discountPercent, setDiscountPercent] = useState('72');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const selectedModel = config.models?.find((model) => String(model.id) === modelID);
+  const selectedTier = selectedModel?.price?.tiers?.[0];
+  const discountBPS = Math.round(Number(discountPercent) * 100);
+  const formatDiscounted = (value) => {
+    if (value == null || !Number.isInteger(discountBPS)) return '-';
+    const usdMicros = Math.round(Number(value) * Number(selectedModel?.price?.usd_exchange_rate_micros || 0) / 1_000_000);
+    return formatPriceMicros(Math.round(usdMicros * discountBPS / 10_000), 'USD');
+  };
   const submit = async () => {
-    const multiplierBPS = Math.round(Number(ratio) * 10_000);
-    if (!Number.isInteger(multiplierBPS) || multiplierBPS < 1 || multiplierBPS > 10_000) {
-      setError('成交倍率必须在 0.0001x 到 1.0000x 之间');
+    if (!Number.isInteger(discountBPS) || discountBPS < 1 || discountBPS > 10_000) {
+      setError('官方价折扣必须在 0.01% 到 100.00% 之间');
       return;
     }
     setBusy(true);
     setError('');
     try {
       await apiRequest('/api/merchant/offers', { method: 'POST', body: {
-        merchant_channel_id: Number(channelID), canonical_model_id: Number(modelID), multiplier_bps: multiplierBPS,
+        merchant_channel_id: Number(channelID), canonical_model_id: Number(modelID), multiplier_bps: discountBPS,
       } });
       await config.onSaved?.();
       notify('新报价版本已生效');
@@ -120,8 +126,8 @@ function QuoteModal({ close, config, notify }) {
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
       <Field label="标准模型"><Select value={modelID} onChange={(event) => setModelID(event.target.value)}>{(config.models || []).map((model) => <option key={model.id} value={model.id}>{model.public_name} · {model.provider}</option>)}</Select></Field>
       <Field label="商户渠道"><Select value={channelID} onChange={(event) => setChannelID(event.target.value)}>{(config.channels || []).map((channel) => <option key={channel.id} value={channel.id}>{channel.channel_name} · C{channel.id}</option>)}</Select></Field>
-      <div className="quote-summary"><div><span>官方价格版本</span><strong>v{selectedModel?.price?.version || '-'}</strong></div><div><span>计费模式</span><strong>{selectedModel?.price?.billing_mode === 'fixed' ? '固定计费' : 'Token 计费'}</strong></div><div><span>倍率上限</span><strong>1.0000x</strong></div></div>
-      <Field label="成交倍率" hint="允许范围 0.0001x - 1.0000x"><div className="suffix-input"><TextInput max="1" min="0.0001" onChange={(event) => setRatio(event.target.value)} step="0.0001" type="number" value={ratio} /><span>x</span></div></Field>
+      <div className="quote-summary"><div><span>官方价格版本</span><strong>v{selectedModel?.price?.version || '-'}</strong></div><div><span>官方首档价格</span><strong>{selectedTier ? `${formatPriceMicros(selectedTier.input_price_micros, selectedModel.price.currency)} 输入${selectedTier.output_price_micros == null ? '' : ` / ${formatPriceMicros(selectedTier.output_price_micros, selectedModel.price.currency)} 输出`}` : '-'}</strong></div><div><span>折后美元价格</span><strong>{selectedTier ? `${formatDiscounted(selectedTier.input_price_micros)} 输入${selectedTier.output_price_micros == null ? '' : ` / ${formatDiscounted(selectedTier.output_price_micros)} 输出`}` : '-'}</strong></div></div>
+      <Field label="官方价折扣" hint="允许范围 0.01% - 100.00%"><div className="suffix-input"><TextInput max="100" min="0.01" onChange={(event) => setDiscountPercent(event.target.value)} step="0.01" type="number" value={discountPercent} /><span>%</span></div></Field>
       <InlineNotice>调价将创建不可变的新报价版本；已进入请求的价格不会变化。</InlineNotice>
     </Modal>
   );

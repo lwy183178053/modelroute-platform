@@ -69,12 +69,6 @@ func TestSortCandidatesImplementsPriceAndStabilityPriority(t *testing.T) {
 	}
 }
 
-func TestApplyBasisPointsRoundsDownWithoutFloat(t *testing.T) {
-	if got := applyBasisPoints(1_234_567, 4_000); got != 493_826 {
-		t.Fatalf("缩放结果 = %d", got)
-	}
-}
-
 func TestRewritePublicModelOnlyChangesModelField(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.5","messages":[{"role":"user","content":"保留内容"}],"stream":true}`)
 	rewritten, model, err := rewritePublicModel(body, "mkt-ov-42")

@@ -64,10 +64,6 @@ func scaledDecimal(value int64, scale int64) string {
 	return strconv.FormatInt(whole, 10) + "." + fractionText
 }
 
-func applyBasisPoints(value int64, basisPoints int) int64 {
-	return value * int64(basisPoints) / 10_000
-}
-
 func rewritePublicModel(body []byte, internalAlias string) ([]byte, string, error) {
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()

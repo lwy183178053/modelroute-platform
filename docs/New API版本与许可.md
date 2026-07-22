@@ -29,7 +29,7 @@ NEW_API_CANDIDATE_IMAGE=REGISTRY/NEW_API:TAG@sha256:DIGEST \
   deploy/scripts/verify-newapi-contract.sh
 ```
 
-契约环境与生产 Compose 隔离，覆盖初始化、账号、令牌、渠道、模型映射、倍率、Chat、Responses、Embeddings、流式响应、缓存计费日志、退款日志结构和无渠道错误，结束后删除临时卷。
+契约环境与生产 Compose 隔离，覆盖初始化、账号、令牌、渠道、模型映射、`tiered_expr`、Chat、Responses、Embeddings、流式响应、缓存计费日志、退款日志结构和无渠道错误，结束后删除临时卷。
 
 ## 服务边界
 

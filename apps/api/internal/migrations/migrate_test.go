@@ -10,7 +10,7 @@ func TestEmbeddedMigrationsAreOrdered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Files() 返回错误：%v", err)
 	}
-	if len(files) != 7 {
+	if len(files) != 8 {
 		t.Fatalf("迁移文件数量 = %d", len(files))
 	}
 	if files[0].Version != 1 || files[0].Name != "000001_foundation.sql" {
@@ -36,6 +36,9 @@ func TestEmbeddedMigrationsAreOrdered(t *testing.T) {
 	}
 	if files[6].Version != 7 || files[6].Name != "000007_announcements.sql" {
 		t.Fatalf("公告迁移不符合预期：%+v", files[6])
+	}
+	if files[7].Version != 8 || files[7].Name != "000008_absolute_pricing.sql" {
+		t.Fatalf("绝对价格迁移不符合预期：%+v", files[7])
 	}
 	for _, table := range []string{"merchant_applications", "merchant_profiles", "merchant_channel_reviews", "merchant_channels"} {
 		if !strings.Contains(files[1].SQL, "CREATE TABLE "+table) {
@@ -69,6 +72,11 @@ func TestEmbeddedMigrationsAreOrdered(t *testing.T) {
 	for _, table := range []string{"announcements", "announcement_reads"} {
 		if !strings.Contains(files[6].SQL, "CREATE TABLE "+table) {
 			t.Fatalf("公告迁移缺少表 %s", table)
+		}
+	}
+	for _, fragment := range []string{"lifecycle", "pricing_scheme", "price_tiers", "input_price_micros", "cache_write_1h_price_micros"} {
+		if !strings.Contains(files[7].SQL, fragment) {
+			t.Fatalf("绝对价格迁移缺少 %s", fragment)
 		}
 	}
 }

@@ -10,31 +10,16 @@ import (
 	"sync"
 )
 
-const priceScale = int64(1_000_000)
-
 var newAPIPriceOptionKeys = []string{
-	"ModelRatio",
-	"ModelPrice",
-	"CompletionRatio",
-	"CacheRatio",
-	"CreateCacheRatio",
-	"ImageRatio",
-	"AudioRatio",
-	"AudioCompletionRatio",
+	"billing_setting.billing_mode",
+	"billing_setting.billing_expr",
 }
 
 type aliasPrice struct {
-	Alias                      string
-	BillingMode                string
-	MultiplierBPS              int
-	ModelRatioMicros           int64
-	ModelPriceMicroUSD         int64
-	CompletionRatioMicros      int64
-	CacheRatioMicros           int64
-	CreateCacheRatioMicros     int64
-	ImageRatioMicros           int64
-	AudioRatioMicros           int64
-	AudioCompletionRatioMicros int64
+	Alias         string
+	Protocol      string
+	MultiplierBPS int
+	Price         OfficialPrice
 }
 
 type ChannelPriceRoute struct {
@@ -164,9 +149,9 @@ func mergeChannelRoute(data []byte, route ChannelPriceRoute) ([]string, map[stri
 }
 
 func buildAliasPriceOptions(existing map[string]string, offers []aliasPrice) (map[string]string, error) {
-	values := make(map[string]map[string]json.RawMessage, len(newAPIPriceOptionKeys))
+	values := make(map[string]map[string]string, len(newAPIPriceOptionKeys))
 	for _, key := range newAPIPriceOptionKeys {
-		values[key] = make(map[string]json.RawMessage)
+		values[key] = make(map[string]string)
 		raw := strings.TrimSpace(existing[key])
 		if raw == "" {
 			continue
@@ -182,35 +167,12 @@ func buildAliasPriceOptions(existing map[string]string, offers []aliasPrice) (ma
 		if offer.Alias == "" || offer.MultiplierBPS < 1 || offer.MultiplierBPS > 10_000 {
 			return nil, fmt.Errorf("报价别名或倍率无效")
 		}
-		delete(values["ModelRatio"], offer.Alias)
-		delete(values["ModelPrice"], offer.Alias)
-		switch offer.BillingMode {
-		case "token":
-			if offer.ModelRatioMicros <= 0 {
-				return nil, fmt.Errorf("Token 计费缺少主倍率")
-			}
-			values["ModelRatio"][offer.Alias] = decimalJSON(applyBasisPoints(offer.ModelRatioMicros, offer.MultiplierBPS))
-		case "fixed":
-			if offer.ModelPriceMicroUSD <= 0 {
-				return nil, fmt.Errorf("固定计费缺少价格")
-			}
-			values["ModelPrice"][offer.Alias] = decimalJSON(applyBasisPoints(offer.ModelPriceMicroUSD, offer.MultiplierBPS))
-		default:
-			return nil, fmt.Errorf("不支持的计费模式 %q", offer.BillingMode)
+		expression, _, err := buildTieredExpression(offer.Price, offer.MultiplierBPS, offer.Protocol)
+		if err != nil {
+			return nil, fmt.Errorf("报价 %s 的绝对价格无效：%w", offer.Alias, err)
 		}
-		for key, value := range map[string]int64{
-			"CompletionRatio":      offer.CompletionRatioMicros,
-			"CacheRatio":           offer.CacheRatioMicros,
-			"CreateCacheRatio":     offer.CreateCacheRatioMicros,
-			"ImageRatio":           offer.ImageRatioMicros,
-			"AudioRatio":           offer.AudioRatioMicros,
-			"AudioCompletionRatio": offer.AudioCompletionRatioMicros,
-		} {
-			if value < 0 {
-				return nil, fmt.Errorf("报价 %s 的 %s 不能为负数", offer.Alias, key)
-			}
-			values[key][offer.Alias] = decimalJSON(value)
-		}
+		values["billing_setting.billing_mode"][offer.Alias] = "tiered_expr"
+		values["billing_setting.billing_expr"][offer.Alias] = expression
 	}
 
 	result := make(map[string]string, len(values))
@@ -222,8 +184,4 @@ func buildAliasPriceOptions(existing map[string]string, offers []aliasPrice) (ma
 		result[key] = string(encoded)
 	}
 	return result, nil
-}
-
-func decimalJSON(value int64) json.RawMessage {
-	return json.RawMessage(scaledDecimal(value, priceScale))
 }

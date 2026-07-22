@@ -1069,3 +1069,48 @@
 - `docs/部署运行手册.md`：把最低迁移验收更新到第 7 号公告迁移。
 - `progress.md`：追加公告阶段实现、验证、文件清单和回滚点。
 - 回滚点：上一阶段提交 `c24973f`；本阶段提交后可执行 `git revert <本阶段提交>` 生成代码回退改动。生产尚未执行第 7 号迁移；未来发布后跨迁移回退必须使用发布前双数据库备份。
+
+## 2026-07-23 - Task: 升级绝对价格、价格阶梯与 New API 分层计费
+
+### What was done
+
+- 新增第 8 号迁移，为标准模型增加稳定版、Preview、限量和临近退役生命周期，为官方价格版本增加原币、独立核价汇率、核价来源和核价时间，并建立连续输入上下文价格阶梯。
+- 将历史 Token 倍率换算为单档美元绝对价格，保留但停用历史固定计费模型；新模型只接受每百万 Token 输入、输出和缓存绝对价格。
+- 实现美元和人民币微价的两步整数四舍五入、商户折扣最低边界、阶梯连续性与协议校验；稳定版默认启用，其他生命周期默认停用。
+- 将报价同步从八组旧倍率配置切换为 New API 原生 `tiered_expr`，使用 `len/p/c/cr/cc/cc1h` 生成不可变表达式；同步失败时不更新渠道、不激活新报价。
+- 模型目录返回原币阶梯，市场与商户报价返回折扣基点和折后美元阶梯；内部报价别名继续不返回浏览器。
+- 更新固定 New API 容器契约，真实覆盖分层表达式、缓存命中、三类协议、流式响应和退款日志。
+
+### Testing
+
+- 测试先在旧实现上稳定失败，失败点为缺少第 8 号迁移、绝对价格类型、整数换算、生命周期状态、分层表达式和新同步键；实现后聚焦测试全部通过。
+- 使用 PostgreSQL 17 执行完整迁移和全部数据库集成测试；模型目录、市场折后价和商户折后价断言通过。
+- 在独立临时数据库先执行前 7 个迁移并写入旧 Token 与固定计费记录，再执行第 8 号迁移；旧 Token 得到单档 `$2.50/$7.50`，旧固定模型保持 `legacy_fixed` 且停用，临时数据库已删除。
+- 执行 `go test -count=1 ./...`、`go vet ./...`、`go build ./cmd/...` 和 `git diff --check`，均通过。
+- 在 New API 固定源码提交 `bde9b2f44887d34ec54799ae191d50f97914359e` 执行 `go test -count=1 ./pkg/billingexpr ./setting/billing_setting`，通过。
+- 执行 `bash deploy/scripts/verify-newapi-contract.sh`，固定 `rc.21` 容器的初始化、账号、令牌、渠道、模型映射、分层表达式、Chat、Responses、Embeddings、流式、缓存日志、退款日志和无渠道错误契约全部通过。
+
+### Notes
+
+- `apps/api/go.mod`、`apps/api/go.sum`：引入与 New API `rc.21` 相同版本的 `expr-lang` 表达式编译器。
+- `apps/api/internal/httpapi/absolute_pricing.go`：实现绝对价格校验、整数换算、折扣阶梯、生命周期初始状态和 `tiered_expr` 生成冒烟。
+- `apps/api/internal/httpapi/absolute_pricing_test.go`：覆盖美元、人民币、四舍五入、阶梯边界、协议、厂商、生命周期和表达式。
+- `apps/api/internal/httpapi/pricing_sync.go`：切换 New API 分层计费配置同步。
+- `apps/api/internal/httpapi/pricing_sync_test.go`：覆盖现有配置保留、表达式生成、人民币 Embeddings 和失败不激活。
+- `apps/api/internal/httpapi/routing_handlers.go`：接入生命周期与绝对价格 HTTP 契约。
+- `apps/api/internal/httpapi/routing_handlers_test.go`：锁定管理员创建模型的新请求结构。
+- `apps/api/internal/httpapi/routing_domain.go`、`apps/api/internal/httpapi/routing_domain_test.go`：删除本轮切换后不再使用的旧倍率缩放函数及测试。
+- `apps/api/internal/httpapi/routing_store.go`：原子保存价格版本与阶梯，并返回模型和报价的分层价格。
+- `apps/api/internal/httpapi/routing_store_test.go`：覆盖价格事务、别名装载和新价格发布。
+- `apps/api/internal/httpapi/routing_store_postgres_test.go`：覆盖真实 PostgreSQL 模型目录与折后价格。
+- `apps/api/internal/migrations/migrate_test.go`：锁定第 8 号迁移顺序和关键结构。
+- `apps/api/internal/migrations/sql/000008_absolute_pricing.sql`：增加生命周期、绝对价格元数据、价格阶梯和旧数据迁移。
+- `deploy/newapi-contract/run_contract.py`：把候选容器计费契约切换为分层表达式和分层日志断言。
+- `deploy/scripts/verify-newapi-contract.sh`：更新候选容器契约结果说明。
+- `deploy/tests/test_release_tools.py`：把候选契约静态断言更新为分层计费配置和日志字段。
+- `docs/New API版本与许可.md`：更新候选版本分层计费覆盖范围。
+- `docs/模型报价路由与健康.md`：更新绝对价格、阶梯、折扣和同步规则。
+- `docs/绝对价格与分层计费.md`：新增绝对价格数据、换算、表达式、升级和验证说明。
+- `docs/部署运行手册.md`：把最低迁移验收更新到第 8 号迁移。
+- `progress.md`：追加本阶段实现、验证、文件清单和回滚点。
+- 回滚点：上一阶段提交 `b42bd57`；本阶段提交后可执行 `git revert <本阶段提交>` 生成代码回退改动。生产尚未执行第 8 号迁移或写入新表达式；未来发布后若跨迁移回退，必须恢复同一发布时间点的平台库与 New API 库备份。

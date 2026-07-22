@@ -78,9 +78,14 @@ RETURNING id
 	}
 
 	store := NewSQLRoutingStore(database)
+	outputPrice := int64(4_800_000)
+	cacheReadPrice := int64(600_000)
 	model, err := store.CreateCanonicalModel(ctx, CreateCanonicalModelCommand{
-		PublicName: "gpt-4o-mini", Provider: "OpenAI", Protocol: "chat_completions", AdminID: 1,
-		Price: OfficialPrice{BillingMode: "token", ModelRatioMicros: 600_000, CompletionRatioMicros: 4_000_000, CacheRatioMicros: 500_000},
+		PublicName: "gpt-4o-mini", Provider: "OpenAI", Protocol: "chat_completions", Lifecycle: "stable", AdminID: 1,
+		Price: OfficialPrice{
+			Currency: "USD", USDExchangeRateMicros: 1_000_000, SourceURL: "https://openai.com/api/pricing/",
+			Tiers: []PriceTier{{MinimumInputTokens: 0, InputPriceMicros: 1_200_000, OutputPriceMicros: &outputPrice, CacheReadPriceMicros: &cacheReadPrice}},
+		},
 	})
 	if err != nil {
 		t.Fatalf("创建标准模型：%v", err)
@@ -94,6 +99,18 @@ RETURNING id
 	}
 	if err := store.ActivateOffer(ctx, offer.ID); err != nil {
 		t.Fatalf("激活报价：%v", err)
+	}
+	models, err := store.ListCanonicalModels(ctx)
+	if err != nil || len(models) != 1 || models[0].Lifecycle != "stable" || len(models[0].Price.Tiers) != 1 || models[0].Price.Tiers[0].InputPriceMicros != 1_200_000 {
+		t.Fatalf("标准模型目录=%+v，错误=%v", models, err)
+	}
+	market, err := store.ListMarketOffers(ctx, 0, "gpt-4o-mini")
+	if err != nil || len(market) != 1 || market[0].DiscountBPS != 7200 || len(market[0].PriceTiers) != 1 || market[0].PriceTiers[0].InputPriceMicroUSD != 864_000 {
+		t.Fatalf("市场折后价格=%+v，错误=%v", market, err)
+	}
+	merchantOffers, err := store.ListMerchantOffers(ctx, 7)
+	if err != nil || len(merchantOffers) != 1 || len(merchantOffers[0].PriceTiers) != 1 || merchantOffers[0].PriceTiers[0].OutputPriceMicroUSD == nil || *merchantOffers[0].PriceTiers[0].OutputPriceMicroUSD != 3_456_000 {
+		t.Fatalf("商户折后价格=%+v，错误=%v", merchantOffers, err)
 	}
 	if _, err := store.BindTokenAndDefaultPolicy(ctx, 7, 9, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"); err != nil {
 		t.Fatalf("绑定令牌策略：%v", err)

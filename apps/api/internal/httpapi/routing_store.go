@@ -24,24 +24,31 @@ type CreateOfferCommand struct {
 }
 
 type OfficialPrice struct {
-	ID                         int64     `json:"id,omitempty"`
-	Version                    int       `json:"version,omitempty"`
-	BillingMode                string    `json:"billing_mode"`
-	ModelRatioMicros           int64     `json:"model_ratio_micros,omitempty"`
-	ModelPriceMicroUSD         int64     `json:"model_price_microusd,omitempty"`
-	CompletionRatioMicros      int64     `json:"completion_ratio_micros"`
-	CacheRatioMicros           int64     `json:"cache_ratio_micros"`
-	CreateCacheRatioMicros     int64     `json:"create_cache_ratio_micros"`
-	ImageRatioMicros           int64     `json:"image_ratio_micros"`
-	AudioRatioMicros           int64     `json:"audio_ratio_micros"`
-	AudioCompletionRatioMicros int64     `json:"audio_completion_ratio_micros"`
-	PublishedAt                time.Time `json:"published_at,omitempty"`
+	ID                         int64       `json:"id,omitempty"`
+	Version                    int         `json:"version,omitempty"`
+	BillingMode                string      `json:"billing_mode"`
+	ModelRatioMicros           int64       `json:"model_ratio_micros,omitempty"`
+	ModelPriceMicroUSD         int64       `json:"model_price_microusd,omitempty"`
+	CompletionRatioMicros      int64       `json:"completion_ratio_micros,omitempty"`
+	CacheRatioMicros           int64       `json:"cache_ratio_micros,omitempty"`
+	CreateCacheRatioMicros     int64       `json:"create_cache_ratio_micros,omitempty"`
+	ImageRatioMicros           int64       `json:"image_ratio_micros,omitempty"`
+	AudioRatioMicros           int64       `json:"audio_ratio_micros,omitempty"`
+	AudioCompletionRatioMicros int64       `json:"audio_completion_ratio_micros,omitempty"`
+	PricingScheme              string      `json:"pricing_scheme,omitempty"`
+	Currency                   string      `json:"currency"`
+	USDExchangeRateMicros      int64       `json:"usd_exchange_rate_micros"`
+	SourceURL                  string      `json:"source_url"`
+	CheckedAt                  time.Time   `json:"checked_at,omitempty"`
+	Tiers                      []PriceTier `json:"tiers"`
+	PublishedAt                time.Time   `json:"published_at,omitempty"`
 }
 
 type CreateCanonicalModelCommand struct {
 	PublicName string
 	Provider   string
 	Protocol   string
+	Lifecycle  string
 	AdminID    int
 	Price      OfficialPrice
 }
@@ -51,6 +58,7 @@ type CanonicalModel struct {
 	PublicName string        `json:"public_name"`
 	Provider   string        `json:"provider"`
 	Protocol   string        `json:"protocol"`
+	Lifecycle  string        `json:"lifecycle"`
 	Status     string        `json:"status"`
 	Price      OfficialPrice `json:"price"`
 	CreatedAt  time.Time     `json:"created_at,omitempty"`
@@ -76,33 +84,39 @@ type RoutingRepository interface {
 }
 
 type MarketOffer struct {
-	OfferID           int64  `json:"offer_id"`
-	MerchantID        int64  `json:"merchant_id"`
-	MerchantName      string `json:"merchant_name"`
-	MerchantChannelID int64  `json:"merchant_channel_id"`
-	ChannelName       string `json:"channel_name"`
-	Model             string `json:"model"`
-	Protocol          string `json:"protocol"`
-	MultiplierBPS     int    `json:"multiplier_bps"`
-	HealthState       string `json:"health_state"`
-	AvailabilityPPM   int    `json:"availability_ppm"`
-	TTFTP95MS         int    `json:"ttft_p95_ms"`
-	InternalAlias     string `json:"-"`
+	OfferID           int64            `json:"offer_id"`
+	MerchantID        int64            `json:"merchant_id"`
+	MerchantName      string           `json:"merchant_name"`
+	MerchantChannelID int64            `json:"merchant_channel_id"`
+	ChannelName       string           `json:"channel_name"`
+	Model             string           `json:"model"`
+	Protocol          string           `json:"protocol"`
+	MultiplierBPS     int              `json:"multiplier_bps"`
+	DiscountBPS       int              `json:"discount_bps"`
+	PriceTiers        []OfferPriceTier `json:"price_tiers"`
+	HealthState       string           `json:"health_state"`
+	AvailabilityPPM   int              `json:"availability_ppm"`
+	TTFTP95MS         int              `json:"ttft_p95_ms"`
+	InternalAlias     string           `json:"-"`
+	OfficialPrice     OfficialPrice    `json:"-"`
 }
 
 type MerchantOfferView struct {
-	OfferID           int64  `json:"offer_id"`
-	MerchantChannelID int64  `json:"merchant_channel_id"`
-	ChannelName       string `json:"channel_name"`
-	Model             string `json:"model"`
-	Protocol          string `json:"protocol"`
-	MultiplierBPS     int    `json:"multiplier_bps"`
-	OfferStatus       string `json:"offer_status"`
-	HealthState       string `json:"health_state"`
-	AvailabilityPPM   int    `json:"availability_ppm"`
-	TTFTP95MS         int    `json:"ttft_p95_ms"`
-	SyncError         string `json:"sync_error,omitempty"`
-	InternalAlias     string `json:"-"`
+	OfferID           int64            `json:"offer_id"`
+	MerchantChannelID int64            `json:"merchant_channel_id"`
+	ChannelName       string           `json:"channel_name"`
+	Model             string           `json:"model"`
+	Protocol          string           `json:"protocol"`
+	MultiplierBPS     int              `json:"multiplier_bps"`
+	DiscountBPS       int              `json:"discount_bps"`
+	PriceTiers        []OfferPriceTier `json:"price_tiers"`
+	OfferStatus       string           `json:"offer_status"`
+	HealthState       string           `json:"health_state"`
+	AvailabilityPPM   int              `json:"availability_ppm"`
+	TTFTP95MS         int              `json:"ttft_p95_ms"`
+	SyncError         string           `json:"sync_error,omitempty"`
+	InternalAlias     string           `json:"-"`
+	OfficialPrice     OfficialPrice    `json:"-"`
 }
 
 type RouteSelection struct {
@@ -189,32 +203,25 @@ func NewSQLRoutingStore(database *sql.DB) *SQLRoutingStore {
 }
 
 func (s *SQLRoutingStore) CreateCanonicalModel(ctx context.Context, command CreateCanonicalModelCommand) (CanonicalModel, error) {
+	command.Price = normalizeOfficialPrice(command.Price)
+	if err := validateCanonicalModel(command); err != nil {
+		return CanonicalModel{}, ErrRoutingInvalidState
+	}
 	tx, err := s.database.BeginTx(ctx, nil)
 	if err != nil {
 		return CanonicalModel{}, fmt.Errorf("开始标准模型事务：%w", err)
 	}
 	defer tx.Rollback()
-	model := CanonicalModel{PublicName: command.PublicName, Provider: command.Provider, Protocol: command.Protocol, Status: "active", Price: command.Price}
+	model := CanonicalModel{PublicName: command.PublicName, Provider: command.Provider, Protocol: command.Protocol, Lifecycle: command.Lifecycle, Status: initialModelStatus(command.Lifecycle), Price: command.Price}
 	err = tx.QueryRowContext(ctx, `
-INSERT INTO canonical_models (public_name, provider, protocol)
-VALUES ($1, $2, $3)
+INSERT INTO canonical_models (public_name, provider, protocol, lifecycle, status)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING id, status, created_at
-`, command.PublicName, command.Provider, command.Protocol).Scan(&model.ID, &model.Status, &model.CreatedAt)
+`, command.PublicName, command.Provider, command.Protocol, command.Lifecycle, model.Status).Scan(&model.ID, &model.Status, &model.CreatedAt)
 	if err != nil {
 		return CanonicalModel{}, fmt.Errorf("创建标准模型：%w", err)
 	}
-	err = tx.QueryRowContext(ctx, `
-INSERT INTO official_price_versions
-    (canonical_model_id, version, billing_mode, model_ratio_micros, model_price_microusd,
-     completion_ratio_micros, cache_ratio_micros, create_cache_ratio_micros,
-     image_ratio_micros, audio_ratio_micros, audio_completion_ratio_micros,
-     published_by_newapi_user_id)
-VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING id, version
-`, model.ID, command.Price.BillingMode, nullablePositive(command.Price.ModelRatioMicros), nullablePositive(command.Price.ModelPriceMicroUSD),
-		command.Price.CompletionRatioMicros, command.Price.CacheRatioMicros, command.Price.CreateCacheRatioMicros,
-		command.Price.ImageRatioMicros, command.Price.AudioRatioMicros, command.Price.AudioCompletionRatioMicros,
-		command.AdminID).Scan(&model.Price.ID, &model.Price.Version)
+	model.Price, err = insertOfficialPriceVersion(ctx, tx, model.ID, 1, command.AdminID, command.Protocol, command.Price)
 	if err != nil {
 		return CanonicalModel{}, fmt.Errorf("创建官方价格版本：%w", err)
 	}
@@ -227,11 +234,77 @@ RETURNING id, version
 	return model, nil
 }
 
-func nullablePositive(value int64) any {
-	if value <= 0 {
-		return nil
+func insertOfficialPriceVersion(ctx context.Context, tx *sql.Tx, modelID int64, version int, adminID int, protocol string, price OfficialPrice) (OfficialPrice, error) {
+	modelRatio, completionRatio, cacheRatio, createCacheRatio, err := compatibilityRatios(price, protocol)
+	if err != nil {
+		return OfficialPrice{}, err
 	}
-	return value
+	err = tx.QueryRowContext(ctx, `
+INSERT INTO official_price_versions
+    (canonical_model_id, version, billing_mode, model_ratio_micros, model_price_microusd,
+     completion_ratio_micros, cache_ratio_micros, create_cache_ratio_micros,
+     image_ratio_micros, audio_ratio_micros, audio_completion_ratio_micros,
+     published_by_newapi_user_id, pricing_scheme, original_currency,
+     usd_exchange_rate_micros, source_url, checked_at)
+VALUES ($1, $2, 'token', $3, NULL, $4, $5, $6, 0, 0, 0, $7,
+        'absolute', $8, $9, $10, $11)
+RETURNING id, version, published_at
+`, modelID, version, modelRatio, completionRatio, cacheRatio, createCacheRatio, adminID,
+		price.Currency, price.USDExchangeRateMicros, price.SourceURL, price.CheckedAt).Scan(
+		&price.ID, &price.Version, &price.PublishedAt,
+	)
+	if err != nil {
+		return OfficialPrice{}, err
+	}
+	for index, tier := range price.Tiers {
+		result, err := tx.ExecContext(ctx, `
+INSERT INTO price_tiers
+    (official_price_version_id, tier_order, minimum_input_tokens, maximum_input_tokens,
+     input_price_micros, output_price_micros, cache_read_price_micros,
+     cache_write_5m_price_micros, cache_write_1h_price_micros)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+`, price.ID, index+1, tier.MinimumInputTokens, tier.MaximumInputTokens,
+			tier.InputPriceMicros, tier.OutputPriceMicros, tier.CacheReadPriceMicros,
+			tier.CacheWrite5mPriceMicros, tier.CacheWrite1hPriceMicros)
+		if err != nil {
+			return OfficialPrice{}, err
+		}
+		if affected, _ := result.RowsAffected(); affected != 1 {
+			return OfficialPrice{}, ErrRoutingInvalidState
+		}
+		price.Tiers[index].TierOrder = index + 1
+	}
+	price.BillingMode = "token"
+	price.PricingScheme = "absolute"
+	return price, nil
+}
+
+func compatibilityRatios(price OfficialPrice, protocol string) (int64, int64, int64, int64, error) {
+	_, tiers, err := buildTieredExpression(price, 10_000, protocol)
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	first := tiers[0]
+	modelRatio := (first.InputPriceMicroUSD + 1) / 2
+	ratio := func(value *int64) (int64, error) {
+		if value == nil {
+			return 0, nil
+		}
+		return roundMultiplyDivide(*value, priceMicrosScale, first.InputPriceMicroUSD)
+	}
+	completion, err := ratio(first.OutputPriceMicroUSD)
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	cache, err := ratio(first.CacheReadPriceMicroUSD)
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	createCache, err := ratio(first.CacheWrite5mPriceMicroUSD)
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	return modelRatio, completion, cache, createCache, nil
 }
 
 func (s *SQLRoutingStore) CreateOffer(ctx context.Context, command CreateOfferCommand) (OfferVersion, error) {
@@ -352,43 +425,66 @@ WHERE id = $1 AND status = 'syncing'
 
 func (s *SQLRoutingStore) AliasPrices(ctx context.Context) ([]aliasPrice, error) {
 	rows, err := s.database.QueryContext(ctx, `
-SELECT o.internal_alias, p.billing_mode, o.multiplier_bps,
-       p.model_ratio_micros, p.model_price_microusd,
-       p.completion_ratio_micros, p.cache_ratio_micros, p.create_cache_ratio_micros,
-       p.image_ratio_micros, p.audio_ratio_micros, p.audio_completion_ratio_micros
+SELECT o.internal_alias, cm.protocol, o.multiplier_bps,
+       p.id, p.version, p.original_currency, p.usd_exchange_rate_micros,
+       p.source_url, p.checked_at, p.published_at,
+       pt.id, pt.tier_order, pt.minimum_input_tokens, pt.maximum_input_tokens,
+       pt.input_price_micros, pt.output_price_micros, pt.cache_read_price_micros,
+       pt.cache_write_5m_price_micros, pt.cache_write_1h_price_micros
 FROM offer_versions o
 JOIN official_price_versions p ON p.id = o.official_price_version_id
-WHERE o.status <> 'sync_failed'
-ORDER BY o.id
+JOIN canonical_models cm ON cm.id = o.canonical_model_id
+JOIN price_tiers pt ON pt.official_price_version_id = p.id
+WHERE o.status <> 'sync_failed' AND p.pricing_scheme = 'absolute'
+ORDER BY o.id, pt.tier_order
 `)
 	if err != nil {
 		return nil, fmt.Errorf("查询别名价格：%w", err)
 	}
 	defer rows.Close()
 	prices := make([]aliasPrice, 0)
+	priceIndexes := make(map[string]int)
 	for rows.Next() {
 		var price aliasPrice
-		var modelRatio, modelPrice sql.NullInt64
+		var tier PriceTier
+		var maximum, output, cacheRead, cacheWrite5m, cacheWrite1h sql.NullInt64
 		if err := rows.Scan(
-			&price.Alias, &price.BillingMode, &price.MultiplierBPS,
-			&modelRatio, &modelPrice, &price.CompletionRatioMicros,
-			&price.CacheRatioMicros, &price.CreateCacheRatioMicros, &price.ImageRatioMicros,
-			&price.AudioRatioMicros, &price.AudioCompletionRatioMicros,
+			&price.Alias, &price.Protocol, &price.MultiplierBPS,
+			&price.Price.ID, &price.Price.Version, &price.Price.Currency,
+			&price.Price.USDExchangeRateMicros, &price.Price.SourceURL,
+			&price.Price.CheckedAt, &price.Price.PublishedAt,
+			&tier.ID, &tier.TierOrder, &tier.MinimumInputTokens, &maximum,
+			&tier.InputPriceMicros, &output, &cacheRead, &cacheWrite5m, &cacheWrite1h,
 		); err != nil {
 			return nil, fmt.Errorf("解析别名价格：%w", err)
 		}
-		if modelRatio.Valid {
-			price.ModelRatioMicros = modelRatio.Int64
+		tier.MaximumInputTokens = nullInt64Pointer(maximum)
+		tier.OutputPriceMicros = nullInt64Pointer(output)
+		tier.CacheReadPriceMicros = nullInt64Pointer(cacheRead)
+		tier.CacheWrite5mPriceMicros = nullInt64Pointer(cacheWrite5m)
+		tier.CacheWrite1hPriceMicros = nullInt64Pointer(cacheWrite1h)
+		if index, exists := priceIndexes[price.Alias]; exists {
+			prices[index].Price.Tiers = append(prices[index].Price.Tiers, tier)
+			continue
 		}
-		if modelPrice.Valid {
-			price.ModelPriceMicroUSD = modelPrice.Int64
-		}
+		price.Price.BillingMode = "token"
+		price.Price.PricingScheme = "absolute"
+		price.Price.Tiers = []PriceTier{tier}
+		priceIndexes[price.Alias] = len(prices)
 		prices = append(prices, price)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("遍历别名价格：%w", err)
 	}
 	return prices, nil
+}
+
+func nullInt64Pointer(value sql.NullInt64) *int64 {
+	if !value.Valid {
+		return nil
+	}
+	result := value.Int64
+	return &result
 }
 
 func (s *SQLRoutingStore) ChannelPriceRoute(ctx context.Context, merchantChannelID int64) (ChannelPriceRoute, error) {
@@ -849,35 +945,66 @@ func (s *SQLRoutingStore) ListMarketOffers(ctx context.Context, _ int, publicMod
 	rows, err := s.database.QueryContext(ctx, `
 SELECT o.id, mp.id, mp.display_name, mc.id, mc.channel_name,
        cm.public_name, cm.protocol, o.multiplier_bps, h.state,
-       h.availability_ppm, h.ttft_p95_ms, o.internal_alias
+       h.availability_ppm, h.ttft_p95_ms, o.internal_alias,
+       p.id, p.version, p.original_currency, p.usd_exchange_rate_micros,
+       p.source_url, p.checked_at, p.published_at,
+       pt.id, pt.tier_order, pt.minimum_input_tokens, pt.maximum_input_tokens,
+       pt.input_price_micros, pt.output_price_micros, pt.cache_read_price_micros,
+       pt.cache_write_5m_price_micros, pt.cache_write_1h_price_micros
 FROM offer_versions o
 JOIN canonical_models cm ON cm.id = o.canonical_model_id
 JOIN merchant_channels mc ON mc.id = o.merchant_channel_id
 JOIN merchant_profiles mp ON mp.id = mc.merchant_profile_id
 JOIN channel_model_health h ON h.merchant_channel_id = mc.id AND h.canonical_model_id = cm.id
+JOIN official_price_versions p ON p.id = o.official_price_version_id AND p.pricing_scheme = 'absolute'
+JOIN price_tiers pt ON pt.official_price_version_id = p.id
 WHERE o.status = 'active' AND mc.status = 'active' AND mp.status = 'active'
   AND ($1 = '' OR cm.public_name = $1)
-ORDER BY cm.public_name, o.multiplier_bps, o.id
+ORDER BY cm.public_name, o.multiplier_bps, o.id, pt.tier_order
 `, strings.TrimSpace(publicModel))
 	if err != nil {
 		return nil, fmt.Errorf("查询市场报价：%w", err)
 	}
 	defer rows.Close()
 	offers := make([]MarketOffer, 0)
+	indexes := make(map[int64]int)
 	for rows.Next() {
 		var offer MarketOffer
+		var tier PriceTier
+		var maximum, output, cacheRead, cacheWrite5m, cacheWrite1h sql.NullInt64
 		if err := rows.Scan(
 			&offer.OfferID, &offer.MerchantID, &offer.MerchantName,
 			&offer.MerchantChannelID, &offer.ChannelName, &offer.Model, &offer.Protocol,
 			&offer.MultiplierBPS, &offer.HealthState, &offer.AvailabilityPPM,
 			&offer.TTFTP95MS, &offer.InternalAlias,
+			&offer.OfficialPrice.ID, &offer.OfficialPrice.Version, &offer.OfficialPrice.Currency,
+			&offer.OfficialPrice.USDExchangeRateMicros, &offer.OfficialPrice.SourceURL,
+			&offer.OfficialPrice.CheckedAt, &offer.OfficialPrice.PublishedAt,
+			&tier.ID, &tier.TierOrder, &tier.MinimumInputTokens, &maximum,
+			&tier.InputPriceMicros, &output, &cacheRead, &cacheWrite5m, &cacheWrite1h,
 		); err != nil {
 			return nil, fmt.Errorf("解析市场报价：%w", err)
 		}
+		assignNullableTierPrices(&tier, maximum, output, cacheRead, cacheWrite5m, cacheWrite1h)
+		if index, exists := indexes[offer.OfferID]; exists {
+			offers[index].OfficialPrice.Tiers = append(offers[index].OfficialPrice.Tiers, tier)
+			continue
+		}
+		offer.DiscountBPS = offer.MultiplierBPS
+		offer.OfficialPrice.PricingScheme = "absolute"
+		offer.OfficialPrice.Tiers = []PriceTier{tier}
+		indexes[offer.OfferID] = len(offers)
 		offers = append(offers, offer)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("遍历市场报价：%w", err)
+	}
+	for index := range offers {
+		_, tiers, err := buildTieredExpression(offers[index].OfficialPrice, offers[index].MultiplierBPS, offers[index].Protocol)
+		if err != nil {
+			return nil, fmt.Errorf("换算市场报价：%w", err)
+		}
+		offers[index].PriceTiers = tiers
 	}
 	return offers, nil
 }
@@ -918,32 +1045,29 @@ WHERE merchant_channel_id = $1
 }
 
 func (s *SQLRoutingStore) PublishOfficialPrice(ctx context.Context, modelID int64, adminID int, price OfficialPrice) (OfficialPrice, error) {
+	price = normalizeOfficialPrice(price)
 	tx, err := s.database.BeginTx(ctx, nil)
 	if err != nil {
 		return OfficialPrice{}, fmt.Errorf("开始官方价格事务：%w", err)
 	}
 	defer tx.Rollback()
+	var protocol string
+	err = tx.QueryRowContext(ctx, `SELECT protocol FROM canonical_models WHERE id = $1 FOR UPDATE`, modelID).Scan(&protocol)
+	if errors.Is(err, sql.ErrNoRows) {
+		return OfficialPrice{}, ErrRoutingNotFound
+	}
+	if err != nil {
+		return OfficialPrice{}, fmt.Errorf("锁定标准模型：%w", err)
+	}
+	if err := validateAbsolutePrice(price, protocol); err != nil {
+		return OfficialPrice{}, ErrRoutingInvalidState
+	}
 	if err := tx.QueryRowContext(ctx, `
 SELECT COALESCE(max(version), 0) + 1 FROM official_price_versions WHERE canonical_model_id = $1
 `, modelID).Scan(&price.Version); err != nil {
 		return OfficialPrice{}, fmt.Errorf("生成官方价格版本：%w", err)
 	}
-	err = tx.QueryRowContext(ctx, `
-INSERT INTO official_price_versions
-    (canonical_model_id, version, billing_mode, model_ratio_micros, model_price_microusd,
-     completion_ratio_micros, cache_ratio_micros, create_cache_ratio_micros,
-     image_ratio_micros, audio_ratio_micros, audio_completion_ratio_micros,
-     published_by_newapi_user_id)
-SELECT id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
-FROM canonical_models WHERE id = $1
-RETURNING id, published_at
-`, modelID, price.Version, price.BillingMode, nullablePositive(price.ModelRatioMicros), nullablePositive(price.ModelPriceMicroUSD),
-		price.CompletionRatioMicros, price.CacheRatioMicros, price.CreateCacheRatioMicros,
-		price.ImageRatioMicros, price.AudioRatioMicros, price.AudioCompletionRatioMicros,
-		adminID).Scan(&price.ID, &price.PublishedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return OfficialPrice{}, ErrRoutingNotFound
-	}
+	price, err = insertOfficialPriceVersion(ctx, tx, modelID, price.Version, adminID, protocol, price)
 	if err != nil {
 		return OfficialPrice{}, fmt.Errorf("创建官方价格版本：%w", err)
 	}
@@ -961,38 +1085,46 @@ RETURNING id, published_at
 
 func (s *SQLRoutingStore) ListCanonicalModels(ctx context.Context) ([]CanonicalModel, error) {
 	rows, err := s.database.QueryContext(ctx, `
-SELECT cm.id, cm.public_name, cm.provider, cm.protocol, cm.status, cm.created_at,
-       p.id, p.version, p.billing_mode, p.model_ratio_micros, p.model_price_microusd,
-       p.completion_ratio_micros, p.cache_ratio_micros, p.create_cache_ratio_micros,
-       p.image_ratio_micros, p.audio_ratio_micros, p.audio_completion_ratio_micros,
-       p.published_at
+SELECT cm.id, cm.public_name, cm.provider, cm.protocol, cm.lifecycle, cm.status, cm.created_at,
+       p.id, p.version, p.original_currency, p.usd_exchange_rate_micros,
+       p.source_url, p.checked_at, p.published_at,
+       pt.id, pt.tier_order, pt.minimum_input_tokens, pt.maximum_input_tokens,
+       pt.input_price_micros, pt.output_price_micros, pt.cache_read_price_micros,
+       pt.cache_write_5m_price_micros, pt.cache_write_1h_price_micros
 FROM canonical_models cm
 JOIN official_price_versions p ON p.id = cm.current_official_price_version_id
-ORDER BY cm.public_name
+JOIN price_tiers pt ON pt.official_price_version_id = p.id
+WHERE p.pricing_scheme = 'absolute'
+ORDER BY cm.public_name, pt.tier_order
 `)
 	if err != nil {
 		return nil, fmt.Errorf("查询标准模型：%w", err)
 	}
 	defer rows.Close()
 	models := make([]CanonicalModel, 0)
+	indexes := make(map[int64]int)
 	for rows.Next() {
 		var model CanonicalModel
-		var ratio, fixed sql.NullInt64
+		var tier PriceTier
+		var maximum, output, cacheRead, cacheWrite5m, cacheWrite1h sql.NullInt64
 		if err := rows.Scan(
-			&model.ID, &model.PublicName, &model.Provider, &model.Protocol, &model.Status, &model.CreatedAt,
-			&model.Price.ID, &model.Price.Version, &model.Price.BillingMode, &ratio, &fixed,
-			&model.Price.CompletionRatioMicros, &model.Price.CacheRatioMicros, &model.Price.CreateCacheRatioMicros,
-			&model.Price.ImageRatioMicros, &model.Price.AudioRatioMicros, &model.Price.AudioCompletionRatioMicros,
-			&model.Price.PublishedAt,
+			&model.ID, &model.PublicName, &model.Provider, &model.Protocol, &model.Lifecycle, &model.Status, &model.CreatedAt,
+			&model.Price.ID, &model.Price.Version, &model.Price.Currency, &model.Price.USDExchangeRateMicros,
+			&model.Price.SourceURL, &model.Price.CheckedAt, &model.Price.PublishedAt,
+			&tier.ID, &tier.TierOrder, &tier.MinimumInputTokens, &maximum,
+			&tier.InputPriceMicros, &output, &cacheRead, &cacheWrite5m, &cacheWrite1h,
 		); err != nil {
 			return nil, fmt.Errorf("解析标准模型：%w", err)
 		}
-		if ratio.Valid {
-			model.Price.ModelRatioMicros = ratio.Int64
+		assignNullableTierPrices(&tier, maximum, output, cacheRead, cacheWrite5m, cacheWrite1h)
+		if index, exists := indexes[model.ID]; exists {
+			models[index].Price.Tiers = append(models[index].Price.Tiers, tier)
+			continue
 		}
-		if fixed.Valid {
-			model.Price.ModelPriceMicroUSD = fixed.Int64
-		}
+		model.Price.BillingMode = "token"
+		model.Price.PricingScheme = "absolute"
+		model.Price.Tiers = []PriceTier{tier}
+		indexes[model.ID] = len(models)
 		models = append(models, model)
 	}
 	if err := rows.Err(); err != nil {
@@ -1006,35 +1138,74 @@ func (s *SQLRoutingStore) ListMerchantOffers(ctx context.Context, userID int) ([
 SELECT o.id, mc.id, mc.channel_name, cm.public_name, cm.protocol,
        o.multiplier_bps, o.status, COALESCE(h.state, 'pending'),
        COALESCE(h.availability_ppm, 0), COALESCE(h.ttft_p95_ms, 0),
-       COALESCE(o.sync_error, ''), o.internal_alias
+       COALESCE(o.sync_error, ''), o.internal_alias,
+       p.id, p.version, p.original_currency, p.usd_exchange_rate_micros,
+       p.source_url, p.checked_at, p.published_at,
+       pt.id, pt.tier_order, pt.minimum_input_tokens, pt.maximum_input_tokens,
+       pt.input_price_micros, pt.output_price_micros, pt.cache_read_price_micros,
+       pt.cache_write_5m_price_micros, pt.cache_write_1h_price_micros
 FROM offer_versions o
 JOIN merchant_channels mc ON mc.id = o.merchant_channel_id
 JOIN merchant_profiles mp ON mp.id = mc.merchant_profile_id
 JOIN canonical_models cm ON cm.id = o.canonical_model_id
 LEFT JOIN channel_model_health h ON h.merchant_channel_id = mc.id AND h.canonical_model_id = cm.id
+JOIN official_price_versions p ON p.id = o.official_price_version_id AND p.pricing_scheme = 'absolute'
+JOIN price_tiers pt ON pt.official_price_version_id = p.id
 WHERE mp.newapi_user_id = $1
-ORDER BY o.id DESC
+ORDER BY o.id DESC, pt.tier_order
 `, userID)
 	if err != nil {
 		return nil, fmt.Errorf("查询商户报价：%w", err)
 	}
 	defer rows.Close()
 	offers := make([]MerchantOfferView, 0)
+	indexes := make(map[int64]int)
 	for rows.Next() {
 		var offer MerchantOfferView
+		var tier PriceTier
+		var maximum, output, cacheRead, cacheWrite5m, cacheWrite1h sql.NullInt64
 		if err := rows.Scan(
 			&offer.OfferID, &offer.MerchantChannelID, &offer.ChannelName, &offer.Model,
 			&offer.Protocol, &offer.MultiplierBPS, &offer.OfferStatus, &offer.HealthState,
 			&offer.AvailabilityPPM, &offer.TTFTP95MS, &offer.SyncError, &offer.InternalAlias,
+			&offer.OfficialPrice.ID, &offer.OfficialPrice.Version, &offer.OfficialPrice.Currency,
+			&offer.OfficialPrice.USDExchangeRateMicros, &offer.OfficialPrice.SourceURL,
+			&offer.OfficialPrice.CheckedAt, &offer.OfficialPrice.PublishedAt,
+			&tier.ID, &tier.TierOrder, &tier.MinimumInputTokens, &maximum,
+			&tier.InputPriceMicros, &output, &cacheRead, &cacheWrite5m, &cacheWrite1h,
 		); err != nil {
 			return nil, fmt.Errorf("解析商户报价：%w", err)
 		}
+		assignNullableTierPrices(&tier, maximum, output, cacheRead, cacheWrite5m, cacheWrite1h)
+		if index, exists := indexes[offer.OfferID]; exists {
+			offers[index].OfficialPrice.Tiers = append(offers[index].OfficialPrice.Tiers, tier)
+			continue
+		}
+		offer.DiscountBPS = offer.MultiplierBPS
+		offer.OfficialPrice.PricingScheme = "absolute"
+		offer.OfficialPrice.Tiers = []PriceTier{tier}
+		indexes[offer.OfferID] = len(offers)
 		offers = append(offers, offer)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("遍历商户报价：%w", err)
 	}
+	for index := range offers {
+		_, tiers, err := buildTieredExpression(offers[index].OfficialPrice, offers[index].MultiplierBPS, offers[index].Protocol)
+		if err != nil {
+			return nil, fmt.Errorf("换算商户报价：%w", err)
+		}
+		offers[index].PriceTiers = tiers
+	}
 	return offers, nil
+}
+
+func assignNullableTierPrices(tier *PriceTier, maximum, output, cacheRead, cacheWrite5m, cacheWrite1h sql.NullInt64) {
+	tier.MaximumInputTokens = nullInt64Pointer(maximum)
+	tier.OutputPriceMicros = nullInt64Pointer(output)
+	tier.CacheReadPriceMicros = nullInt64Pointer(cacheRead)
+	tier.CacheWrite5mPriceMicros = nullInt64Pointer(cacheWrite5m)
+	tier.CacheWrite1hPriceMicros = nullInt64Pointer(cacheWrite1h)
 }
 
 func (s *SQLRoutingStore) PublicModelNames(ctx context.Context, aliases []string) (map[string]string, error) {

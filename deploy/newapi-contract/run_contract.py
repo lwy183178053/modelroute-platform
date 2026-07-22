@@ -1,3 +1,4 @@
+import base64
 import http.cookiejar
 import json
 import subprocess
@@ -194,16 +195,16 @@ try:
     assert json.loads(channel_detail["data"]["model_mapping"])[MODEL] == UPSTREAM_MODEL
     client.json("POST", "/api/channel/fix", {})
 
-    ratios = {
-        "ModelRatio": {MODEL: 1.25},
-        "CompletionRatio": {MODEL: 2},
-        "CacheRatio": {MODEL: 0.1},
+    billing_expression = 'v1:tier("tier_1", p * 2.5 + c * 5 + cr * 0.25)'
+    billing_options = {
+        "billing_setting.billing_mode": {MODEL: "tiered_expr"},
+        "billing_setting.billing_expr": {MODEL: billing_expression},
     }
-    for key, value in ratios.items():
+    for key, value in billing_options.items():
         client.json("PUT", "/api/option/", {"key": key, "value": json.dumps(value, separators=(",", ":"))})
     _, options = client.json("GET", "/api/option/")
     option_map = {item["key"]: item["value"] for item in options["data"]}
-    for key, expected in ratios.items():
+    for key, expected in billing_options.items():
         assert json.loads(option_map[key]) == expected
 
     headers = api_key_headers(raw_key)
@@ -263,9 +264,9 @@ try:
     assert expected_paths <= observed_paths, (expected_paths, observed_paths, consume_logs)
     cache_log = next(item for item in consume_logs if json.loads(item["other"]).get("cache_tokens") == 4)
     other = json.loads(cache_log["other"])
-    assert other["model_ratio"] == 1.25
-    assert other["completion_ratio"] == 2
-    assert other["cache_ratio"] == 0.1
+    assert other["billing_mode"] == "tiered_expr"
+    assert base64.b64decode(other["expr_b64"]).decode() == billing_expression
+    assert other["matched_tier"] == "tier_1"
     assert other["is_model_mapped"] is True
     assert other["upstream_model_name"] == UPSTREAM_MODEL
 

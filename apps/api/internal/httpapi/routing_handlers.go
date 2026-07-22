@@ -21,6 +21,7 @@ func (s *server) createCanonicalModel(w http.ResponseWriter, r *http.Request) {
 		PublicName string        `json:"public_name"`
 		Provider   string        `json:"provider"`
 		Protocol   string        `json:"protocol"`
+		Lifecycle  string        `json:"lifecycle"`
 		Price      OfficialPrice `json:"price"`
 	}
 	if err := decodeJSON(r, &request); err != nil {
@@ -29,7 +30,8 @@ func (s *server) createCanonicalModel(w http.ResponseWriter, r *http.Request) {
 	}
 	command := CreateCanonicalModelCommand{
 		PublicName: strings.TrimSpace(request.PublicName), Provider: strings.TrimSpace(request.Provider),
-		Protocol: strings.TrimSpace(request.Protocol), AdminID: session.UserID, Price: request.Price,
+		Protocol: strings.TrimSpace(request.Protocol), Lifecycle: strings.TrimSpace(request.Lifecycle),
+		AdminID: session.UserID, Price: normalizeOfficialPrice(request.Price),
 	}
 	if err := validateCanonicalModel(command); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_model_price", err.Error())
@@ -80,12 +82,16 @@ func (s *server) publishOfficialPrice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var price OfficialPrice
-	if err := decodeJSON(r, &price); err != nil || validateCanonicalModel(CreateCanonicalModelCommand{PublicName: "price-check", Provider: "price-check", Protocol: "responses", Price: price}) != nil {
+	if err := decodeJSON(r, &price); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_model_price", "官方价格配置无效")
 		return
 	}
-	published, err := s.services.Routing.PublishOfficialPrice(r.Context(), modelID, session.UserID, price)
+	published, err := s.services.Routing.PublishOfficialPrice(r.Context(), modelID, session.UserID, normalizeOfficialPrice(price))
 	if err != nil {
+		if errors.Is(err, ErrRoutingInvalidState) {
+			writeAPIError(w, http.StatusBadRequest, "invalid_model_price", "官方价格配置无效")
+			return
+		}
 		writeAPIError(w, http.StatusConflict, "price_publish_failed", "标准模型不存在或价格版本冲突")
 		return
 	}
@@ -295,29 +301,20 @@ func validateCanonicalModel(command CreateCanonicalModelCommand) error {
 	if command.PublicName == "" || len(command.PublicName) > 255 || strings.HasPrefix(command.PublicName, "mkt-ov-") || command.Provider == "" || len(command.Provider) > 80 {
 		return errors.New("模型名称或厂商无效")
 	}
+	if _, supported := supportedModelProviders[command.Provider]; !supported {
+		return errors.New("模型厂商不在平台支持范围")
+	}
 	switch command.Protocol {
 	case "chat_completions", "responses", "embeddings":
 	default:
 		return errors.New("模型协议不在首期开放范围")
 	}
-	price := command.Price
-	if price.BillingMode == "token" {
-		if price.ModelRatioMicros <= 0 || price.ModelPriceMicroUSD != 0 {
-			return errors.New("Token 计费必须提供整数主倍率且不得提供固定价格")
-		}
-	} else if price.BillingMode == "fixed" {
-		if price.ModelPriceMicroUSD <= 0 || price.ModelRatioMicros != 0 {
-			return errors.New("固定计费必须提供整数微美元价格且不得提供主倍率")
-		}
-	} else {
-		return errors.New("计费模式必须是 token 或 fixed")
+	switch command.Lifecycle {
+	case "stable", "preview", "limited", "retiring":
+	default:
+		return errors.New("模型生命周期无效")
 	}
-	for _, value := range []int64{price.CompletionRatioMicros, price.CacheRatioMicros, price.CreateCacheRatioMicros, price.ImageRatioMicros, price.AudioRatioMicros, price.AudioCompletionRatioMicros} {
-		if value < 0 {
-			return errors.New("计费维度不得为负数")
-		}
-	}
-	return nil
+	return validateAbsolutePrice(command.Price, command.Protocol)
 }
 
 func newOfferAlias() string {

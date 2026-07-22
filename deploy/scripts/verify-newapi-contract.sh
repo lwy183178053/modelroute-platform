@@ -24,4 +24,4 @@ else
   python3 "$RUNNER" "$BASE_URL" "$COMPOSE_FILE" "$PROJECT_NAME"
 fi
 
-echo "New API 候选容器契约通过：初始化、账号、令牌、渠道、模型映射、倍率、三类协议、stream、cached_tokens、refund 日志和 no_available_channel 均已验证。"
+echo "New API 候选容器契约通过：初始化、账号、令牌、渠道、模型映射、分层表达式、三类协议、stream、cached_tokens、refund 日志和 no_available_channel 均已验证。"

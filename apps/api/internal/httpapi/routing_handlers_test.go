@@ -72,15 +72,18 @@ func TestAdminCreatesCanonicalModelWithIntegerOfficialPrice(t *testing.T) {
 	}))
 	repository := &routingRepositoryStub{}
 	repository.createModel = func(_ context.Context, command CreateCanonicalModelCommand) (CanonicalModel, error) {
-		if command.PublicName != "gpt-5.5" || command.Protocol != "responses" || command.Price.ModelRatioMicros != 1_250_000 || command.Price.CacheRatioMicros != 100_000 {
+		if command.PublicName != "gpt-5.5" || command.Provider != "OpenAI" || command.Protocol != "responses" || command.Lifecycle != "stable" {
 			t.Fatalf("标准模型参数=%+v", command)
 		}
-		return CanonicalModel{ID: 61, PublicName: command.PublicName, Provider: command.Provider, Protocol: command.Protocol, Status: "active", Price: command.Price}, nil
+		if command.Price.Currency != "USD" || command.Price.USDExchangeRateMicros != 1_000_000 || len(command.Price.Tiers) != 1 || command.Price.Tiers[0].InputPriceMicros != 1_250_000 || command.Price.Tiers[0].CacheReadPriceMicros == nil || *command.Price.Tiers[0].CacheReadPriceMicros != 100_000 {
+			t.Fatalf("官方价格参数=%+v", command.Price)
+		}
+		return CanonicalModel{ID: 61, PublicName: command.PublicName, Provider: command.Provider, Protocol: command.Protocol, Lifecycle: command.Lifecycle, Status: "active", Price: command.Price}, nil
 	}
 	services.Routing = repository
 	token := createPlatformSession(t, services, 1, 100)
 	handler := NewServerWithServices("test", Dependencies{}, services)
-	body := `{"public_name":"gpt-5.5","provider":"OpenAI","protocol":"responses","price":{"billing_mode":"token","model_ratio_micros":1250000,"completion_ratio_micros":3000000,"cache_ratio_micros":100000,"create_cache_ratio_micros":1250000,"image_ratio_micros":1000000,"audio_ratio_micros":1000000,"audio_completion_ratio_micros":1000000}}`
+	body := `{"public_name":"gpt-5.5","provider":"OpenAI","protocol":"responses","lifecycle":"stable","price":{"currency":"USD","usd_exchange_rate_micros":1000000,"source_url":"https://openai.com/api/pricing/","tiers":[{"minimum_input_tokens":0,"maximum_input_tokens":null,"input_price_micros":1250000,"output_price_micros":3000000,"cache_read_price_micros":100000}]}}`
 	request := httptest.NewRequest(http.MethodPost, "/api/admin/models", strings.NewReader(body))
 	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})

@@ -642,3 +642,31 @@
 - `deploy/scripts/verify-payments.sh`：将文件模式从 `100644` 修正为 `100755`，脚本正文未变化。
 - `progress.md`：追加本轮发布前修正记录。
 - 回滚点：提交 `064b9ee`；本轮提交可单独执行 `git revert <本轮提交>` 恢复文件模式。
+
+## 2026-07-22 - Task: 完成第 6 阶段生产部署与支付契约验收
+
+### What was done
+
+- 对 103 当前发布、磁盘、容器、端口和发布目录完成只读检查，在任何迁移前备份平台库、New API 库、Compose、版本和受限环境文件。
+- 上传并校验 `5aa9fa406f47` 提交归档，从不可变发布目录构建并启动六服务，API 自动执行第 4 份支付迁移。
+- 依次完成内网与公网基础验收、账号、商户、路由和支付契约，核对支付表与唯一约束后原子切换 `current`。
+- 保持生产支付配置为空，没有写入聊天中出现过的旧 PID 或 KEY；清理服务器临时发布归档并保留已校验的发布前备份。
+
+### Testing
+
+- 发布前备份 `20260722T094226Z` 中两个数据库、Compose、版本和修改前环境文件全部通过 SHA-256 校验，文件权限均为 `600`。
+- 本地与服务器发布归档 SHA-256 均为 `06625ad0ecb1f96e4513504fef9f5fd0936371cac05a78de695a18ad204edcf2`；Compose 构建和启动退出码为 `0`。
+- `verify.sh` 在 `http://127.0.0.1:28100` 和 `https://aggregate.lwylink.xyz` 均通过；账号、商户、路由和支付四个专项契约全部通过。
+- `/api/version` 返回 `5aa9fa406f47`，`current` 指向对应发布目录；平台迁移记录为 `4`，四张支付表存在，两个部分唯一索引和六个表级唯一约束存在。
+- 支付配置、订单、回调事件和入账操作行数均为 `0`，有效临时路由绑定为 `0`；生产未引入测试支付数据。
+- 网关、New API、平台 API、Worker、PostgreSQL 和 Redis 共六个服务运行，5 个健康检查均为 `healthy`；宿主机只监听 `127.0.0.1:28100`，内部端口未发布。
+- 稳定窗口内 ModelRoute 网关 `499/5xx` 数量为 `0`，API、Worker 和 New API 日志没有 `panic`、`fatal` 或充值入账周期异常；三个现有域名均返回 `200`。
+
+### Notes
+
+- `docs/易支付充值.md`：补充生产版本、迁移、空配置、契约、稳定窗口和备份验收事实。
+- `docs/部署环境审计.md`：更新支付迁移、生产凭据边界和当前运行版本。
+- `progress.md`：追加第 6 阶段生产部署、验收、文件清单和回滚记录。
+- 服务器 `/opt/modelroute-platform/releases/5aa9fa406f47`：保存第 6 阶段已验收运行发布。
+- 服务器 `/opt/modelroute-platform/shared/backups/20260722T094226Z`：保存发布前两个数据库、Compose、版本和修改前环境文件备份。
+- 回滚点：服务器将 `/opt/modelroute-platform/current` 原子切换到 `/opt/modelroute-platform/releases/6dd0565` 并执行该目录的 `deploy/scripts/deploy.sh`；需要连数据库回退时，使用上述发布前备份和 `restore.sh`，再恢复 `environment.before.env`。

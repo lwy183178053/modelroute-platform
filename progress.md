@@ -531,3 +531,33 @@
 - `deploy/tests/test_compose.py`：增加基础验收脚本契约回归测试。
 - `progress.md`：追加本轮验收契约修正记录。
 - 回滚点：提交 `c0b2fa0`；本轮修复提交可单独执行 `git revert <本轮修复提交>`，生产发布指针在记录时仍未切换。
+
+## 2026-07-22 - Task: 完成第 5 阶段生产部署与路由契约验收
+
+### What was done
+
+- 在生产发布前备份平台库、New API 库、Compose、版本和修改前受限环境文件，并重新生成和校验统一 SHA-256 清单。
+- 从服务器现有受限管理员密码文件向共享 `.env` 原子写入 New API 服务账号变量，环境文件和来源文件权限均保持 `600`，没有输出凭据正文。
+- 上传并校验提交归档，执行第 3 份平台迁移，构建并启动六服务 Compose；验收脚本修正后使用最终提交 `6dd0565` 重新发布。
+- 完成内网和公网基础验收、账号契约、商户契约和新增模型路由契约，再原子切换 `current` 到最终发布目录。
+- 核对标准模型、报价、路由、探活和决策关键表、专用探活令牌登记、临时密钥清理、服务健康、端口隔离、原有域名和稳定窗口日志。
+
+### Testing
+
+- 发布前备份 `20260722T082512Z` 中平台库、New API 库、Compose、版本和修改前环境文件的 SHA-256 全部通过；环境副本权限为 `600`。
+- 发布归档本地与服务器 SHA-256 一致；Compose 构建和启动退出码为 `0`，API 自动执行 `000003_routing.sql`。
+- `verify.sh` 在 `http://127.0.0.1:28100` 和 `https://aggregate.lwylink.xyz` 均通过；`verify-accounts.sh`、`verify-merchants.sh` 和 `verify-routing.sh` 全部通过。
+- `/api/version` 返回 `6dd0565`，`current` 指向 `/opt/modelroute-platform/releases/6dd0565`；8 张路由关键表存在，探活令牌元数据为 1 条，契约结束后有效临时路由绑定为 0 条。
+- 网关、New API、平台 API、Worker、PostgreSQL 和 Redis 共六个服务运行，5 个健康检查均为 `healthy`；除网关回环端口外，内部服务没有宿主机发布端口。
+- `aggregate.lwylink.xyz` 的 HTTP 返回 `308`、HTTPS 返回 `200`；`api.lwylink.xyz` 与 `sdk.lwylink.xyz` 均返回 `200`。
+- 最终稳定窗口内 ModelRoute 网关没有 `499` 或 `5xx`，平台 API 和 Worker 没有 `panic`、`fatal` 或渠道探活异常。
+- 同机 Caddy 全局日志的 `context canceled` 出现在 ModelRoute 无请求的时间段，证据指向其他域名流量，未将其误记为 ModelRoute 正常。
+
+### Notes
+
+- `docs/模型报价路由与健康.md`：补充第 5 阶段生产版本、迁移、契约、隔离、日志和备份验收事实。
+- `docs/部署环境审计.md`：补充服务账号、路由迁移、探活令牌和最终生产隔离状态。
+- `progress.md`：追加第 5 阶段生产部署、验收和回滚记录。
+- 服务器 `/opt/modelroute-platform/releases/6dd0565`：保存第 5 阶段最终已验收运行发布。
+- 服务器 `/opt/modelroute-platform/shared/backups/20260722T082512Z`：保存发布前两个数据库、Compose、版本和修改前环境文件备份。
+- 回滚点：服务器将 `/opt/modelroute-platform/current` 原子切换到 `/opt/modelroute-platform/releases/192f31c` 并执行该目录的 `deploy/scripts/deploy.sh`；需要连数据库和环境文件回退时，使用上述发布前备份和 `restore.sh`，再恢复 `environment.before.env`。

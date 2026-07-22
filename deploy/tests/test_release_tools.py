@@ -49,6 +49,8 @@ class ReleaseToolContractTest(unittest.TestCase):
         self.assertIn("modelroute_restore_check_", script)
         self.assertIn("newapi_restore_check_", script)
         self.assertIn("pg_restore --exit-on-error", script)
+        self.assertIn("FROM platform_schema_migrations", script)
+        self.assertNotIn("FROM schema_migrations", script)
         self.assertIn('test "$PLATFORM_TEST_DB" != "$PLATFORM_DB_NAME"', script)
         self.assertIn('test "$NEWAPI_TEST_DB" != "$NEWAPI_DB_NAME"', script)
         self.assertNotIn('-d "$PLATFORM_DB_NAME" <', script)

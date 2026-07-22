@@ -853,3 +853,24 @@
 - `docs/运营管理与升级验收.md`：记录运营功能、权限边界、升级契约和发布工具用法。
 - `progress.md`：追加第 8 阶段本地实现、验证、文件清单和回滚点。
 - 回滚点：阶段标签 `phase-7-settlement`；第 8 阶段提交后可执行 `git revert <第8阶段提交>` 生成代码回退改动。生产服务器在本轮记录时仍运行第 7 阶段版本 `b147266e6464`。
+
+## 2026-07-22 - Task: 修正第 8 阶段备份恢复演练迁移表名
+
+### What was done
+
+- 将备份恢复演练的迁移记录检查改为平台实际使用的 `platform_schema_migrations` 表，避免数据库已成功恢复后因检查错误而误报失败。
+- 增加部署工具契约断言，锁定恢复演练必须检查平台迁移表真实名称，且不得再次使用错误的通用表名。
+- 103 首次演练只恢复到自动生成的临时数据库并触发清理钩子，生产数据库和当前第 7 阶段服务未被修改；真实演练将在修复提交发布目录生成后重新执行。
+
+### Testing
+
+- 新增断言先在旧脚本上稳定失败，错误明确为缺少 `FROM platform_schema_migrations`；修改脚本后专项测试通过。
+- 执行 `python -m unittest discover -s deploy/tests -v` 共 `16` 项，全部通过。
+- 修正后的 `verify-backup-restore.sh` 通过 `sh -n` 语法检查，`git diff --check` 通过。
+
+### Notes
+
+- `deploy/scripts/verify-backup-restore.sh`：查询平台真实迁移记录表。
+- `deploy/tests/test_release_tools.py`：增加正确迁移表名和错误表名不得出现的回归断言。
+- `progress.md`：追加恢复演练问题、修正、验证和生产边界记录。
+- 回滚点：第 8 阶段提交 `dd7d0db`；本轮修复提交可单独执行 `git revert <本轮修复提交>`，生产服务器仍运行 `/opt/modelroute-platform/releases/b147266e6464`。

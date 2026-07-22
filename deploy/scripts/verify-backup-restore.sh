@@ -49,7 +49,7 @@ dc exec -T postgres pg_restore --exit-on-error --no-owner -U "$POSTGRES_SUPERUSE
 
 platform_tables=$(dc exec -T postgres psql -Atq -U "$POSTGRES_SUPERUSER" -d "$PLATFORM_TEST_DB" -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")
 newapi_tables=$(dc exec -T postgres psql -Atq -U "$POSTGRES_SUPERUSER" -d "$NEWAPI_TEST_DB" -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")
-platform_migrations=$(dc exec -T postgres psql -Atq -U "$POSTGRES_SUPERUSER" -d "$PLATFORM_TEST_DB" -c "SELECT count(*) FROM schema_migrations")
+platform_migrations=$(dc exec -T postgres psql -Atq -U "$POSTGRES_SUPERUSER" -d "$PLATFORM_TEST_DB" -c "SELECT count(*) FROM platform_schema_migrations")
 test "$platform_tables" -gt 0
 test "$newapi_tables" -gt 0
 test "$platform_migrations" -gt 0

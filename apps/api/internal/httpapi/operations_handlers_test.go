@@ -258,26 +258,8 @@ func TestPlatformSettingsAreWhitelistedAndEmptySMTPPasswordIsPreserved(t *testin
 	}
 }
 
-func TestAdminGroupsUseIntegerBasisPoints(t *testing.T) {
-	admin := &adminOperationStub{handler: func(method string, path string, body any) ([]byte, error) {
-		if method == http.MethodGet && path == "/api/option/" {
-			return []byte(`[{"key":"GroupRatio","value":"{\"default\":1,\"vip\":0.8}"}]`), nil
-		}
-		if method == http.MethodPut && path == "/api/option/" {
-			option := body.(map[string]any)
-			if option["key"] != "GroupRatio" {
-				return nil, fmt.Errorf("错误设置键 %v", option["key"])
-			}
-			serialized, _ := option["value"].(string)
-			if !strings.Contains(serialized, `"default":1`) || !strings.Contains(serialized, `"vip":0.75`) {
-				return nil, fmt.Errorf("分组倍率序列化错误 %s", serialized)
-			}
-			return []byte("null"), nil
-		}
-		return nil, fmt.Errorf("未知分组调用 %s %s", method, path)
-	}}
+func TestAdminGroupsEndpointsAreNotExposed(t *testing.T) {
 	services, _, audit := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	services.AdminNewAPI = admin
 	token := createPlatformSession(t, services, 1, 100)
 	handler := NewServerWithServices("test", Dependencies{}, services)
 
@@ -285,20 +267,19 @@ func TestAdminGroupsUseIntegerBasisPoints(t *testing.T) {
 	getRequest.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	getResponse := httptest.NewRecorder()
 	handler.ServeHTTP(getResponse, getRequest)
-	if getResponse.Code != http.StatusOK || !strings.Contains(getResponse.Body.String(), `"ratio_bps":8000`) {
-		t.Fatalf("分组读取响应=%d %s", getResponse.Code, getResponse.Body.String())
+	if getResponse.Code != http.StatusNotFound {
+		t.Fatalf("分组读取端点仍暴露：%d %s", getResponse.Code, getResponse.Body.String())
 	}
 
 	putRequest := httptest.NewRequest(http.MethodPut, "/api/admin/groups", strings.NewReader(`{"groups":[{"name":"default","ratio_bps":10000},{"name":"vip","ratio_bps":7500}]}`))
-	putRequest.Header.Set("Origin", "https://aggregate.lwylink.xyz")
 	putRequest.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	putResponse := httptest.NewRecorder()
 	handler.ServeHTTP(putResponse, putRequest)
-	if putResponse.Code != http.StatusOK {
-		t.Fatalf("分组保存响应=%d %s", putResponse.Code, putResponse.Body.String())
+	if putResponse.Code != http.StatusNotFound {
+		t.Fatalf("分组保存端点仍暴露：%d %s", putResponse.Code, putResponse.Body.String())
 	}
-	if len(audit.entries) != 1 || audit.entries[0].Action != "groups.update" {
-		t.Fatalf("分组审计=%+v", audit.entries)
+	if len(audit.entries) != 0 {
+		t.Fatalf("不存在的分组端点产生了审计=%+v", audit.entries)
 	}
 }
 

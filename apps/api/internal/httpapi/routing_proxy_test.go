@@ -11,11 +11,13 @@ import (
 
 type routeRepositoryStub struct {
 	RoutingRepository
-	selection    RouteSelection
-	resolveError error
-	started      []RouteDecision
-	completed    []RouteDecisionResult
-	observations []RouteObservation
+	selection     RouteSelection
+	resolveError  error
+	imagePrices   []ImagePriceItem
+	imagePriceErr error
+	started       []RouteDecision
+	completed     []RouteDecisionResult
+	observations  []RouteObservation
 }
 
 func (s *routeRepositoryStub) ResolveRoute(context.Context, string, string) (RouteSelection, error) {
@@ -35,6 +37,10 @@ func (s *routeRepositoryStub) CompleteRouteDecision(_ context.Context, result Ro
 func (s *routeRepositoryStub) RecordRouteObservation(_ context.Context, observation RouteObservation) error {
 	s.observations = append(s.observations, observation)
 	return nil
+}
+
+func (s *routeRepositoryStub) ImagePriceItems(context.Context, int64) ([]ImagePriceItem, error) {
+	return s.imagePrices, s.imagePriceErr
 }
 
 func TestModelProxyRetriesBeforeFirstByteAndPreservesStream(t *testing.T) {
@@ -60,8 +66,8 @@ func TestModelProxyRetriesBeforeFirstByteAndPreservesStream(t *testing.T) {
 	repository := &routeRepositoryStub{selection: RouteSelection{
 		TokenBindingID: 81, PolicyID: 91, Mode: "smart", Priority: "price", Protocol: "responses",
 		Candidates: []RouteCandidate{
-			{OfferID: 1, MerchantChannelID: 51, CanonicalModelID: 61, InternalAlias: "mkt-ov-1", MultiplierBPS: 3000, HealthState: "healthy"},
-			{OfferID: 2, MerchantChannelID: 52, CanonicalModelID: 61, InternalAlias: "mkt-ov-2", MultiplierBPS: 4000, HealthState: "healthy"},
+			{OfferID: 1, OfferChannelAliasID: 101, MerchantChannelID: 51, CanonicalModelID: 61, InternalAlias: "mkt-ov-1", MultiplierBPS: 3000, HealthState: "healthy"},
+			{OfferID: 2, OfferChannelAliasID: 102, MerchantChannelID: 52, CanonicalModelID: 61, InternalAlias: "mkt-ov-2", MultiplierBPS: 4000, HealthState: "healthy"},
 		},
 	}}
 	services.Routing = repository
@@ -79,7 +85,7 @@ func TestModelProxyRetriesBeforeFirstByteAndPreservesStream(t *testing.T) {
 	if strings.Join(aliases, ",") != "mkt-ov-1,mkt-ov-2" {
 		t.Fatalf("候选尝试顺序=%v", aliases)
 	}
-	if len(repository.started) != 1 || len(repository.completed) != 1 || repository.completed[0].OfferID != 2 || repository.completed[0].Attempts != 2 {
+	if len(repository.started) != 1 || repository.started[0].OfferChannelAliasID != 101 || len(repository.completed) != 1 || repository.completed[0].OfferChannelAliasID != 102 || repository.completed[0].Attempts != 2 {
 		t.Fatalf("路由决策记录不完整：started=%+v completed=%+v", repository.started, repository.completed)
 	}
 	if len(repository.observations) != 2 || repository.observations[0].Outcome != "temporary_failure" || repository.observations[1].Outcome != "success" {
@@ -99,5 +105,58 @@ func TestModelProxyReturnsOpenAI503WithoutUpstreamWhenNoCandidate(t *testing.T) 
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusServiceUnavailable || upstreamCalls != 0 || !strings.Contains(response.Body.String(), `"code":"no_available_channel"`) {
 		t.Fatalf("无候选响应=%d %s，上游调用=%d", response.Code, response.Body.String(), upstreamCalls)
+	}
+}
+
+func TestImageProxyRejectsUnpricedCombinationAndInvalidCountBeforeUpstream(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body string
+	}{
+		{name: "未定价质量尺寸", body: `{"model":"gpt-image-2","prompt":"hi","quality":"high","size":"1024x1024","n":1}`},
+		{name: "零张", body: `{"model":"gpt-image-2","prompt":"hi","quality":"standard","size":"1024x1024","n":0}`},
+		{name: "小数张", body: `{"model":"gpt-image-2","prompt":"hi","quality":"standard","size":"1024x1024","n":1.5}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			upstreamCalls := 0
+			services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { upstreamCalls++ }))
+			services.Credentials = testCredentialBox(t)
+			repository := &routeRepositoryStub{
+				selection:   RouteSelection{TokenBindingID: 81, PolicyID: 91, CanonicalModelID: 61, Mode: "smart", Priority: "price", Protocol: "image_generation", Candidates: []RouteCandidate{{OfferID: 1, OfferChannelAliasID: 101, MerchantChannelID: 51, CanonicalModelID: 61, InternalAlias: "mkt-ov-image"}}},
+				imagePrices: []ImagePriceItem{{Quality: "standard", Size: "1024x1024", PriceMicros: 40_000}},
+			}
+			services.Routing = repository
+			handler := NewServerWithServices("test", Dependencies{}, services)
+			request := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(test.body))
+			request.Header.Set("Authorization", "Bearer sk-user-route")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusBadRequest || upstreamCalls != 0 || len(repository.started) != 0 || !strings.Contains(response.Body.String(), `"code":"invalid_request_error"`) {
+				t.Fatalf("响应=%d %s，上游调用=%d，路由记录=%+v", response.Code, response.Body.String(), upstreamCalls, repository.started)
+			}
+		})
+	}
+}
+
+func TestImageProxyAcceptsPricedCombinationAndPositiveCount(t *testing.T) {
+	upstreamCalls := 0
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"created":1,"data":[]}`))
+	}))
+	services.Credentials = testCredentialBox(t)
+	repository := &routeRepositoryStub{
+		selection:   RouteSelection{TokenBindingID: 81, PolicyID: 91, CanonicalModelID: 61, Mode: "smart", Priority: "price", Protocol: "image_generation", Candidates: []RouteCandidate{{OfferID: 1, OfferChannelAliasID: 101, MerchantChannelID: 51, CanonicalModelID: 61, InternalAlias: "mkt-ov-image"}}},
+		imagePrices: []ImagePriceItem{{Quality: "standard", Size: "1024x1024", PriceMicros: 40_000}},
+	}
+	services.Routing = repository
+	handler := NewServerWithServices("test", Dependencies{}, services)
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"gpt-image-2","prompt":"hi","quality":"standard","size":"1024x1024","n":2}`))
+	request.Header.Set("Authorization", "Bearer sk-user-route")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || upstreamCalls != 1 || len(repository.started) != 1 {
+		t.Fatalf("响应=%d %s，上游调用=%d，路由记录=%+v", response.Code, response.Body.String(), upstreamCalls, repository.started)
 	}
 }

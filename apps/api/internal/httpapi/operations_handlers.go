@@ -8,11 +8,9 @@ import (
 	"net/http"
 	"net/mail"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 )
 
@@ -174,137 +172,6 @@ func (s *server) readAdminOptions(r *http.Request) (map[string]string, error) {
 		options[item.Key] = item.Value
 	}
 	return options, nil
-}
-
-type groupRatioItem struct {
-	Name     string `json:"name"`
-	RatioBPS int64  `json:"ratio_bps"`
-}
-
-func (s *server) adminGroups(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := s.requireSession(w, r, roleAdmin); !ok || !s.adminOperationsReady(w) {
-		return
-	}
-	options, err := s.readAdminOptions(r)
-	if err != nil {
-		writeUpstreamError(w, err, http.StatusBadGateway)
-		return
-	}
-	groups, err := decodeGroupRatios(options["GroupRatio"])
-	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, "new_api_contract_error", "New API 分组倍率格式无效")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": groups})
-}
-
-func (s *server) updateAdminGroups(w http.ResponseWriter, r *http.Request) {
-	_, session, ok := s.requireSession(w, r, roleAdmin)
-	if !ok || !s.requireSameOrigin(w, r) || !s.adminOperationsReady(w) {
-		return
-	}
-	var request struct {
-		Groups []groupRatioItem `json:"groups"`
-	}
-	if err := decodeJSON(r, &request); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_groups", "分组倍率参数无效")
-		return
-	}
-	serialized, groups, ok := encodeGroupRatios(request.Groups)
-	if !ok {
-		writeAPIError(w, http.StatusBadRequest, "invalid_groups", "分组名称、倍率或默认分组无效")
-		return
-	}
-	if _, err := s.services.AdminNewAPI.Do(r.Context(), http.MethodPut, "/api/option/", map[string]any{"key": "GroupRatio", "value": serialized}); err != nil {
-		s.recordAudit(r, session, "groups.update", 0, "failed", err.Error())
-		writeUpstreamError(w, err, http.StatusBadGateway)
-		return
-	}
-	if err := s.recordAudit(r, session, "groups.update", 0, "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "分组倍率已保存，但审计记录失败")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": groups})
-}
-
-func decodeGroupRatios(raw string) ([]groupRatioItem, error) {
-	if strings.TrimSpace(raw) == "" {
-		return []groupRatioItem{}, nil
-	}
-	decoder := json.NewDecoder(strings.NewReader(raw))
-	decoder.UseNumber()
-	values := map[string]json.Number{}
-	if err := decoder.Decode(&values); err != nil {
-		return nil, err
-	}
-	groups := make([]groupRatioItem, 0, len(values))
-	for name, number := range values {
-		ratio, err := strconv.ParseFloat(number.String(), 64)
-		if err != nil || ratio < 0 || ratio > float64(math.MaxInt32)/10_000 {
-			return nil, fmt.Errorf("分组倍率无效")
-		}
-		groups = append(groups, groupRatioItem{Name: name, RatioBPS: int64(math.Round(ratio * 10_000))})
-	}
-	sort.Slice(groups, func(i, j int) bool { return groups[i].Name < groups[j].Name })
-	return groups, nil
-}
-
-func encodeGroupRatios(input []groupRatioItem) (string, []groupRatioItem, bool) {
-	if len(input) == 0 || len(input) > 100 {
-		return "", nil, false
-	}
-	seen := make(map[string]struct{}, len(input))
-	groups := make([]groupRatioItem, 0, len(input))
-	hasDefault := false
-	for _, group := range input {
-		group.Name = strings.TrimSpace(group.Name)
-		if !validGroupName(group.Name) || group.RatioBPS < 0 || group.RatioBPS > math.MaxInt32 {
-			return "", nil, false
-		}
-		if _, exists := seen[group.Name]; exists {
-			return "", nil, false
-		}
-		seen[group.Name] = struct{}{}
-		hasDefault = hasDefault || group.Name == "default"
-		groups = append(groups, group)
-	}
-	if !hasDefault {
-		return "", nil, false
-	}
-	sort.Slice(groups, func(i, j int) bool { return groups[i].Name < groups[j].Name })
-	var result bytes.Buffer
-	result.WriteByte('{')
-	for index, group := range groups {
-		if index > 0 {
-			result.WriteByte(',')
-		}
-		name, _ := json.Marshal(group.Name)
-		result.Write(name)
-		result.WriteByte(':')
-		result.WriteString(formatBasisPoints(group.RatioBPS))
-	}
-	result.WriteByte('}')
-	return result.String(), groups, true
-}
-
-func validGroupName(value string) bool {
-	if value == "" || utf8.RuneCountInString(value) > 64 {
-		return false
-	}
-	for _, char := range value {
-		if unicode.IsControl(char) {
-			return false
-		}
-	}
-	return true
-}
-
-func formatBasisPoints(value int64) string {
-	whole, fraction := value/10_000, value%10_000
-	if fraction == 0 {
-		return strconv.FormatInt(whole, 10)
-	}
-	return strconv.FormatInt(whole, 10) + "." + strings.TrimRight(fmt.Sprintf("%04d", fraction), "0")
 }
 
 func (s *server) adminRedemptions(w http.ResponseWriter, r *http.Request) {

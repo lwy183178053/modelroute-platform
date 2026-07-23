@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"regexp"
 	"testing"
 	"time"
@@ -19,14 +21,21 @@ func TestSQLMerchantStoreCreatesApplicationAndInitialReviewAtomically(t *testing
 	createdAt := time.Date(2026, 7, 22, 14, 0, 0, 0, time.UTC)
 	command := CreateMerchantApplication{
 		UserID: 7, DisplayName: "北辰云智", WebsiteURL: "https://merchant.example", BusinessDescription: "企业模型 API 服务",
-		Channel: ChannelSubmission{ChannelName: "主线路", ChannelType: 1, BaseURL: "https://api.merchant.example", Models: []string{"gpt-4o-mini"}, EncryptedCredential: []byte("ciphertext"), CredentialFingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		Channel: ChannelSubmission{ChannelName: "主线路", CanonicalModelID: 61, TestReceipt: "test-receipt-1234567890", BaseURL: "https://api.merchant.example", EncryptedCredential: []byte("ciphertext"), CredentialFingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 	}
+	receiptDigest := sha256.Sum256([]byte(command.Channel.TestReceipt))
 	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT t.id, t.adapter_type")).
+		WithArgs(hex.EncodeToString(receiptDigest[:]), 7, int64(61), "https://api.merchant.example", command.Channel.CredentialFingerprint).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "adapter_type", "public_name", "provider", "protocol"}).
+			AddRow(81, "openai_compatible", "gpt-5.6", "OpenAI", "responses"))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE merchant_channel_tests SET consumed_at = now() WHERE id = $1")).
+		WithArgs(int64(81)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO merchant_applications")).
 		WithArgs(7, "北辰云智", "https://merchant.example", "企业模型 API 服务").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(11, createdAt))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO merchant_channel_reviews")).
-		WithArgs(7, int64(11), "主线路", 1, "https://api.merchant.example", []byte(`["gpt-4o-mini"]`), []byte("ciphertext"), command.Channel.CredentialFingerprint).
+		WithArgs(7, int64(11), int64(61), int64(81), "主线路", "https://api.merchant.example", "openai_compatible", []byte("ciphertext"), command.Channel.CredentialFingerprint).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(21, createdAt))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE merchant_applications SET initial_channel_review_id = $1 WHERE id = $2")).
 		WithArgs(int64(21), int64(11)).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -68,6 +77,39 @@ func TestSQLMerchantStoreEnsuresPlatformMerchantForAdministrator(t *testing.T) {
 	}
 }
 
+func TestSQLMerchantStoreListsChannelHealthForAdministrator(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewSQLMerchantStore(database)
+	createdAt := time.Date(2026, 7, 22, 14, 0, 0, 0, time.UTC)
+	cooldownUntil := createdAt.Add(5 * time.Minute)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT count(*) FROM merchant_channels")).
+		WithArgs("").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT c.id, c.merchant_profile_id")).
+		WithArgs("", 20, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "merchant_profile_id", "review_id", "newapi_channel_id", "channel_name", "canonical_model_id",
+			"public_name", "provider", "protocol", "adapter_type", "base_url", "credential_fingerprint", "status", "created_at",
+			"health_state", "availability_ppm", "ttft_p95_ms", "consecutive_failures", "cooldown_until",
+		}).AddRow(51, 31, 21, 41, "主线路", 61, "gpt-5.6", "OpenAI", "responses", "openai_compatible",
+			"https://api.merchant.example", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "active", createdAt,
+			"cooling", 975000, 680, 3, cooldownUntil))
+
+	channels, total, err := store.ListChannels(context.Background(), 1, 20, "")
+	if err != nil {
+		t.Fatalf("查询管理员渠道失败：%v", err)
+	}
+	if total != 1 || len(channels) != 1 || channels[0].HealthState != "cooling" || channels[0].AvailabilityPPM != 975000 || channels[0].TTFTP95MS != 680 || channels[0].ConsecutiveFailures != 3 || channels[0].CooldownUntil == nil {
+		t.Fatalf("渠道健康字段=%+v total=%d", channels, total)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSQLMerchantStoreClaimsReviewWithAtomicStateTransition(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -77,8 +119,8 @@ func TestSQLMerchantStoreClaimsReviewWithAtomicStateTransition(t *testing.T) {
 	store := NewSQLMerchantStore(database)
 	createdAt := time.Date(2026, 7, 22, 14, 0, 0, 0, time.UTC)
 	rows := sqlmock.NewRows(reviewColumns()).AddRow(
-		21, 7, 11, 0, "主线路", 1, "https://api.merchant.example", []byte(`["gpt-4o-mini"]`),
-		[]byte("ciphertext"), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "verifying", []byte(`[]`), "", "", nil, nil, createdAt,
+		21, 7, 11, 0, "主线路", 61, "gpt-5.6", "OpenAI", "responses", 81, "openai_compatible",
+		"https://api.merchant.example", []byte("ciphertext"), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "verifying", "", "", nil, nil, createdAt,
 	)
 	mock.ExpectQuery(regexp.QuoteMeta("WITH claimed AS")).WithArgs(int64(21)).WillReturnRows(rows)
 	review, err := store.ClaimReview(context.Background(), 21, "verifying")
@@ -102,12 +144,13 @@ func TestSQLMerchantStoreFinalApprovalClearsCredentialAndCreatesOwnership(t *tes
 	store := NewSQLMerchantStore(database)
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT r.id, r.merchant_newapi_user_id")).WithArgs(int64(21)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "application_id", "channel_name", "channel_type", "base_url", "requested_models", "fingerprint", "display_name", "website_url"}).
-			AddRow(21, 7, 11, "主线路", 1, "https://api.merchant.example", []byte(`["gpt-4o-mini"]`), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "北辰云智", "https://merchant.example"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "application_id", "canonical_model_id", "channel_name", "base_url", "adapter_type", "fingerprint", "display_name", "website_url"}).
+			AddRow(21, 7, 11, 61, "主线路", "https://api.merchant.example", "openai_compatible", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "北辰云智", "https://merchant.example"))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO merchant_profiles")).WithArgs(7, int64(11), "北辰云智", "https://merchant.example", 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(31))
-	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO merchant_channels")).WithArgs(int64(31), int64(21), 41, "主线路", 1, "https://api.merchant.example", []byte(`["gpt-4o-mini"]`), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO merchant_channels")).WithArgs(int64(31), int64(21), int64(61), 41, "主线路", "https://api.merchant.example", "openai_compatible", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(51))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO channel_health")).WithArgs(int64(51)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE merchant_channel_reviews")).WithArgs(1, int64(21), int64(31)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE merchant_applications")).WithArgs(1, int64(11)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
@@ -124,5 +167,5 @@ func TestSQLMerchantStoreFinalApprovalClearsCredentialAndCreatesOwnership(t *tes
 }
 
 func reviewColumns() []string {
-	return []string{"id", "merchant_newapi_user_id", "application_id", "replaces_channel_id", "channel_name", "channel_type", "base_url", "requested_models", "encrypted_credential", "credential_fingerprint", "status", "verified_models", "verification_error", "review_reason", "verified_at", "reviewed_at", "created_at"}
+	return []string{"id", "merchant_newapi_user_id", "application_id", "replaces_channel_id", "channel_name", "canonical_model_id", "public_name", "provider", "protocol", "channel_test_id", "adapter_type", "base_url", "encrypted_credential", "credential_fingerprint", "status", "verification_error", "review_reason", "verified_at", "reviewed_at", "created_at"}
 }

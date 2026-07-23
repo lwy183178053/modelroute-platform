@@ -20,28 +20,26 @@ var allowedPaymentMethods = map[string]bool{
 }
 
 type paymentSettingView struct {
-	ID                         int64     `json:"id"`
-	Version                    int       `json:"version"`
-	GatewayURL                 string    `json:"gateway_url"`
-	MerchantPIDMasked          string    `json:"merchant_pid_masked"`
-	KeyConfigured              bool      `json:"key_configured"`
-	PaymentMethods             []string  `json:"payment_methods"`
-	MinimumUSDCents            int64     `json:"minimum_usd_cents"`
-	MaximumUSDCents            int64     `json:"maximum_usd_cents"`
-	ExchangeRateCNYCentsPerUSD int64     `json:"exchange_rate_cny_cents_per_usd"`
-	Enabled                    bool      `json:"enabled"`
-	NotifyURL                  string    `json:"notify_url"`
-	ReturnURL                  string    `json:"return_url"`
-	CreatedAt                  time.Time `json:"created_at"`
+	ID                int64     `json:"id"`
+	Version           int       `json:"version"`
+	GatewayURL        string    `json:"gateway_url"`
+	MerchantPIDMasked string    `json:"merchant_pid_masked"`
+	KeyConfigured     bool      `json:"key_configured"`
+	PaymentMethods    []string  `json:"payment_methods"`
+	MinimumCNYCents   int64     `json:"minimum_cny_cents"`
+	MaximumCNYCents   int64     `json:"maximum_cny_cents"`
+	Enabled           bool      `json:"enabled"`
+	NotifyURL         string    `json:"notify_url"`
+	ReturnURL         string    `json:"return_url"`
+	CreatedAt         time.Time `json:"created_at"`
 }
 
 type publicPaymentSettingView struct {
-	Version                    int      `json:"version"`
-	PaymentMethods             []string `json:"payment_methods"`
-	MinimumUSDCents            int64    `json:"minimum_usd_cents"`
-	MaximumUSDCents            int64    `json:"maximum_usd_cents"`
-	ExchangeRateCNYCentsPerUSD int64    `json:"exchange_rate_cny_cents_per_usd"`
-	Enabled                    bool     `json:"enabled"`
+	Version         int      `json:"version"`
+	PaymentMethods  []string `json:"payment_methods"`
+	MinimumCNYCents int64    `json:"minimum_cny_cents"`
+	MaximumCNYCents int64    `json:"maximum_cny_cents"`
+	Enabled         bool     `json:"enabled"`
 }
 
 func (s *server) paymentSettings(w http.ResponseWriter, r *http.Request) {
@@ -55,8 +53,8 @@ func (s *server) paymentSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": publicPaymentSettingView{
 		Version: setting.Version, PaymentMethods: setting.PaymentMethods,
-		MinimumUSDCents: setting.MinimumUSDCents, MaximumUSDCents: setting.MaximumUSDCents,
-		ExchangeRateCNYCentsPerUSD: setting.ExchangeRateCNYCentsPerUSD, Enabled: setting.Enabled,
+		MinimumCNYCents: setting.MinimumCNYCents, MaximumCNYCents: setting.MaximumCNYCents,
+		Enabled: setting.Enabled,
 	}})
 }
 
@@ -235,14 +233,13 @@ func (s *server) adminCreatePaymentSetting(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var request struct {
-		GatewayURL                 string   `json:"gateway_url"`
-		MerchantPID                string   `json:"merchant_pid"`
-		MerchantKey                string   `json:"merchant_key"`
-		Enabled                    bool     `json:"enabled"`
-		PaymentMethods             []string `json:"payment_methods"`
-		MinimumUSDCents            int64    `json:"minimum_usd_cents"`
-		MaximumUSDCents            int64    `json:"maximum_usd_cents"`
-		ExchangeRateCNYCentsPerUSD int64    `json:"exchange_rate_cny_cents_per_usd"`
+		GatewayURL      string   `json:"gateway_url"`
+		MerchantPID     string   `json:"merchant_pid"`
+		MerchantKey     string   `json:"merchant_key"`
+		Enabled         bool     `json:"enabled"`
+		PaymentMethods  []string `json:"payment_methods"`
+		MinimumCNYCents int64    `json:"minimum_cny_cents"`
+		MaximumCNYCents int64    `json:"maximum_cny_cents"`
 	}
 	if err := decodeJSON(r, &request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_payment_setting", "支付配置参数无效")
@@ -264,8 +261,8 @@ func (s *server) adminCreatePaymentSetting(w http.ResponseWriter, r *http.Reques
 			pid = current.MerchantPID
 		}
 	}
-	if err != nil || pid == "" || len(pid) > 128 || !methodsOK || request.MinimumUSDCents <= 0 ||
-		request.MaximumUSDCents < request.MinimumUSDCents || request.ExchangeRateCNYCentsPerUSD <= 0 {
+	if err != nil || pid == "" || len(pid) > 128 || !methodsOK || request.MinimumCNYCents <= 0 ||
+		request.MaximumCNYCents < request.MinimumCNYCents {
 		writeAPIError(w, http.StatusBadRequest, "invalid_payment_setting", "支付配置参数无效")
 		return
 	}
@@ -285,9 +282,9 @@ func (s *server) adminCreatePaymentSetting(w http.ResponseWriter, r *http.Reques
 	}
 	setting, err := s.services.Payments.CreatePaymentSetting(r.Context(), CreatePaymentSettingCommand{
 		AdminUserID: session.UserID, GatewayURL: gatewayURL, MerchantPID: pid, EncryptedKey: encryptedKey,
-		KeyFingerprint: fingerprint, PaymentMethods: methods, MinimumUSDCents: request.MinimumUSDCents,
-		MaximumUSDCents: request.MaximumUSDCents, ExchangeRateCNYCentsPerUSD: request.ExchangeRateCNYCentsPerUSD,
-		Enabled: request.Enabled,
+		KeyFingerprint: fingerprint, PaymentMethods: methods, MinimumCNYCents: request.MinimumCNYCents,
+		MaximumCNYCents: request.MaximumCNYCents,
+		Enabled:         request.Enabled,
 	})
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "payment_setting_save_failed", "保存支付配置失败")
@@ -310,8 +307,8 @@ func (s *server) createPaymentOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		USDCents    int64  `json:"usd_cents"`
-		PaymentType string `json:"payment_type"`
+		AmountCNYCents int64  `json:"amount_cny_cents"`
+		PaymentType    string `json:"payment_type"`
 	}
 	if err := decodeJSON(r, &request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_payment_order", "充值订单参数无效")
@@ -323,11 +320,11 @@ func (s *server) createPaymentOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	paymentType := strings.TrimSpace(request.PaymentType)
-	if request.USDCents < setting.MinimumUSDCents || request.USDCents > setting.MaximumUSDCents || !containsString(setting.PaymentMethods, paymentType) {
+	if request.AmountCNYCents < setting.MinimumCNYCents || request.AmountCNYCents > setting.MaximumCNYCents || !containsString(setting.PaymentMethods, paymentType) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_payment_order", "充值金额或支付方式不在允许范围")
 		return
 	}
-	cnyCents, quota, err := paymentAmounts(request.USDCents, setting.ExchangeRateCNYCentsPerUSD)
+	quota, err := paymentQuota(request.AmountCNYCents)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_payment_order", "充值金额超出范围")
 		return
@@ -339,8 +336,8 @@ func (s *server) createPaymentOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	order, err := s.services.Payments.CreatePaymentOrder(r.Context(), CreatePaymentOrderCommand{
 		OrderNo: orderNo, UserID: session.UserID, SettingVersionID: setting.ID, PaymentType: paymentType,
-		USDCents: request.USDCents, CNYCents: cnyCents, ExchangeRateCNYCentsPerUSD: setting.ExchangeRateCNYCentsPerUSD,
-		NewAPIQuota: quota, ExpiresAt: time.Now().UTC().Add(30 * time.Minute),
+		AmountCNYCents: request.AmountCNYCents, NewAPIQuota: quota,
+		ExpiresAt: time.Now().UTC().Add(30 * time.Minute),
 	})
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "payment_order_create_failed", "创建充值订单失败")
@@ -389,7 +386,7 @@ func (s *server) easyPayNotify(w http.ResponseWriter, r *http.Request) {
 		r.Form.Get("pid") != callbackContext.Setting.MerchantPID ||
 		r.Form.Get("trade_status") != "TRADE_SUCCESS" ||
 		r.Form.Get("type") != callbackContext.Order.PaymentType && callbackContext.Order.PaymentType != "" ||
-		moneyErr != nil || money != callbackContext.Order.CNYCents {
+		moneyErr != nil || money != callbackContext.Order.AmountCNYCents {
 		http.Error(w, "invalid callback", http.StatusBadRequest)
 		return
 	}
@@ -420,7 +417,7 @@ func (s *server) easyPayPaymentURL(setting PaymentSetting, order PaymentOrder, k
 		"notify_url":   {s.services.Cookie.PublicOrigin + "/api/payments/easypay/notify"},
 		"return_url":   {s.services.Cookie.PublicOrigin + "/payments/return"},
 		"name":         {"ModelRoute 额度充值"},
-		"money":        {formatGatewayMoney(order.CNYCents)},
+		"money":        {formatGatewayMoney(order.AmountCNYCents)},
 	}
 	values.Set("sign", easyPaySign(values, key))
 	values.Set("sign_type", "MD5")
@@ -431,9 +428,9 @@ func (s *server) paymentSettingView(setting PaymentSetting) paymentSettingView {
 	return paymentSettingView{
 		ID: setting.ID, Version: setting.Version, GatewayURL: setting.GatewayURL,
 		MerchantPIDMasked: maskPaymentPID(setting.MerchantPID), KeyConfigured: len(setting.EncryptedKey) > 0,
-		PaymentMethods: setting.PaymentMethods, MinimumUSDCents: setting.MinimumUSDCents,
-		MaximumUSDCents: setting.MaximumUSDCents, ExchangeRateCNYCentsPerUSD: setting.ExchangeRateCNYCentsPerUSD,
-		Enabled: setting.Enabled, NotifyURL: s.services.Cookie.PublicOrigin + "/api/payments/easypay/notify",
+		PaymentMethods: setting.PaymentMethods, MinimumCNYCents: setting.MinimumCNYCents,
+		MaximumCNYCents: setting.MaximumCNYCents,
+		Enabled:         setting.Enabled, NotifyURL: s.services.Cookie.PublicOrigin + "/api/payments/easypay/notify",
 		ReturnURL: s.services.Cookie.PublicOrigin + "/payments/return", CreatedAt: setting.CreatedAt,
 	}
 }

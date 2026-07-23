@@ -42,7 +42,33 @@ VALUES (true, $1, $2)
 		t.Fatal(err)
 	}
 
-	var pendingApplicationID, approvedApplicationID, merchantID, approvedReviewID, channelID int64
+	var modelID, priceID int64
+	if err := database.QueryRowContext(ctx, `
+INSERT INTO canonical_models (public_name, provider, protocol)
+VALUES ('gpt-4o-mini', 'OpenAI', 'chat_completions') RETURNING id
+`).Scan(&modelID); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRowContext(ctx, `
+INSERT INTO official_price_versions
+    (canonical_model_id, version, price_kind, published_by_newapi_user_id)
+VALUES ($1, 1, 'text', 1) RETURNING id
+`, modelID).Scan(&priceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `
+INSERT INTO text_price_tiers
+    (official_price_version_id, tier_order, minimum_input_tokens, input_price_micros,
+     output_price_micros, cache_read_price_micros)
+VALUES ($1, 1, 0, 600000, 4000000, 500000)
+`, priceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE canonical_models SET current_official_price_version_id = $1 WHERE id = $2`, priceID, modelID); err != nil {
+		t.Fatal(err)
+	}
+
+	var pendingApplicationID, approvedApplicationID, merchantID, pendingTestID, approvedTestID, approvedReviewID, channelID int64
 	if err := database.QueryRowContext(ctx, `
 INSERT INTO merchant_applications
     (newapi_user_id, display_name, website_url, business_description, status)
@@ -64,64 +90,79 @@ VALUES (8, $1, '已审商户', 'https://approved.example', 1) RETURNING id
 `, approvedApplicationID).Scan(&merchantID); err != nil {
 		t.Fatal(err)
 	}
+	if err := database.QueryRowContext(ctx, `
+INSERT INTO merchant_channel_tests
+    (newapi_user_id, canonical_model_id, base_url, credential_fingerprint, adapter_type,
+     capabilities, latency_ms, receipt_token_hash, expires_at, consumed_at)
+VALUES (7, $1, 'https://pending-upstream.example', $2, 'openai_compatible',
+        '["chat_completions"]'::jsonb, 20, $3, now() + interval '15 minutes', now())
+RETURNING id
+`, modelID,
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"1111111111111111111111111111111111111111111111111111111111111111").Scan(&pendingTestID); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRowContext(ctx, `
+INSERT INTO merchant_channel_tests
+    (newapi_user_id, canonical_model_id, base_url, credential_fingerprint, adapter_type,
+     capabilities, latency_ms, receipt_token_hash, expires_at, consumed_at)
+VALUES (8, $1, 'https://approved-upstream.example', $2, 'openai_compatible',
+        '["chat_completions"]'::jsonb, 18, $3, now() + interval '15 minutes', now())
+RETURNING id
+`, modelID,
+		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"2222222222222222222222222222222222222222222222222222222222222222").Scan(&approvedTestID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := database.ExecContext(ctx, `
 INSERT INTO merchant_channel_reviews
-    (merchant_newapi_user_id, application_id, channel_name, channel_type, base_url,
-     requested_models, encrypted_credential, credential_fingerprint, status)
-VALUES (7, $1, '待审渠道', 1, 'https://pending-upstream.example',
-        '["gpt-4o-mini"]'::jsonb, 'encrypted', $2, 'pending')
-`, pendingApplicationID, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); err != nil {
+	(merchant_newapi_user_id, application_id, canonical_model_id, channel_test_id, channel_name,
+	 base_url, adapter_type, encrypted_credential, credential_fingerprint, status)
+VALUES (7, $1, $2, $3, '待审渠道', 'https://pending-upstream.example',
+	'openai_compatible', 'encrypted', $4, 'pending')
+`, pendingApplicationID, modelID, pendingTestID, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.QueryRowContext(ctx, `
 INSERT INTO merchant_channel_reviews
-    (merchant_newapi_user_id, application_id, channel_name, channel_type, base_url,
-     requested_models, credential_fingerprint, status, verified_models)
-VALUES (8, $1, '已审渠道', 1, 'https://approved-upstream.example',
-        '["gpt-4o-mini"]'::jsonb, $2, 'approved', '["gpt-4o-mini"]'::jsonb) RETURNING id
-`, approvedApplicationID, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").Scan(&approvedReviewID); err != nil {
+	(merchant_newapi_user_id, merchant_profile_id, application_id, canonical_model_id, channel_test_id,
+	 channel_name, base_url, adapter_type, credential_fingerprint, status)
+VALUES (8, $1, $2, $3, $4, '已审渠道', 'https://approved-upstream.example',
+	'openai_compatible', $5, 'approved') RETURNING id
+`, merchantID, approvedApplicationID, modelID, approvedTestID,
+		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").Scan(&approvedReviewID); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.QueryRowContext(ctx, `
 INSERT INTO merchant_channels
-    (merchant_profile_id, review_id, newapi_channel_id, channel_name, channel_type, base_url, models, credential_fingerprint)
-VALUES ($1, $2, 41, '已审渠道', 1, 'https://approved-upstream.example', '["gpt-4o-mini"]'::jsonb, $3) RETURNING id
-`, merchantID, approvedReviewID, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc").Scan(&channelID); err != nil {
-		t.Fatal(err)
-	}
-
-	var modelID, priceID int64
-	if err := database.QueryRowContext(ctx, `
-INSERT INTO canonical_models (public_name, provider, protocol)
-VALUES ('gpt-4o-mini', 'OpenAI', 'chat_completions') RETURNING id
-`).Scan(&modelID); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.QueryRowContext(ctx, `
-INSERT INTO official_price_versions
-    (canonical_model_id, version, billing_mode, model_ratio_micros, completion_ratio_micros,
-     cache_ratio_micros, create_cache_ratio_micros, image_ratio_micros, audio_ratio_micros,
-     audio_completion_ratio_micros, published_by_newapi_user_id)
-VALUES ($1, 1, 'token', 600000, 4000000, 500000, 0, 0, 0, 0, 1) RETURNING id
-`, modelID).Scan(&priceID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.ExecContext(ctx, `UPDATE canonical_models SET current_official_price_version_id = $1 WHERE id = $2`, priceID, modelID); err != nil {
+	(merchant_profile_id, review_id, canonical_model_id, newapi_channel_id, channel_name,
+	 base_url, adapter_type, credential_fingerprint)
+VALUES ($1, $2, $3, 41, '已审渠道', 'https://approved-upstream.example',
+	'openai_compatible', $4) RETURNING id
+`, merchantID, approvedReviewID, modelID,
+		"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc").Scan(&channelID); err != nil {
 		t.Fatal(err)
 	}
 	const alias = "mkt-ov-0123456789abcdef01234567"
-	if _, err := database.ExecContext(ctx, `
+	var offerID int64
+	if err := database.QueryRowContext(ctx, `
 INSERT INTO offer_versions
-    (merchant_channel_id, canonical_model_id, official_price_version_id, multiplier_bps,
-     internal_alias, status, created_by_newapi_user_id, activated_at)
-VALUES ($1, $2, $3, 9000, $4, 'active', 8, $5)
-`, channelID, modelID, priceID, alias, now); err != nil {
+	(merchant_profile_id, canonical_model_id, official_price_version_id, multiplier_bps,
+	 version, status, created_by_newapi_user_id, activated_at)
+VALUES ($1, $2, $3, 9000, 1, 'active', 8, $4) RETURNING id
+`, merchantID, modelID, priceID, now).Scan(&offerID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.ExecContext(ctx, `
-INSERT INTO channel_model_health (merchant_channel_id, canonical_model_id, state, next_probe_at)
-VALUES ($1, $2, 'cooling', $3)
-`, channelID, modelID, now); err != nil {
+INSERT INTO offer_channel_aliases (offer_version_id, merchant_channel_id, internal_alias)
+VALUES ($1, $2, $3)
+`, offerID, channelID, alias); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `
+INSERT INTO channel_health (merchant_channel_id, state, next_probe_at, cooldown_until)
+VALUES ($1, 'cooling', $2, $2)
+`, channelID, now); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.ExecContext(ctx, `
@@ -148,8 +189,8 @@ SELECT 'req-error', id, $1, 'smart', 'stability', 'completed', 500, $2 FROM toke
 	if _, err := database.ExecContext(ctx, `
 INSERT INTO payment_setting_versions
     (version, gateway_url, merchant_pid, encrypted_key, key_fingerprint, payment_methods,
-     minimum_usd_cents, maximum_usd_cents, exchange_rate_cny_cents_per_usd, enabled, created_by_newapi_user_id)
-VALUES (1, 'https://pay.example', 'pid', 'encrypted', $1, '["alipay"]'::jsonb, 100, 10000, 720, true, 1)
+     minimum_cny_cents, maximum_cny_cents, enabled, created_by_newapi_user_id)
+VALUES (1, 'https://pay.example', 'pid', 'encrypted', $1, '["alipay"]'::jsonb, 100, 10000, true, 1)
 `, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"); err != nil {
 		t.Fatal(err)
 	}

@@ -101,8 +101,8 @@ func probeRequest(probe HealthProbe) (string, []byte) {
 	switch probe.Protocol {
 	case "chat_completions":
 		return "/v1/chat/completions", []byte(fmt.Sprintf(`{"model":"%s","messages":[{"role":"user","content":"ping"}],"max_tokens":1,"stream":false}`, model))
-	case "embeddings":
-		return "/v1/embeddings", []byte(fmt.Sprintf(`{"model":"%s","input":"ping"}`, model))
+	case "image_generation":
+		return "/v1/images/generations", []byte(fmt.Sprintf(`{"model":"%s","prompt":"hi","n":1,"quality":"auto","size":"auto"}`, model))
 	default:
 		return "/v1/responses", []byte(fmt.Sprintf(`{"model":"%s","input":"ping","max_output_tokens":1}`, model))
 	}

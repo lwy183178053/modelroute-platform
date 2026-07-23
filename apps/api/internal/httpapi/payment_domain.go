@@ -12,23 +12,16 @@ import (
 	"strings"
 )
 
-const newAPIQuotaPerUSDCent int64 = 5000
+const newAPIQuotaPerCNYCent int64 = 5000
 
-func paymentAmounts(usdCents int64, cnyCentsPerUSD int64) (int64, int64, error) {
-	if usdCents <= 0 || cnyCentsPerUSD <= 0 {
-		return 0, 0, errors.New("充值金额和汇率必须为正数")
+func paymentQuota(cnyCents int64) (int64, error) {
+	if cnyCents <= 0 {
+		return 0, errors.New("充值金额必须为正数")
 	}
-	if usdCents > math.MaxInt64/cnyCentsPerUSD {
-		return 0, 0, errors.New("人民币金额超出范围")
+	if cnyCents > math.MaxInt64/newAPIQuotaPerCNYCent {
+		return 0, errors.New("New API 额度超出范围")
 	}
-	product := usdCents * cnyCentsPerUSD
-	if product > math.MaxInt64-50 {
-		return 0, 0, errors.New("人民币金额超出范围")
-	}
-	if usdCents > math.MaxInt64/newAPIQuotaPerUSDCent {
-		return 0, 0, errors.New("New API 额度超出范围")
-	}
-	return (product + 50) / 100, usdCents * newAPIQuotaPerUSDCent, nil
+	return cnyCents * newAPIQuotaPerCNYCent, nil
 }
 
 func parseGatewayMoney(value string) (int64, error) {

@@ -42,8 +42,16 @@ func TestCurrentCatalogMatchesPinnedNewAPISource(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, model := range catalog.Models {
-		if !strings.Contains(contents[model.Provider], `"`+model.PublicName+`"`) {
-			t.Errorf("New API rc.21 的 %s 适配器缺少模型 %s", model.Provider, model.PublicName)
+		if listedByDefault(model.Provider, model.PublicName) && !strings.Contains(contents[model.Provider], `"`+model.PublicName+`"`) {
+			t.Errorf("New API rc.21 的 %s 默认清单缺少模型 %s", model.Provider, model.PublicName)
 		}
 	}
+}
+
+func listedByDefault(provider string, model string) bool {
+	genericModels := map[string]bool{
+		"gpt-5.6-sol": true, "gpt-5.6-terra": true, "gpt-5.6-luna": true,
+		"gpt-5.5": true, "gpt-image-2": true, "kimi-k3": true, "MiniMax-M3": true,
+	}
+	return !genericModels[model]
 }

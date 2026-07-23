@@ -42,16 +42,14 @@ func (s *SQLPaymentStore) CreatePaymentSetting(ctx context.Context, command Crea
 	setting, err := scanPaymentSetting(tx.QueryRowContext(ctx, `
 INSERT INTO payment_setting_versions
     (version, gateway_url, merchant_pid, encrypted_key, key_fingerprint, payment_methods,
-     minimum_usd_cents, maximum_usd_cents, exchange_rate_cny_cents_per_usd, enabled,
-     created_by_newapi_user_id)
+     minimum_cny_cents, maximum_cny_cents, enabled, created_by_newapi_user_id)
 VALUES
     ((SELECT COALESCE(max(version), 0) + 1 FROM payment_setting_versions),
-     $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10)
+     $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)
 RETURNING id, version, gateway_url, merchant_pid, encrypted_key, key_fingerprint, payment_methods,
-          minimum_usd_cents, maximum_usd_cents, exchange_rate_cny_cents_per_usd, enabled, created_at
+          minimum_cny_cents, maximum_cny_cents, enabled, created_at
 `, command.GatewayURL, command.MerchantPID, command.EncryptedKey, command.KeyFingerprint, methods,
-		command.MinimumUSDCents, command.MaximumUSDCents, command.ExchangeRateCNYCentsPerUSD,
-		command.Enabled, command.AdminUserID))
+		command.MinimumCNYCents, command.MaximumCNYCents, command.Enabled, command.AdminUserID))
 	if err != nil {
 		return PaymentSetting{}, err
 	}
@@ -64,20 +62,18 @@ RETURNING id, version, gateway_url, merchant_pid, encrypted_key, key_fingerprint
 func (s *SQLPaymentStore) CreatePaymentOrder(ctx context.Context, command CreatePaymentOrderCommand) (PaymentOrder, error) {
 	return scanPaymentOrder(s.database.QueryRowContext(ctx, `
 INSERT INTO payment_orders
-    (order_no, newapi_user_id, setting_version_id, payment_type, usd_cents, cny_cents,
-     exchange_rate_cny_cents_per_usd, newapi_quota, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    (order_no, newapi_user_id, setting_version_id, payment_type, amount_cny_cents,
+     newapi_quota, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING `+paymentOrderColumns, command.OrderNo, command.UserID, command.SettingVersionID,
-		command.PaymentType, command.USDCents, command.CNYCents, command.ExchangeRateCNYCentsPerUSD,
-		command.NewAPIQuota, command.ExpiresAt))
+		command.PaymentType, command.AmountCNYCents, command.NewAPIQuota, command.ExpiresAt))
 }
 
 func (s *SQLPaymentStore) PaymentCallbackContext(ctx context.Context, orderNo string) (PaymentCallbackContext, error) {
 	row := s.database.QueryRowContext(ctx, `
 SELECT `+prefixedPaymentOrderColumns("o")+`,
        p.id, p.version, p.gateway_url, p.merchant_pid, p.encrypted_key, p.key_fingerprint,
-       p.payment_methods, p.minimum_usd_cents, p.maximum_usd_cents,
-       p.exchange_rate_cny_cents_per_usd, p.enabled, p.created_at
+       p.payment_methods, p.minimum_cny_cents, p.maximum_cny_cents, p.enabled, p.created_at
 FROM payment_orders o
 JOIN payment_setting_versions p ON p.id = o.setting_version_id
 WHERE o.order_no = $1
@@ -216,11 +212,11 @@ func (s *SQLPaymentStore) ClaimPaymentCredits(ctx context.Context, now time.Time
 	}
 	defer tx.Rollback()
 	rows, err := tx.QueryContext(ctx, `
-SELECT c.id, c.payment_order_id, o.order_no, o.newapi_user_id, o.newapi_quota, c.attempts
+SELECT c.id, c.payment_order_id, o.order_no, o.newapi_user_id, o.newapi_quota, c.attempt_count
 FROM newapi_credit_operations c
 JOIN payment_orders o ON o.id = c.payment_order_id
 WHERE c.status IN ('pending', 'failed')
-  AND c.attempts < 5
+  AND c.attempt_count < 5
   AND c.next_attempt_at <= $1
   AND o.payment_status = 'paid'
 ORDER BY c.id
@@ -248,7 +244,7 @@ LIMIT $2
 	for index := range operations {
 		if _, err := tx.ExecContext(ctx, `
 UPDATE newapi_credit_operations
-SET status = 'processing', attempts = attempts + 1, started_at = $1,
+SET status = 'processing', attempt_count = attempt_count + 1, started_at = $1,
     finished_at = NULL, last_error = NULL, updated_at = now()
 WHERE id = $2
 `, now, operations[index].ID); err != nil {
@@ -290,7 +286,7 @@ func (s *SQLPaymentStore) RetryPaymentCredit(ctx context.Context, orderID int64,
 	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx, `
 UPDATE newapi_credit_operations
-SET status = 'pending', attempts = 0, last_error = NULL, next_attempt_at = now(),
+SET status = 'pending', attempt_count = 0, last_error = NULL, next_attempt_at = now(),
     started_at = NULL, finished_at = NULL, updated_at = now()
 WHERE payment_order_id = $1 AND status = $2
 `, orderID, expectedStatus)
@@ -389,18 +385,18 @@ func truncatePaymentError(message string) string {
 
 const paymentSettingSelect = `
 SELECT id, version, gateway_url, merchant_pid, encrypted_key, key_fingerprint, payment_methods,
-       minimum_usd_cents, maximum_usd_cents, exchange_rate_cny_cents_per_usd, enabled, created_at
+       minimum_cny_cents, maximum_cny_cents, enabled, created_at
 FROM payment_setting_versions`
 
 const paymentOrderColumns = `id, order_no, newapi_user_id, setting_version_id, payment_type,
-       usd_cents, cny_cents, exchange_rate_cny_cents_per_usd, newapi_quota,
+       amount_cny_cents, newapi_quota,
        payment_status, credit_status, third_party_trade_no, paid_at, credited_at,
        expires_at, created_at, updated_at`
 
 func prefixedPaymentOrderColumns(alias string) string {
 	columns := []string{
-		"id", "order_no", "newapi_user_id", "setting_version_id", "payment_type", "usd_cents", "cny_cents",
-		"exchange_rate_cny_cents_per_usd", "newapi_quota", "payment_status", "credit_status",
+		"id", "order_no", "newapi_user_id", "setting_version_id", "payment_type", "amount_cny_cents",
+		"newapi_quota", "payment_status", "credit_status",
 		"third_party_trade_no", "paid_at", "credited_at", "expires_at", "created_at", "updated_at",
 	}
 	result := ""
@@ -417,8 +413,8 @@ func scanPaymentSetting(row rowScanner) (PaymentSetting, error) {
 	var setting PaymentSetting
 	var methods []byte
 	err := row.Scan(&setting.ID, &setting.Version, &setting.GatewayURL, &setting.MerchantPID,
-		&setting.EncryptedKey, &setting.KeyFingerprint, &methods, &setting.MinimumUSDCents,
-		&setting.MaximumUSDCents, &setting.ExchangeRateCNYCentsPerUSD, &setting.Enabled, &setting.CreatedAt)
+		&setting.EncryptedKey, &setting.KeyFingerprint, &methods, &setting.MinimumCNYCents,
+		&setting.MaximumCNYCents, &setting.Enabled, &setting.CreatedAt)
 	if err != nil {
 		return PaymentSetting{}, paymentStoreError(err)
 	}
@@ -433,7 +429,7 @@ func scanPaymentOrder(row rowScanner) (PaymentOrder, error) {
 	var tradeNo sql.NullString
 	var paidAt, creditedAt sql.NullTime
 	err := row.Scan(&order.ID, &order.OrderNo, &order.UserID, &order.SettingVersionID, &order.PaymentType,
-		&order.USDCents, &order.CNYCents, &order.ExchangeRateCNYCentsPerUSD, &order.NewAPIQuota,
+		&order.AmountCNYCents, &order.NewAPIQuota,
 		&order.PaymentStatus, &order.CreditStatus, &tradeNo, &paidAt, &creditedAt,
 		&order.ExpiresAt, &order.CreatedAt, &order.UpdatedAt)
 	if err != nil {
@@ -474,12 +470,12 @@ func scanPaymentCallbackContext(row rowScanner) (PaymentOrder, PaymentSetting, e
 	var paidAt, creditedAt sql.NullTime
 	var methods []byte
 	err := row.Scan(&order.ID, &order.OrderNo, &order.UserID, &order.SettingVersionID, &order.PaymentType,
-		&order.USDCents, &order.CNYCents, &order.ExchangeRateCNYCentsPerUSD, &order.NewAPIQuota,
+		&order.AmountCNYCents, &order.NewAPIQuota,
 		&order.PaymentStatus, &order.CreditStatus, &tradeNo, &paidAt, &creditedAt,
 		&order.ExpiresAt, &order.CreatedAt, &order.UpdatedAt,
 		&setting.ID, &setting.Version, &setting.GatewayURL, &setting.MerchantPID, &setting.EncryptedKey,
-		&setting.KeyFingerprint, &methods, &setting.MinimumUSDCents, &setting.MaximumUSDCents,
-		&setting.ExchangeRateCNYCentsPerUSD, &setting.Enabled, &setting.CreatedAt)
+		&setting.KeyFingerprint, &methods, &setting.MinimumCNYCents, &setting.MaximumCNYCents,
+		&setting.Enabled, &setting.CreatedAt)
 	if err != nil {
 		return PaymentOrder{}, PaymentSetting{}, paymentStoreError(err)
 	}

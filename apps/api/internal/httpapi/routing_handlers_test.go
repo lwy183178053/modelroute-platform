@@ -19,6 +19,15 @@ type routingRepositoryStub struct {
 	listOffers    func(context.Context, int, string) ([]MarketOffer, error)
 	prepareHealth func(context.Context, int64) (int, error)
 	resetHealth   func(context.Context, int64) error
+	listModels    func(context.Context) ([]CanonicalModel, error)
+	deleteModel   func(context.Context, int64) (string, error)
+}
+
+func (s *routingRepositoryStub) ListCanonicalModels(ctx context.Context) ([]CanonicalModel, error) {
+	if s.listModels == nil {
+		return nil, nil
+	}
+	return s.listModels(ctx)
 }
 
 func (s *routingRepositoryStub) ListMarketOffers(ctx context.Context, userID int, model string) ([]MarketOffer, error) {
@@ -56,13 +65,19 @@ func (s *routingRepositoryStub) CreateOffer(ctx context.Context, command CreateO
 	return s.createOffer(ctx, command)
 }
 
-type offerSynchronizerStub struct {
-	offerID   int64
-	channelID int64
+func (s *routingRepositoryStub) DeleteCanonicalModel(ctx context.Context, modelID int64) (string, error) {
+	if s.deleteModel == nil {
+		return "", ErrRoutingNotFound
+	}
+	return s.deleteModel(ctx, modelID)
 }
 
-func (s *offerSynchronizerStub) SyncOffer(_ context.Context, offerID int64, channelID int64) error {
-	s.offerID, s.channelID = offerID, channelID
+type offerSynchronizerStub struct {
+	offerID int64
+}
+
+func (s *offerSynchronizerStub) SyncOffer(_ context.Context, offerID int64) error {
+	s.offerID = offerID
 	return nil
 }
 
@@ -72,18 +87,18 @@ func TestAdminCreatesCanonicalModelWithIntegerOfficialPrice(t *testing.T) {
 	}))
 	repository := &routingRepositoryStub{}
 	repository.createModel = func(_ context.Context, command CreateCanonicalModelCommand) (CanonicalModel, error) {
-		if command.PublicName != "gpt-5.5" || command.Provider != "OpenAI" || command.Protocol != "responses" || command.Lifecycle != "stable" {
+		if command.PublicName != "gpt-5.5" || command.Provider != "OpenAI" || command.Protocol != "responses" {
 			t.Fatalf("标准模型参数=%+v", command)
 		}
-		if command.Price.Currency != "USD" || command.Price.USDExchangeRateMicros != 1_000_000 || len(command.Price.Tiers) != 1 || command.Price.Tiers[0].InputPriceMicros != 1_250_000 || command.Price.Tiers[0].CacheReadPriceMicros == nil || *command.Price.Tiers[0].CacheReadPriceMicros != 100_000 {
+		if len(command.Price.Tiers) != 1 || command.Price.Tiers[0].InputPriceMicros != 1_250_000 || command.Price.Tiers[0].CacheReadPriceMicros == nil || *command.Price.Tiers[0].CacheReadPriceMicros != 100_000 {
 			t.Fatalf("官方价格参数=%+v", command.Price)
 		}
-		return CanonicalModel{ID: 61, PublicName: command.PublicName, Provider: command.Provider, Protocol: command.Protocol, Lifecycle: command.Lifecycle, Status: "active", Price: command.Price}, nil
+		return CanonicalModel{ID: 61, PublicName: command.PublicName, Provider: command.Provider, Protocol: command.Protocol, Status: "active", Price: command.Price}, nil
 	}
 	services.Routing = repository
 	token := createPlatformSession(t, services, 1, 100)
 	handler := NewServerWithServices("test", Dependencies{}, services)
-	body := `{"public_name":"gpt-5.5","provider":"OpenAI","protocol":"responses","lifecycle":"stable","price":{"currency":"USD","usd_exchange_rate_micros":1000000,"source_url":"https://openai.com/api/pricing/","tiers":[{"minimum_input_tokens":0,"maximum_input_tokens":null,"input_price_micros":1250000,"output_price_micros":3000000,"cache_read_price_micros":100000}]}}`
+	body := `{"public_name":"gpt-5.5","provider":"OpenAI","protocol":"responses","price":{"tiers":[{"minimum_input_tokens":0,"maximum_input_tokens":null,"input_price_micros":1250000,"output_price_micros":3000000,"cache_read_price_micros":100000}]}}`
 	request := httptest.NewRequest(http.MethodPost, "/api/admin/models", strings.NewReader(body))
 	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
@@ -94,7 +109,69 @@ func TestAdminCreatesCanonicalModelWithIntegerOfficialPrice(t *testing.T) {
 	}
 }
 
-func TestMerchantOfferRejectsPriceAboveOfficialBeforeStore(t *testing.T) {
+func TestAdminDetectsCustomModelWithoutPersistingCredentials(t *testing.T) {
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	repository := &routingRepositoryStub{}
+	persisted := false
+	repository.createModel = func(context.Context, CreateCanonicalModelCommand) (CanonicalModel, error) {
+		persisted = true
+		return CanonicalModel{}, nil
+	}
+	services.Routing = repository
+	services.ChannelTests = channelTesterStub{test: func(_ context.Context, request ChannelTestRequest) (ChannelTestOutcome, error) {
+		if request.Model.PublicName != "custom-chat-v1" || request.Model.Provider != "OpenAI" || request.Model.Protocol != "chat_completions" || request.BaseURL != "https://api.example.com" || request.APIKey != "sk-custom-secret" {
+			t.Fatalf("模型检测参数=%+v", request)
+		}
+		return ChannelTestOutcome{AdapterType: "openai_compatible", Capabilities: []string{"chat_completions"}, LatencyMS: 123}, nil
+	}}
+	token := createPlatformSession(t, services, 1, 100)
+	handler := NewServerWithServices("test", Dependencies{}, services)
+	request := httptest.NewRequest(http.MethodPost, "/api/admin/models/detect", strings.NewReader(`{"public_name":"custom-chat-v1","provider":"OpenAI","protocol":"chat_completions","base_url":"https://api.example.com","api_key":"sk-custom-secret"}`))
+	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
+	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || persisted || strings.Contains(response.Body.String(), "sk-custom-secret") || !strings.Contains(response.Body.String(), `"latency_ms":123`) {
+		t.Fatalf("检测响应=%d %s，持久化=%v", response.Code, response.Body.String(), persisted)
+	}
+}
+
+func TestAdminDeletesOrArchivesCanonicalModel(t *testing.T) {
+	services, _, audit := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	repository := &routingRepositoryStub{}
+	repository.deleteModel = func(_ context.Context, modelID int64) (string, error) {
+		if modelID != 61 {
+			t.Fatalf("删除模型编号=%d", modelID)
+		}
+		return "archived", nil
+	}
+	services.Routing = repository
+	adminToken := createPlatformSession(t, services, 1, 100)
+	userToken := createPlatformSession(t, services, 7, 1)
+	handler := NewServerWithServices("test", Dependencies{}, services)
+
+	for _, test := range []struct {
+		token string
+		want  int
+	}{
+		{token: userToken, want: http.StatusForbidden},
+		{token: adminToken, want: http.StatusOK},
+	} {
+		request := httptest.NewRequest(http.MethodDelete, "/api/admin/models/61", nil)
+		request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
+		request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: test.token})
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != test.want || test.want == http.StatusOK && !strings.Contains(response.Body.String(), `"result":"archived"`) {
+			t.Fatalf("删除响应=%d %s", response.Code, response.Body.String())
+		}
+	}
+	if len(audit.entries) != 1 || audit.entries[0].Action != "model.delete" {
+		t.Fatalf("删除审计=%+v", audit.entries)
+	}
+}
+
+func TestMerchantOfferRejectsMultiplierAboveFiveTimesBeforeStore(t *testing.T) {
 	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	called := false
 	repository := &routingRepositoryStub{}
@@ -105,7 +182,7 @@ func TestMerchantOfferRejectsPriceAboveOfficialBeforeStore(t *testing.T) {
 	services.Routing = repository
 	token := createPlatformSession(t, services, 7, 1)
 	handler := NewServerWithServices("test", Dependencies{}, services)
-	request := httptest.NewRequest(http.MethodPost, "/api/merchant/offers", strings.NewReader(`{"merchant_channel_id":51,"canonical_model_id":61,"multiplier_bps":10001}`))
+	request := httptest.NewRequest(http.MethodPut, "/api/merchant/offers/61", strings.NewReader(`{"multiplier_bps":50001}`))
 	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()
@@ -119,22 +196,22 @@ func TestMerchantOfferActivatesOnlyAfterNewAPISync(t *testing.T) {
 	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	repository := &routingRepositoryStub{}
 	repository.createOffer = func(_ context.Context, command CreateOfferCommand) (OfferVersion, error) {
-		if command.UserID != 7 || command.MerchantChannelID != 51 || command.MultiplierBPS != 4000 || !strings.HasPrefix(command.InternalAlias, "mkt-ov-") {
+		if command.UserID != 7 || command.CanonicalModelID != 61 || command.MultiplierBPS != 0 {
 			t.Fatalf("报价参数=%+v", command)
 		}
-		return OfferVersion{ID: 42, MerchantChannelID: 51, InternalAlias: command.InternalAlias, Status: "syncing"}, nil
+		return OfferVersion{ID: 42, CanonicalModelID: 61, MultiplierBPS: 0, Status: "syncing"}, nil
 	}
 	synchronizer := &offerSynchronizerStub{}
 	services.Routing = repository
 	services.OfferSync = synchronizer
 	token := createPlatformSession(t, services, 7, 1)
 	handler := NewServerWithServices("test", Dependencies{}, services)
-	request := httptest.NewRequest(http.MethodPost, "/api/merchant/offers", strings.NewReader(`{"merchant_channel_id":51,"canonical_model_id":61,"multiplier_bps":4000}`))
+	request := httptest.NewRequest(http.MethodPut, "/api/merchant/offers/61", strings.NewReader(`{"multiplier_bps":0}`))
 	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusCreated || synchronizer.offerID != 42 || synchronizer.channelID != 51 {
+	if response.Code != http.StatusCreated || synchronizer.offerID != 42 {
 		t.Fatalf("报价响应=%d %s，同步=%+v", response.Code, response.Body.String(), synchronizer)
 	}
 }

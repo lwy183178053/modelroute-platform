@@ -97,6 +97,7 @@ func buildHTTPServices(database *sql.DB, redisClient *redis.Client, cfg config.C
 		Audit:         httpapi.NewSQLAuditStore(database),
 		Merchants:     httpapi.NewSQLMerchantStore(database),
 		Credentials:   credentials,
+		ChannelTests:  httpapi.NewNewAPIChannelDetector(adminNewAPI),
 		Routing:       routing,
 		OfferSync:     httpapi.NewPriceSynchronizer(routing, adminNewAPI),
 		Payments:      payments,

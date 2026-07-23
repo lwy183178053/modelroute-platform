@@ -30,7 +30,7 @@ func (s *repositoryStub) CreateCanonicalModel(_ context.Context, command httpapi
 	s.nextModelID++
 	model := httpapi.CanonicalModel{
 		ID: commandID(s.nextModelID), PublicName: command.PublicName, Provider: command.Provider,
-		Protocol: command.Protocol, Lifecycle: command.Lifecycle, Status: modelStatus(command.Lifecycle), Price: command.Price,
+		Protocol: command.Protocol, Status: "active", Price: command.Price,
 	}
 	model.Price.Version = 1
 	s.created = append(s.created, command)
@@ -95,6 +95,16 @@ func TestApplySkipsUnchangedPriceOnRepeatedRun(t *testing.T) {
 	}
 }
 
+func TestPricesEqualTreatsDerivedPriceKindAsEquivalent(t *testing.T) {
+	output := int64(3_000_000)
+	seed := httpapi.OfficialPrice{Tiers: []httpapi.PriceTier{{MinimumInputTokens: 0, InputPriceMicros: 1_000_000, OutputPriceMicros: &output}}}
+	stored := seed
+	stored.PriceKind = "text"
+	if !pricesEqual(stored, seed) {
+		t.Fatal("数据库派生的 text 价格类型不应导致种子重复发布")
+	}
+}
+
 func TestApplyPublishesNewPriceWithoutChangingModelIdentity(t *testing.T) {
 	catalog := mustParseCatalog(t, validCatalogJSON("gpt-5.4", "OpenAI"))
 	repository := &repositoryStub{}
@@ -129,11 +139,4 @@ func commandID(value int64) int64 {
 		return 1
 	}
 	return value
-}
-
-func modelStatus(lifecycle string) string {
-	if lifecycle == "stable" {
-		return "active"
-	}
-	return "inactive"
 }

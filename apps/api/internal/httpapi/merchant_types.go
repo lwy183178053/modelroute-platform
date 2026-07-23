@@ -33,10 +33,16 @@ type MerchantChannelReview struct {
 	ApplicationID         int64      `json:"application_id,omitempty"`
 	ReplacesChannelID     int64      `json:"replaces_channel_id,omitempty"`
 	ChannelName           string     `json:"channel_name"`
-	ChannelType           int        `json:"channel_type"`
+	ChannelType           int        `json:"-"`
+	CanonicalModelID      int64      `json:"canonical_model_id"`
+	Model                 string     `json:"model"`
+	Provider              string     `json:"provider"`
+	Protocol              string     `json:"protocol"`
+	AdapterType           string     `json:"adapter_type"`
+	ChannelTestID         int64      `json:"channel_test_id"`
 	BaseURL               string     `json:"base_url"`
-	RequestedModels       []string   `json:"requested_models"`
-	VerifiedModels        []string   `json:"verified_models,omitempty"`
+	RequestedModels       []string   `json:"-"`
+	VerifiedModels        []string   `json:"-"`
 	Status                string     `json:"status"`
 	CredentialConfigured  bool       `json:"credential_configured"`
 	EncryptedCredential   []byte     `json:"-"`
@@ -73,22 +79,71 @@ type MerchantProfile struct {
 }
 
 type MerchantChannel struct {
-	ID                    int64     `json:"id"`
-	MerchantID            int64     `json:"merchant_id"`
-	ReviewID              int64     `json:"review_id"`
-	NewAPIChannelID       int       `json:"newapi_channel_id"`
-	ChannelName           string    `json:"channel_name"`
-	ChannelType           int       `json:"channel_type"`
-	BaseURL               string    `json:"base_url"`
-	Models                []string  `json:"models"`
-	CredentialFingerprint string    `json:"credential_fingerprint"`
-	Status                string    `json:"status"`
-	CreatedAt             time.Time `json:"created_at"`
+	ID                    int64      `json:"id"`
+	MerchantID            int64      `json:"merchant_id"`
+	ReviewID              int64      `json:"review_id"`
+	NewAPIChannelID       int        `json:"newapi_channel_id"`
+	ChannelName           string     `json:"channel_name"`
+	ChannelType           int        `json:"-"`
+	CanonicalModelID      int64      `json:"canonical_model_id"`
+	Model                 string     `json:"model"`
+	Provider              string     `json:"provider"`
+	Protocol              string     `json:"protocol"`
+	AdapterType           string     `json:"adapter_type"`
+	BaseURL               string     `json:"base_url"`
+	Models                []string   `json:"-"`
+	CredentialFingerprint string     `json:"credential_fingerprint"`
+	Status                string     `json:"status"`
+	HealthState           string     `json:"health_state"`
+	AvailabilityPPM       int        `json:"availability_ppm"`
+	TTFTP95MS             int        `json:"ttft_p95_ms"`
+	ConsecutiveFailures   int        `json:"consecutive_failures"`
+	CooldownUntil         *time.Time `json:"cooldown_until,omitempty"`
+	CreatedAt             time.Time  `json:"created_at"`
+}
+
+type ChannelTest struct {
+	ID               int64     `json:"id"`
+	CanonicalModelID int64     `json:"canonical_model_id"`
+	AdapterType      string    `json:"adapter_type"`
+	Capabilities     []string  `json:"capabilities"`
+	LatencyMS        int       `json:"latency_ms"`
+	ExpiresAt        time.Time `json:"expires_at"`
+}
+
+type CreateChannelTest struct {
+	UserID                int
+	CanonicalModelID      int64
+	BaseURL               string
+	CredentialFingerprint string
+	AdapterType           string
+	Capabilities          []string
+	LatencyMS             int
+	ReceiptTokenHash      string
+	ExpiresAt             time.Time
+}
+
+type ChannelTestRequest struct {
+	Model   CanonicalModel
+	BaseURL string
+	APIKey  string
+}
+
+type ChannelTestOutcome struct {
+	AdapterType  string   `json:"adapter_type"`
+	Capabilities []string `json:"capabilities"`
+	LatencyMS    int      `json:"latency_ms"`
+}
+
+type ChannelTester interface {
+	Test(context.Context, ChannelTestRequest) (ChannelTestOutcome, error)
 }
 
 type ChannelSubmission struct {
 	ChannelName           string
 	ChannelType           int
+	CanonicalModelID      int64
+	TestReceipt           string
 	BaseURL               string
 	Models                []string
 	EncryptedCredential   []byte
@@ -124,6 +179,7 @@ type MerchantStatusChange struct {
 type MerchantRepository interface {
 	Identity(context.Context, int) (MerchantIdentity, error)
 	EnsurePlatformMerchant(context.Context, int, string) (MerchantIdentity, error)
+	SaveChannelTest(context.Context, CreateChannelTest) (ChannelTest, error)
 	CreateApplication(context.Context, CreateMerchantApplication) (MerchantApplication, error)
 	ApplicationForUser(context.Context, int) (MerchantApplication, error)
 	CreateChannelReview(context.Context, CreateMerchantChannel) (MerchantChannelReview, error)
@@ -135,7 +191,7 @@ type MerchantRepository interface {
 	ListMerchants(context.Context, int, int, string) ([]MerchantProfile, int, error)
 	ListChannels(context.Context, int, int, string) ([]MerchantChannel, int, error)
 	ClaimReview(context.Context, int64, string) (MerchantChannelReview, error)
-	FinishVerification(context.Context, int64, int, []string, string) error
+	FinishVerification(context.Context, int64, int, string, string) error
 	FinishApproval(context.Context, int64, int, int) (MerchantApproval, error)
 	CancelApproval(context.Context, int64, string) error
 	RejectReview(context.Context, int64, int, string) error

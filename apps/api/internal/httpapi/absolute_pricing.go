@@ -1,12 +1,12 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"math/big"
 	"strings"
-	"time"
 
 	"github.com/expr-lang/expr"
 )
@@ -21,48 +21,46 @@ var supportedModelProviders = map[string]struct{}{
 	"Qwen": {}, "Moonshot": {}, "Minimax": {},
 }
 
-func initialModelStatus(lifecycle string) string {
-	if lifecycle == "stable" {
-		return "active"
-	}
-	return "inactive"
-}
-
 func normalizeOfficialPrice(price OfficialPrice) OfficialPrice {
-	price.BillingMode = "token"
-	price.PricingScheme = "absolute"
-	price.Currency = strings.TrimSpace(strings.ToUpper(price.Currency))
-	price.SourceURL = strings.TrimSpace(price.SourceURL)
-	if price.CheckedAt.IsZero() {
-		price.CheckedAt = time.Now().UTC()
+	price.PriceKind = "text"
+	if len(price.ImagePrices) > 0 {
+		price.PriceKind = "image"
 	}
 	for index := range price.Tiers {
 		price.Tiers[index].TierOrder = index + 1
+	}
+	for index := range price.ImagePrices {
+		price.ImagePrices[index].Quality = strings.TrimSpace(price.ImagePrices[index].Quality)
+		price.ImagePrices[index].Size = strings.TrimSpace(price.ImagePrices[index].Size)
 	}
 	return price
 }
 
 type PriceTier struct {
-	ID                      int64  `json:"id,omitempty"`
-	TierOrder               int    `json:"tier_order,omitempty"`
-	MinimumInputTokens      int64  `json:"minimum_input_tokens"`
-	MaximumInputTokens      *int64 `json:"maximum_input_tokens"`
-	InputPriceMicros        int64  `json:"input_price_micros"`
-	OutputPriceMicros       *int64 `json:"output_price_micros"`
-	CacheReadPriceMicros    *int64 `json:"cache_read_price_micros"`
-	CacheWrite5mPriceMicros *int64 `json:"cache_write_5m_price_micros"`
-	CacheWrite1hPriceMicros *int64 `json:"cache_write_1h_price_micros"`
+	ID                    int64  `json:"id,omitempty"`
+	TierOrder             int    `json:"tier_order,omitempty"`
+	MinimumInputTokens    int64  `json:"minimum_input_tokens"`
+	MaximumInputTokens    *int64 `json:"maximum_input_tokens"`
+	InputPriceMicros      int64  `json:"input_price_micros"`
+	OutputPriceMicros     *int64 `json:"output_price_micros"`
+	CacheReadPriceMicros  *int64 `json:"cache_read_price_micros"`
+	CacheWritePriceMicros *int64 `json:"cache_write_price_micros"`
 }
 
 type OfferPriceTier struct {
-	TierOrder                 int    `json:"tier_order"`
-	MinimumInputTokens        int64  `json:"minimum_input_tokens"`
-	MaximumInputTokens        *int64 `json:"maximum_input_tokens"`
-	InputPriceMicroUSD        int64  `json:"input_price_microusd"`
-	OutputPriceMicroUSD       *int64 `json:"output_price_microusd"`
-	CacheReadPriceMicroUSD    *int64 `json:"cache_read_price_microusd"`
-	CacheWrite5mPriceMicroUSD *int64 `json:"cache_write_5m_price_microusd"`
-	CacheWrite1hPriceMicroUSD *int64 `json:"cache_write_1h_price_microusd"`
+	TierOrder             int    `json:"tier_order"`
+	MinimumInputTokens    int64  `json:"minimum_input_tokens"`
+	MaximumInputTokens    *int64 `json:"maximum_input_tokens"`
+	InputPriceMicros      int64  `json:"input_price_micros"`
+	OutputPriceMicros     *int64 `json:"output_price_micros"`
+	CacheReadPriceMicros  *int64 `json:"cache_read_price_micros"`
+	CacheWritePriceMicros *int64 `json:"cache_write_price_micros"`
+}
+
+type ImagePriceItem struct {
+	Quality     string `json:"quality"`
+	Size        string `json:"size"`
+	PriceMicros int64  `json:"price_micros"`
 }
 
 func roundMultiplyDivide(value int64, multiplier int64, divisor int64) (int64, error) {
@@ -78,18 +76,19 @@ func roundMultiplyDivide(value int64, multiplier int64, divisor int64) (int64, e
 	return product.Int64(), nil
 }
 
-func validateAbsolutePrice(price OfficialPrice, protocol string) error {
-	if price.Currency != "USD" && price.Currency != "CNY" {
-		return errors.New("原币币种必须是 USD 或 CNY")
+func validateOfficialPrice(price OfficialPrice, protocol string) error {
+	if protocol == "image_generation" {
+		if len(price.Tiers) != 0 {
+			return errors.New("图片模型不得配置 Token 价格阶梯")
+		}
+		_, _, err := buildImageExpression(price.ImagePrices, 10_000)
+		return err
 	}
-	if price.USDExchangeRateMicros <= 0 {
-		return errors.New("美元兑原币汇率必须大于零")
+	if protocol != "chat_completions" && protocol != "responses" {
+		return errors.New("模型协议不在平台开放范围")
 	}
-	if price.Currency == "USD" && price.USDExchangeRateMicros != priceMicrosScale {
-		return errors.New("美元价格的锁定汇率必须为 1")
-	}
-	if strings.TrimSpace(price.SourceURL) == "" || len(price.SourceURL) > 2048 {
-		return errors.New("必须填写有效的核价来源")
+	if len(price.ImagePrices) != 0 {
+		return errors.New("文本模型不得配置图片价格矩阵")
 	}
 	if len(price.Tiers) == 0 {
 		return errors.New("至少需要一个价格阶梯")
@@ -101,14 +100,10 @@ func validateAbsolutePrice(price OfficialPrice, protocol string) error {
 		if tier.InputPriceMicros <= 0 {
 			return errors.New("输入价格必须大于零")
 		}
-		if protocol == "embeddings" {
-			if tier.OutputPriceMicros != nil {
-				return errors.New("Embeddings 只接受输入价格")
-			}
-		} else if tier.OutputPriceMicros == nil || *tier.OutputPriceMicros <= 0 {
+		if tier.OutputPriceMicros == nil || *tier.OutputPriceMicros <= 0 {
 			return errors.New("文本生成模型必须填写大于零的输出价格")
 		}
-		for _, optional := range []*int64{tier.CacheReadPriceMicros, tier.CacheWrite5mPriceMicros, tier.CacheWrite1hPriceMicros} {
+		for _, optional := range []*int64{tier.CacheReadPriceMicros, tier.CacheWritePriceMicros} {
 			if optional != nil && *optional < 0 {
 				return errors.New("缓存价格不得为负数")
 			}
@@ -131,13 +126,17 @@ func validateAbsolutePrice(price OfficialPrice, protocol string) error {
 	return nil
 }
 
+func validateAbsolutePrice(price OfficialPrice, protocol string) error {
+	return validateOfficialPrice(price, protocol)
+}
+
 func ValidateCanonicalModel(command CreateCanonicalModelCommand) error {
 	return validateCanonicalModel(command)
 }
 
 func buildTieredExpression(price OfficialPrice, discountBPS int, protocol string) (string, []OfferPriceTier, error) {
-	if discountBPS < 1 || discountBPS > int(discountBPSScale) {
-		return "", nil, errors.New("商户折扣必须在 1 到 10000 基点之间")
+	if discountBPS < 0 || discountBPS > 50_000 {
+		return "", nil, errors.New("商户倍率必须在 0 到 50000 基点之间")
 	}
 	if err := validateAbsolutePrice(price, protocol); err != nil {
 		return "", nil, err
@@ -145,23 +144,21 @@ func buildTieredExpression(price OfficialPrice, discountBPS int, protocol string
 	discounted := make([]OfferPriceTier, 0, len(price.Tiers))
 	expressions := make([]string, 0, len(price.Tiers))
 	for index, tier := range price.Tiers {
-		converted, err := discountTier(tier, price.USDExchangeRateMicros, discountBPS)
+		converted, err := discountTier(tier, discountBPS)
 		if err != nil {
 			return "", nil, fmt.Errorf("第 %d 档价格换算失败：%w", index+1, err)
 		}
 		converted.TierOrder = index + 1
-		terms := []string{"p * " + scaledDecimal(converted.InputPriceMicroUSD, priceMicrosScale)}
-		if converted.OutputPriceMicroUSD != nil {
-			terms = append(terms, "c * "+scaledDecimal(*converted.OutputPriceMicroUSD, priceMicrosScale))
+		terms := []string{"p * " + scaledDecimal(converted.InputPriceMicros, priceMicrosScale)}
+		if converted.OutputPriceMicros != nil {
+			terms = append(terms, "c * "+scaledDecimal(*converted.OutputPriceMicros, priceMicrosScale))
 		}
-		if converted.CacheReadPriceMicroUSD != nil {
-			terms = append(terms, "cr * "+scaledDecimal(*converted.CacheReadPriceMicroUSD, priceMicrosScale))
+		if converted.CacheReadPriceMicros != nil {
+			terms = append(terms, "cr * "+scaledDecimal(*converted.CacheReadPriceMicros, priceMicrosScale))
 		}
-		if converted.CacheWrite5mPriceMicroUSD != nil {
-			terms = append(terms, "cc * "+scaledDecimal(*converted.CacheWrite5mPriceMicroUSD, priceMicrosScale))
-		}
-		if converted.CacheWrite1hPriceMicroUSD != nil {
-			terms = append(terms, "cc1h * "+scaledDecimal(*converted.CacheWrite1hPriceMicroUSD, priceMicrosScale))
+		if converted.CacheWritePriceMicros != nil {
+			price := scaledDecimal(*converted.CacheWritePriceMicros, priceMicrosScale)
+			terms = append(terms, "cc * "+price, "cc1h * "+price)
 		}
 		expressions = append(expressions, fmt.Sprintf(`tier("tier_%d", %s)`, index+1, strings.Join(terms, " + ")))
 		discounted = append(discounted, converted)
@@ -177,50 +174,39 @@ func buildTieredExpression(price OfficialPrice, discountBPS int, protocol string
 	return result, discounted, nil
 }
 
-func discountTier(tier PriceTier, exchangeRateMicros int64, discountBPS int) (OfferPriceTier, error) {
+func discountTier(tier PriceTier, discountBPS int) (OfferPriceTier, error) {
 	result := OfferPriceTier{
 		MinimumInputTokens: tier.MinimumInputTokens,
 		MaximumInputTokens: tier.MaximumInputTokens,
 	}
-	input, err := convertAndDiscountPrice(tier.InputPriceMicros, exchangeRateMicros, discountBPS)
+	input, err := roundMultiplyDivide(tier.InputPriceMicros, int64(discountBPS), discountBPSScale)
 	if err != nil {
 		return OfferPriceTier{}, err
 	}
-	if input < 1 {
-		return OfferPriceTier{}, errors.New("必填输入价格折后低于 1 微美元")
+	if discountBPS != 0 && input < 1 {
+		return OfferPriceTier{}, errors.New("必填输入价格折后低于 1 微单位")
 	}
-	result.InputPriceMicroUSD = input
-	if result.OutputPriceMicroUSD, err = convertOptionalPrice(tier.OutputPriceMicros, exchangeRateMicros, discountBPS); err != nil {
+	result.InputPriceMicros = input
+	if result.OutputPriceMicros, err = multiplyOptionalPrice(tier.OutputPriceMicros, discountBPS); err != nil {
 		return OfferPriceTier{}, err
 	}
-	if tier.OutputPriceMicros != nil && *result.OutputPriceMicroUSD < 1 {
-		return OfferPriceTier{}, errors.New("必填输出价格折后低于 1 微美元")
+	if discountBPS != 0 && tier.OutputPriceMicros != nil && *result.OutputPriceMicros < 1 {
+		return OfferPriceTier{}, errors.New("必填输出价格折后低于 1 微单位")
 	}
-	if result.CacheReadPriceMicroUSD, err = convertOptionalPrice(tier.CacheReadPriceMicros, exchangeRateMicros, discountBPS); err != nil {
+	if result.CacheReadPriceMicros, err = multiplyOptionalPrice(tier.CacheReadPriceMicros, discountBPS); err != nil {
 		return OfferPriceTier{}, err
 	}
-	if result.CacheWrite5mPriceMicroUSD, err = convertOptionalPrice(tier.CacheWrite5mPriceMicros, exchangeRateMicros, discountBPS); err != nil {
-		return OfferPriceTier{}, err
-	}
-	if result.CacheWrite1hPriceMicroUSD, err = convertOptionalPrice(tier.CacheWrite1hPriceMicros, exchangeRateMicros, discountBPS); err != nil {
+	if result.CacheWritePriceMicros, err = multiplyOptionalPrice(tier.CacheWritePriceMicros, discountBPS); err != nil {
 		return OfferPriceTier{}, err
 	}
 	return result, nil
 }
 
-func convertAndDiscountPrice(value int64, exchangeRateMicros int64, discountBPS int) (int64, error) {
-	usd, err := roundMultiplyDivide(value, exchangeRateMicros, priceMicrosScale)
-	if err != nil {
-		return 0, err
-	}
-	return roundMultiplyDivide(usd, int64(discountBPS), discountBPSScale)
-}
-
-func convertOptionalPrice(value *int64, exchangeRateMicros int64, discountBPS int) (*int64, error) {
+func multiplyOptionalPrice(value *int64, multiplierBPS int) (*int64, error) {
 	if value == nil {
 		return nil, nil
 	}
-	converted, err := convertAndDiscountPrice(*value, exchangeRateMicros, discountBPS)
+	converted, err := roundMultiplyDivide(*value, int64(multiplierBPS), discountBPSScale)
 	if err != nil {
 		return nil, err
 	}
@@ -250,4 +236,101 @@ func smokeTestTieredExpression(expression string) error {
 		}
 	}
 	return nil
+}
+
+func buildImageExpression(items []ImagePriceItem, multiplierBPS int) (string, []ImagePriceItem, error) {
+	if multiplierBPS < 0 || multiplierBPS > 50_000 {
+		return "", nil, errors.New("商户倍率必须在 0 到 50000 基点之间")
+	}
+	if len(items) == 0 {
+		return "", nil, errors.New("图片价格矩阵不得为空")
+	}
+	prices := make([]ImagePriceItem, len(items))
+	seen := make(map[string]struct{}, len(items))
+	maximumPrice := int64(0)
+	for index, item := range items {
+		item.Quality = strings.TrimSpace(item.Quality)
+		item.Size = strings.TrimSpace(item.Size)
+		if item.Quality == "" || item.Size == "" || item.PriceMicros <= 0 {
+			return "", nil, errors.New("图片质量、尺寸和单张价格必须有效")
+		}
+		key := item.Quality + "\x00" + item.Size
+		if _, exists := seen[key]; exists {
+			return "", nil, errors.New("图片价格矩阵存在重复组合")
+		}
+		seen[key] = struct{}{}
+		price, err := roundMultiplyDivide(item.PriceMicros, int64(multiplierBPS), discountBPSScale)
+		if err != nil {
+			return "", nil, err
+		}
+		if multiplierBPS != 0 && price < 1 {
+			return "", nil, errors.New("图片单张价格折后低于 1 微单位")
+		}
+		item.PriceMicros = price
+		prices[index] = item
+		if price > maximumPrice {
+			maximumPrice = price
+		}
+	}
+	body := imagePriceDecimal(maximumPrice)
+	for index := len(prices) - 1; index >= 0; index-- {
+		quality, _ := json.Marshal(prices[index].Quality)
+		size, _ := json.Marshal(prices[index].Size)
+		condition := fmt.Sprintf(`param("quality") == %s && param("size") == %s`, quality, size)
+		body = fmt.Sprintf("%s ? %s : %s", condition, imagePriceDecimal(prices[index].PriceMicros), body)
+	}
+	expression := `v1:tier("image", (param("n") == nil ? 1.0 : param("n")) * (` + body + `))`
+	if err := smokeTestImageExpression(expression); err != nil {
+		return "", nil, err
+	}
+	return expression, prices, nil
+}
+
+func smokeTestImageExpression(expression string) error {
+	body := strings.TrimPrefix(expression, "v1:")
+	for _, vector := range []struct {
+		quality string
+		size    string
+		n       any
+	}{
+		{quality: "standard", size: "1024x1024", n: nil},
+		{quality: "high", size: "1024x1024", n: 2.0},
+	} {
+		environment := map[string]any{
+			"param": func(name string) any {
+				switch name {
+				case "quality":
+					return vector.quality
+				case "size":
+					return vector.size
+				case "n":
+					return vector.n
+				default:
+					return nil
+				}
+			},
+			"tier": func(_ string, cost float64) float64 { return cost },
+		}
+		program, err := expr.Compile(body, expr.Env(environment), expr.AsFloat64())
+		if err != nil {
+			return fmt.Errorf("New API 图片计费表达式编译失败：%w", err)
+		}
+		output, err := expr.Run(program, environment)
+		if err != nil {
+			return fmt.Errorf("New API 图片计费表达式执行失败：%w", err)
+		}
+		cost, ok := output.(float64)
+		if !ok || cost < 0 || math.IsNaN(cost) || math.IsInf(cost, 0) {
+			return errors.New("New API 图片计费表达式返回无效金额")
+		}
+	}
+	return nil
+}
+
+func imagePriceDecimal(value int64) string {
+	formatted := scaledDecimal(value, priceMicrosScale)
+	if !strings.Contains(formatted, ".") {
+		return formatted + ".0"
+	}
+	return formatted
 }

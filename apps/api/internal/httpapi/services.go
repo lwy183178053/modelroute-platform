@@ -71,6 +71,7 @@ type Services struct {
 	Audit          AuditRecorder
 	Merchants      MerchantRepository
 	Credentials    CredentialProtector
+	ChannelTests   ChannelTester
 	Routing        RoutingRepository
 	OfferSync      OfferSynchronizer
 	Health         HealthCycleRunner

@@ -427,9 +427,11 @@ func truncateSettlementTables(t *testing.T, database *sql.DB) {
 TRUNCATE merchant_ledger_entries, settlement_refund_allocations,
          settlement_reconciliation_items, settlement_sources, merchant_withdrawals,
          merchant_balances, channel_health_events, performance_rollups, routing_decisions,
-         routing_policy_merchants, routing_policies, token_bindings, channel_model_health,
-         offer_versions, official_price_versions, canonical_models, merchant_channels,
-         merchant_channel_reviews, merchant_profiles, merchant_applications RESTART IDENTITY CASCADE
+         routing_policy_merchants, routing_policies, token_bindings, channel_health,
+         offer_channel_aliases, offer_versions, text_price_tiers, image_price_items,
+         official_price_versions, merchant_channels, merchant_channel_reviews,
+         merchant_channel_tests, merchant_profiles, merchant_applications, canonical_models
+RESTART IDENTITY CASCADE
 `)
 	if err != nil {
 		t.Fatalf("清理结算测试表：%v", err)
@@ -445,7 +447,32 @@ SET last_synced_through = 0, last_success_at = NULL, last_error = NULL, updated_
 
 func seedSettlementOffer(t *testing.T, database *sql.DB, newAPIChannelID int, alias string) int64 {
 	t.Helper()
-	var applicationID, merchantID, reviewID, channelID, modelID, priceID int64
+	var modelID, priceID int64
+	if err := database.QueryRow(`
+INSERT INTO canonical_models (public_name, provider, protocol)
+VALUES ('gpt-test', 'OpenAI', 'chat_completions') RETURNING id
+`).Scan(&modelID); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`
+INSERT INTO official_price_versions
+    (canonical_model_id, version, price_kind, published_by_newapi_user_id)
+VALUES ($1, 1, 'text', 1) RETURNING id
+`, modelID).Scan(&priceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+INSERT INTO text_price_tiers
+    (official_price_version_id, tier_order, minimum_input_tokens, input_price_micros, output_price_micros)
+VALUES ($1, 1, 0, 1000000, 1000000)
+`, priceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec("UPDATE canonical_models SET current_official_price_version_id = $1 WHERE id = $2", priceID, modelID); err != nil {
+		t.Fatal(err)
+	}
+
+	var applicationID, merchantID, testID, reviewID, channelID int64
 	if err := database.QueryRow(`
 INSERT INTO merchant_applications
     (newapi_user_id, display_name, website_url, business_description, status)
@@ -457,51 +484,53 @@ VALUES (17, '结算测试商户', 'https://merchant.test', '结算测试', 'appr
 INSERT INTO merchant_profiles
     (newapi_user_id, approved_application_id, display_name, website_url, approved_by_newapi_user_id)
 VALUES (17, $1, '结算测试商户', 'https://merchant.test', 1) RETURNING id
-`, applicationID).Scan(&merchantID); err != nil {
+	`, applicationID).Scan(&merchantID); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`
+INSERT INTO merchant_channel_tests
+    (newapi_user_id, canonical_model_id, base_url, credential_fingerprint, adapter_type,
+     capabilities, latency_ms, receipt_token_hash, expires_at, consumed_at)
+VALUES (17, $1, 'https://upstream.test', $2, 'openai_compatible',
+        '["chat_completions"]'::jsonb, 10, $3, now() + interval '15 minutes', now())
+RETURNING id
+`, modelID, strings64("d"), strings64("f")).Scan(&testID); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.QueryRow(`
 INSERT INTO merchant_channel_reviews
-    (merchant_newapi_user_id, application_id, channel_name, channel_type, base_url,
-     requested_models, credential_fingerprint, status, verified_models)
-VALUES (17, $1, '结算测试渠道', 1, 'https://upstream.test', '["gpt-test"]'::jsonb,
-        $2, 'approved', '["gpt-test"]'::jsonb) RETURNING id
-`, applicationID, strings64("d")).Scan(&reviewID); err != nil {
+	(merchant_newapi_user_id, merchant_profile_id, application_id, canonical_model_id,
+	 channel_test_id, channel_name, base_url, adapter_type, credential_fingerprint, status)
+VALUES (17, $1, $2, $3, $4, '结算测试渠道', 'https://upstream.test',
+	'openai_compatible', $5, 'approved') RETURNING id
+`, merchantID, applicationID, modelID, testID, strings64("d")).Scan(&reviewID); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.QueryRow(`
 INSERT INTO merchant_channels
-    (merchant_profile_id, review_id, newapi_channel_id, channel_name, channel_type,
-     base_url, models, credential_fingerprint)
-VALUES ($1, $2, $3, '结算测试渠道', 1, 'https://upstream.test', '["gpt-test"]'::jsonb, $4)
+	(merchant_profile_id, review_id, canonical_model_id, newapi_channel_id, channel_name,
+	 base_url, adapter_type, credential_fingerprint)
+VALUES ($1, $2, $3, $4, '结算测试渠道', 'https://upstream.test', 'openai_compatible', $5)
 RETURNING id
-`, merchantID, reviewID, newAPIChannelID, strings64("e")).Scan(&channelID); err != nil {
+`, merchantID, reviewID, modelID, newAPIChannelID, strings64("e")).Scan(&channelID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := database.Exec(`INSERT INTO channel_health (merchant_channel_id) VALUES ($1)`, channelID); err != nil {
+		t.Fatal(err)
+	}
+	var offerID int64
 	if err := database.QueryRow(`
-INSERT INTO canonical_models (public_name, provider, protocol) VALUES ('gpt-test', 'Test', 'chat_completions') RETURNING id
-`).Scan(&modelID); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.QueryRow(`
-INSERT INTO official_price_versions
-    (canonical_model_id, version, billing_mode, model_ratio_micros, completion_ratio_micros,
-     cache_ratio_micros, create_cache_ratio_micros, image_ratio_micros, audio_ratio_micros,
-     audio_completion_ratio_micros, published_by_newapi_user_id)
-VALUES ($1, 1, 'token', 1000000, 1000000, 1000000, 1000000, 1000000, 1000000, 1000000, 1)
-RETURNING id
-`, modelID).Scan(&priceID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.Exec("UPDATE canonical_models SET current_official_price_version_id = $1 WHERE id = $2", priceID, modelID); err != nil {
+INSERT INTO offer_versions
+	(merchant_profile_id, canonical_model_id, official_price_version_id, multiplier_bps,
+	 version, status, created_by_newapi_user_id, activated_at)
+VALUES ($1, $2, $3, 10000, 1, 'active', 17, now()) RETURNING id
+`, merchantID, modelID, priceID).Scan(&offerID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.Exec(`
-INSERT INTO offer_versions
-    (merchant_channel_id, canonical_model_id, official_price_version_id, multiplier_bps,
-     internal_alias, status, created_by_newapi_user_id, activated_at)
-VALUES ($1, $2, $3, 10000, $4, 'active', 17, now())
-`, channelID, modelID, priceID, alias); err != nil {
+INSERT INTO offer_channel_aliases (offer_version_id, merchant_channel_id, internal_alias)
+VALUES ($1, $2, $3)
+`, offerID, channelID, alias); err != nil {
 		t.Fatal(err)
 	}
 	return merchantID

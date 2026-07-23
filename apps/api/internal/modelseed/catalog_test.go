@@ -7,7 +7,7 @@ import (
 
 func TestParseCatalogRejectsUnknownFields(t *testing.T) {
 	_, err := ParseCatalog([]byte(`{
-		"version":"2026-07-23-v1",
+		"version":"2026-07-23-v2",
 		"new_api_version":"v1.0.0-rc.21",
 		"new_api_source_commit":"bde9b2f44887d34ec54799ae191d50f97914359e",
 		"models":[],
@@ -25,41 +25,59 @@ func TestParseCatalogRejectsModelOutsidePinnedNewAPISupport(t *testing.T) {
 	}
 }
 
+func TestParseCatalogRejectsNonOfficialEvidenceURL(t *testing.T) {
+	body := strings.Replace(validCatalogJSON("gpt-5.4", "OpenAI"), "https://developers.openai.com/api/docs/models/gpt-5.4", "https://example.test/pricing", 1)
+	_, err := ParseCatalog([]byte(body))
+	if err == nil || !strings.Contains(err.Error(), "官方域名") {
+		t.Fatalf("非官方核价来源应被拒绝，错误=%v", err)
+	}
+}
+
 func TestCurrentCatalogCoversPinnedProvidersAndProtocols(t *testing.T) {
 	catalog, err := CurrentCatalog()
 	if err != nil {
 		t.Fatalf("读取当前种子：%v", err)
 	}
-	if catalog.Version != "2026-07-23-v1" || catalog.Digest == "" {
+	if catalog.Version != "2026-07-23-v2" || catalog.Digest == "" {
 		t.Fatalf("种子版本或摘要无效：%+v", catalog)
 	}
-	if len(catalog.Models) != 21 {
-		t.Fatalf("当前种子模型数=%d，期望 21", len(catalog.Models))
+	if len(catalog.Models) != 23 {
+		t.Fatalf("当前种子模型数=%d，期望 23", len(catalog.Models))
 	}
 	providers := map[string]bool{}
 	protocols := map[string]bool{}
-	lifecycles := map[string]int{}
+	models := map[string]bool{}
 	for _, model := range catalog.Models {
 		providers[model.Provider] = true
 		protocols[model.Protocol] = true
-		lifecycles[model.Lifecycle]++
+		models[model.PublicName] = true
 	}
 	for _, provider := range []string{"OpenAI", "Anthropic", "Gemini", "DeepSeek", "Qwen", "Moonshot", "Minimax"} {
 		if !providers[provider] {
 			t.Fatalf("当前种子缺少厂商 %s", provider)
 		}
 	}
-	for _, protocol := range []string{"chat_completions", "responses", "embeddings"} {
+	for _, protocol := range []string{"chat_completions", "responses", "image_generation"} {
 		if !protocols[protocol] {
 			t.Fatalf("当前种子缺少协议 %s", protocol)
 		}
 	}
-	if lifecycles["stable"] != 19 || lifecycles["preview"] != 2 || len(lifecycles) != 2 {
-		t.Fatalf("当前种子生命周期分布=%+v，期望 stable=19 preview=2", lifecycles)
+	if protocols["embeddings"] {
+		t.Fatal("V2 模型种子仍包含 Embeddings")
+	}
+	for _, name := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-image-1", "gpt-image-1.5", "gpt-image-2", "claude-opus-4-8", "kimi-k3"} {
+		if !models[name] {
+			t.Fatalf("当前种子缺少已核验模型 %s", name)
+		}
+	}
+	for _, name := range []string{"gpt-5.4-pro", "claude-fable-5", "claude-sonnet-5"} {
+		if models[name] {
+			t.Fatalf("缺少 API 单价证据的模型不应自动发布：%s", name)
+		}
 	}
 }
 
-func TestCurrentCatalogLocksTierBoundariesAndCNYRate(t *testing.T) {
+func TestCurrentCatalogLocksTierBoundariesAndNumericOneToOnePricing(t *testing.T) {
 	catalog, err := CurrentCatalog()
 	if err != nil {
 		t.Fatal(err)
@@ -76,29 +94,27 @@ func TestCurrentCatalogLocksTierBoundariesAndCNYRate(t *testing.T) {
 	if len(openAI.Price.Tiers) != 2 || openAI.Price.Tiers[0].MaximumInputTokens == nil || *openAI.Price.Tiers[0].MaximumInputTokens != 272000 {
 		t.Fatalf("OpenAI 272K 阶梯=%+v", openAI.Price.Tiers)
 	}
-	for _, name := range []string{"kimi-k2.5", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"} {
-		model := models[name]
-		if model.Price.Currency != "CNY" || model.Price.USDExchangeRateMicros != 147650 {
-			t.Fatalf("人民币模型 %s 的锁定汇率=%+v", name, model.Price)
-		}
+	kimi := models["kimi-k3"]
+	if len(kimi.Price.Tiers) != 1 || kimi.Price.Tiers[0].InputPriceMicros != 20_000_000 || kimi.Price.Tiers[0].OutputPriceMicros == nil || *kimi.Price.Tiers[0].OutputPriceMicros != 100_000_000 {
+		t.Fatalf("Kimi K3 未按官方数字一比一保存：%+v", kimi.Price)
+	}
+	image := models["gpt-image-2"]
+	if len(image.Price.ImagePrices) != 9 || image.Price.ImagePrices[0].PriceMicros <= 0 {
+		t.Fatalf("GPT Image 2 价格矩阵=%+v", image.Price.ImagePrices)
 	}
 }
 
 func validCatalogJSON(modelName string, provider string) string {
 	return `{
-		"version":"2026-07-23-v1",
+		"version":"2026-07-23-v2",
 		"new_api_version":"v1.0.0-rc.21",
 		"new_api_source_commit":"bde9b2f44887d34ec54799ae191d50f97914359e",
 		"models":[{
 			"public_name":"` + modelName + `",
 			"provider":"` + provider + `",
 			"protocol":"responses",
-			"lifecycle":"stable",
+			"evidence_url":"https://developers.openai.com/api/docs/models/gpt-5.4",
 			"price":{
-				"currency":"USD",
-				"usd_exchange_rate_micros":1000000,
-				"source_url":"https://example.test/pricing",
-				"checked_at":"2026-07-23T00:00:00Z",
 				"tiers":[{
 					"minimum_input_tokens":0,
 					"maximum_input_tokens":null,

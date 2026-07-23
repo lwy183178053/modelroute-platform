@@ -37,8 +37,7 @@ TRUNCATE payment_callback_events, newapi_credit_operations, payment_orders, paym
 	setting, err := store.CreatePaymentSetting(ctx, CreatePaymentSettingCommand{
 		AdminUserID: 1, GatewayURL: "https://zpayz.cn", MerchantPID: "postgres-pid",
 		EncryptedKey: []byte("postgres-encrypted-key"), KeyFingerprint: strings64("a"),
-		PaymentMethods: []string{"alipay"}, MinimumUSDCents: 1000, MaximumUSDCents: 100000,
-		ExchangeRateCNYCentsPerUSD: 720, Enabled: true,
+		PaymentMethods: []string{"alipay"}, MinimumCNYCents: 100, MaximumCNYCents: 100000, Enabled: true,
 	})
 	if err != nil {
 		t.Fatalf("创建支付配置：%v", err)
@@ -46,8 +45,7 @@ TRUNCATE payment_callback_events, newapi_credit_operations, payment_orders, paym
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	order, err := store.CreatePaymentOrder(ctx, CreatePaymentOrderCommand{
 		OrderNo: "MR-PG-CONCURRENT", UserID: 7, SettingVersionID: setting.ID, PaymentType: "alipay",
-		USDCents: 10_000, CNYCents: 72_000, ExchangeRateCNYCentsPerUSD: 720,
-		NewAPIQuota: 50_000_000, ExpiresAt: now.Add(30 * time.Minute),
+		AmountCNYCents: 10_000, NewAPIQuota: 50_000_000, ExpiresAt: now.Add(30 * time.Minute),
 	})
 	if err != nil {
 		t.Fatalf("创建支付订单：%v", err)
@@ -133,8 +131,7 @@ TRUNCATE payment_callback_events, newapi_credit_operations, payment_orders, paym
 
 	unknownOrder, err := store.CreatePaymentOrder(ctx, CreatePaymentOrderCommand{
 		OrderNo: "MR-PG-UNKNOWN", UserID: 8, SettingVersionID: setting.ID, PaymentType: "alipay",
-		USDCents: 5000, CNYCents: 36_000, ExchangeRateCNYCentsPerUSD: 720,
-		NewAPIQuota: 25_000_000, ExpiresAt: now.Add(30 * time.Minute),
+		AmountCNYCents: 5000, NewAPIQuota: 25_000_000, ExpiresAt: now.Add(30 * time.Minute),
 	})
 	if err != nil {
 		t.Fatal(err)

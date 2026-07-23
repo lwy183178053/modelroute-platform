@@ -12,6 +12,7 @@ import (
 )
 
 type HealthProbe struct {
+	OfferChannelAliasID int64
 	OfferID             int64
 	MerchantChannelID   int64
 	CanonicalModelID    int64
@@ -21,24 +22,23 @@ type HealthProbe struct {
 	State               string
 	ConsecutiveFailures int
 	CooldownLevel       int
-	RecoverySuccesses   int
-	HealthySince        time.Time
 	NextProbeAt         time.Time
 }
 
 type RouteCandidate struct {
-	OfferID           int64  `json:"offer_id"`
-	MerchantID        int64  `json:"merchant_id"`
-	MerchantChannelID int64  `json:"merchant_channel_id"`
-	NewAPIChannelID   int    `json:"newapi_channel_id"`
-	CanonicalModelID  int64  `json:"canonical_model_id"`
-	InternalAlias     string `json:"-"`
-	PublicModel       string `json:"model"`
-	Protocol          string `json:"protocol"`
-	MultiplierBPS     int    `json:"multiplier_bps"`
-	HealthState       string `json:"health_state"`
-	AvailabilityPPM   int    `json:"availability_ppm"`
-	TTFTP95MS         int    `json:"ttft_p95_ms"`
+	OfferID             int64  `json:"offer_id"`
+	OfferChannelAliasID int64  `json:"offer_channel_alias_id"`
+	MerchantID          int64  `json:"merchant_id"`
+	MerchantChannelID   int64  `json:"merchant_channel_id"`
+	NewAPIChannelID     int    `json:"newapi_channel_id"`
+	CanonicalModelID    int64  `json:"canonical_model_id"`
+	InternalAlias       string `json:"-"`
+	PublicModel         string `json:"model"`
+	Protocol            string `json:"protocol"`
+	MultiplierBPS       int    `json:"multiplier_bps"`
+	HealthState         string `json:"health_state"`
+	AvailabilityPPM     int    `json:"availability_ppm"`
+	TTFTP95MS           int    `json:"ttft_p95_ms"`
 }
 
 type healthFailureClass string
@@ -91,6 +91,32 @@ func rewritePublicModel(body []byte, internalAlias string) ([]byte, string, erro
 	return rewritten, publicModel, nil
 }
 
+func validateImageGenerationRequest(body []byte, prices []ImagePriceItem) error {
+	var request map[string]json.RawMessage
+	if err := json.Unmarshal(body, &request); err != nil {
+		return errors.New("图片请求正文不是有效 JSON")
+	}
+	var quality, size string
+	if err := json.Unmarshal(request["quality"], &quality); err != nil || strings.TrimSpace(quality) == "" {
+		return errors.New("quality 必须是已定价的非空字符串")
+	}
+	if err := json.Unmarshal(request["size"], &size); err != nil || strings.TrimSpace(size) == "" {
+		return errors.New("size 必须是已定价的非空字符串")
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(string(request["n"])), 10, 64)
+	if err != nil || n <= 0 {
+		return errors.New("n 必须是正整数")
+	}
+	quality = strings.TrimSpace(quality)
+	size = strings.TrimSpace(size)
+	for _, item := range prices {
+		if item.Quality == quality && item.Size == size {
+			return nil
+		}
+	}
+	return errors.New("quality 与 size 组合未配置价格")
+}
+
 func classifyProbeStatus(status int) healthFailureClass {
 	switch {
 	case status >= 200 && status < 300:
@@ -135,31 +161,17 @@ func healthRank(state string) int {
 
 func nextProbeState(probe HealthProbe, class healthFailureClass, now time.Time, retryAfter time.Duration) HealthProbe {
 	result := probe
-	if !result.HealthySince.IsZero() && now.Sub(result.HealthySince) >= 24*time.Hour {
-		result.CooldownLevel = 0
-	}
 	switch class {
 	case healthFailureHard:
 		result.State = "disabled"
 		result.NextProbeAt = time.Time{}
-		result.RecoverySuccesses = 0
 	case healthFailureNone:
 		result.ConsecutiveFailures = 0
-		if probe.State == "cooling" || probe.State == "recovering" {
-			result.RecoverySuccesses++
-			if result.RecoverySuccesses < 2 {
-				result.State = "recovering"
-				result.NextProbeAt = now.Add(10 * time.Second)
-				return result
-			}
-		}
+		result.CooldownLevel = 0
 		result.State = "healthy"
-		result.RecoverySuccesses = 0
-		result.HealthySince = now
-		result.NextProbeAt = now.Add(5 * time.Minute)
+		result.NextProbeAt = time.Time{}
 	case healthFailureTemporary:
 		result.ConsecutiveFailures++
-		result.RecoverySuccesses = 0
 		if probe.State == "cooling" || probe.State == "recovering" || result.ConsecutiveFailures >= 3 {
 			result.State = "cooling"
 			result.CooldownLevel++
@@ -170,10 +182,16 @@ func nextProbeState(probe HealthProbe, class healthFailureClass, now time.Time, 
 			result.NextProbeAt = now.Add(cooldown)
 		} else {
 			result.State = "degraded"
-			result.NextProbeAt = now.Add(5 * time.Minute)
+			result.NextProbeAt = time.Time{}
 		}
 	case healthFailureIgnored:
-		result.NextProbeAt = now.Add(5 * time.Minute)
+		if probe.State == "cooling" || probe.State == "recovering" {
+			result.State = "cooling"
+			result.CooldownLevel++
+			result.NextProbeAt = now.Add(cooldownForLevel(result.CooldownLevel))
+		} else {
+			result.NextProbeAt = time.Time{}
+		}
 	}
 	return result
 }
@@ -188,7 +206,9 @@ func cooldownForLevel(level int) time.Duration {
 		return 15 * time.Minute
 	case 4:
 		return 30 * time.Minute
-	default:
+	case 5:
 		return 60 * time.Minute
+	default:
+		return 120 * time.Minute
 	}
 }

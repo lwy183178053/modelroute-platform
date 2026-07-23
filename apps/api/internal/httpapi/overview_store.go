@@ -51,10 +51,10 @@ SELECT
     (SELECT count(*) FROM settlement_reconciliation_items WHERE status = 'open'),
     (SELECT count(*) FROM merchant_channels),
     (SELECT count(*) FROM merchant_channels WHERE status = 'active'),
-    (SELECT count(DISTINCT merchant_channel_id) FROM channel_model_health WHERE state = 'cooling'),
+    (SELECT count(*) FROM channel_health WHERE state = 'cooling'),
     (SELECT count(*) FROM merchant_channels mc
        WHERE mc.status = 'disabled'
-          OR EXISTS (SELECT 1 FROM channel_model_health h WHERE h.merchant_channel_id = mc.id AND h.state = 'disabled')),
+          OR EXISTS (SELECT 1 FROM channel_health h WHERE h.merchant_channel_id = mc.id AND h.state = 'disabled')),
     COALESCE((SELECT enabled FROM payment_setting_versions WHERE is_current LIMIT 1), false),
     COALESCE((SELECT sum(CASE WHEN source_type = 2 THEN gross_quota ELSE -gross_quota END)
                 FROM settlement_sources WHERE status = 'settled' AND source_created_at >= $1), 0),

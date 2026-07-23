@@ -171,13 +171,14 @@ FROM settlement_sources WHERE newapi_log_id = $1 FOR UPDATE
 }
 
 func settleSource(ctx context.Context, tx *sql.Tx, sourceID int64, item SettlementLog) (string, error) {
-	var merchantID, offerID int64
+	var merchantID, offerID, aliasID int64
 	err := tx.QueryRowContext(ctx, `
-SELECT mc.merchant_profile_id, o.id
-FROM offer_versions o
-JOIN merchant_channels mc ON mc.id = o.merchant_channel_id
-WHERE mc.newapi_channel_id = $1 AND o.internal_alias = $2
-`, item.ChannelID, item.ModelName).Scan(&merchantID, &offerID)
+SELECT mc.merchant_profile_id, o.id, aliases.id
+FROM offer_channel_aliases aliases
+JOIN offer_versions o ON o.id = aliases.offer_version_id
+JOIN merchant_channels mc ON mc.id = aliases.merchant_channel_id
+WHERE mc.newapi_channel_id = $1 AND aliases.internal_alias = $2
+`, item.ChannelID, item.ModelName).Scan(&merchantID, &offerID, &aliasID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "reconciliation", recordSettlementReconciliation(ctx, tx, sourceID, "offer_mapping_missing", map[string]any{
 			"newapi_channel_id": item.ChannelID, "model_name": item.ModelName,
@@ -187,12 +188,12 @@ WHERE mc.newapi_channel_id = $1 AND o.internal_alias = $2
 		return "", fmt.Errorf("查询结算报价归属：%w", err)
 	}
 	if item.Type == 2 {
-		return settleConsumption(ctx, tx, sourceID, merchantID, offerID, item)
+		return settleConsumption(ctx, tx, sourceID, merchantID, offerID, aliasID, item)
 	}
-	return settleRefund(ctx, tx, sourceID, merchantID, offerID, item)
+	return settleRefund(ctx, tx, sourceID, merchantID, offerID, aliasID, item)
 }
 
-func settleConsumption(ctx context.Context, tx *sql.Tx, sourceID, merchantID, offerID int64, item SettlementLog) (string, error) {
+func settleConsumption(ctx context.Context, tx *sql.Tx, sourceID, merchantID, offerID, aliasID int64, item SettlementLog) (string, error) {
 	merchantQuota, platformQuota := splitSettlementQuota(item.Quota)
 	available, frozen, err := updateMerchantBalance(ctx, tx, merchantID, merchantQuota, 0, merchantQuota, 0, 0)
 	if err != nil {
@@ -201,9 +202,10 @@ func settleConsumption(ctx context.Context, tx *sql.Tx, sourceID, merchantID, of
 	if _, err := tx.ExecContext(ctx, `
 UPDATE settlement_sources
 SET status = 'settled', merchant_profile_id = $2, offer_version_id = $3,
-    merchant_quota = $4, platform_quota = $5, processed_at = now(), updated_at = now()
+    offer_channel_alias_id = $4, merchant_quota = $5, platform_quota = $6,
+    processed_at = now(), updated_at = now()
 WHERE id = $1
-`, sourceID, merchantID, offerID, merchantQuota, platformQuota); err != nil {
+`, sourceID, merchantID, offerID, aliasID, merchantQuota, platformQuota); err != nil {
 		return "", fmt.Errorf("完成消费结算来源：%w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -232,7 +234,7 @@ type refundCandidate struct {
 	refundPlatform   int64
 }
 
-func settleRefund(ctx context.Context, tx *sql.Tx, sourceID, merchantID, offerID int64, item SettlementLog) (string, error) {
+func settleRefund(ctx context.Context, tx *sql.Tx, sourceID, merchantID, offerID, aliasID int64, item SettlementLog) (string, error) {
 	if item.TaskID == "" && item.RequestID == "" {
 		return "reconciliation", recordSettlementReconciliation(ctx, tx, sourceID, "refund_origin_missing", map[string]any{
 			"reason": "退款日志缺少 task_id 和 request_id",
@@ -240,17 +242,18 @@ func settleRefund(ctx context.Context, tx *sql.Tx, sourceID, merchantID, offerID
 	}
 	rows, err := tx.QueryContext(ctx, `
 SELECT id, gross_quota, merchant_quota, platform_quota,
-       (($7 <> '' AND task_id = $7) OR ($7 = '' AND $8 <> '' AND request_id = $8)) AS exact_match
+	   (($8 <> '' AND task_id = $8) OR ($8 = '' AND $9 <> '' AND request_id = $9)) AS exact_match
 FROM settlement_sources
 WHERE source_type = 2 AND status = 'settled' AND merchant_profile_id = $1 AND offer_version_id = $2
-  AND newapi_user_id = $3 AND newapi_channel_id = $4 AND model_name = $5 AND source_created_at <= $6
+  AND offer_channel_alias_id = $3 AND newapi_user_id = $4 AND newapi_channel_id = $5
+  AND model_name = $6 AND source_created_at <= $7
   AND (
-      (($7 <> '' AND task_id = $7) OR ($7 = '' AND $8 <> '' AND request_id = $8))
+      (($8 <> '' AND task_id = $8) OR ($8 = '' AND $9 <> '' AND request_id = $9))
       OR (COALESCE(task_id, '') = '' AND COALESCE(request_id, '') = '')
   )
 ORDER BY source_created_at, id
 FOR UPDATE
-`, merchantID, offerID, item.UserID, item.ChannelID, item.ModelName,
+`, merchantID, offerID, aliasID, item.UserID, item.ChannelID, item.ModelName,
 		time.Unix(item.CreatedAt, 0).UTC(), item.TaskID, item.RequestID)
 	if err != nil {
 		return "", fmt.Errorf("查询退款原消费：%w", err)
@@ -360,9 +363,10 @@ VALUES ($1, $2, $3, $4, $5)
 	if _, err := tx.ExecContext(ctx, `
 UPDATE settlement_sources
 SET status = 'settled', merchant_profile_id = $2, offer_version_id = $3,
-    merchant_quota = $4, platform_quota = $5, processed_at = now(), updated_at = now()
+    offer_channel_alias_id = $4, merchant_quota = $5, platform_quota = $6,
+    processed_at = now(), updated_at = now()
 WHERE id = $1
-`, sourceID, merchantID, offerID, -merchantRefund, -platformRefund); err != nil {
+`, sourceID, merchantID, offerID, aliasID, -merchantRefund, -platformRefund); err != nil {
 		return "", fmt.Errorf("完成退款结算来源：%w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `

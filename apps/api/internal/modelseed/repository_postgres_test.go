@@ -110,7 +110,7 @@ WHERE public_name = ANY($1)
 `, catalogModelNames(catalog)).Scan(&models, &prices, &active, &inactive); err != nil {
 		t.Fatalf("读取完整种子统计：%v", err)
 	}
-	if models != 21 || prices != 21 || active != 19 || inactive != 2 {
+	if models != len(catalog.Models) || prices != len(catalog.Models) || active != len(catalog.Models) || inactive != 0 {
 		t.Fatalf("完整种子统计模型=%d 价格=%d 启用=%d 停用=%d", models, prices, active, inactive)
 	}
 }

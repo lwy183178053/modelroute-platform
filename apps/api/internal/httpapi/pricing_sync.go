@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -23,14 +24,15 @@ type aliasPrice struct {
 }
 
 type ChannelPriceRoute struct {
-	NewAPIChannelID int
-	PublicModels    []string
-	Aliases         map[string]string
+	MerchantChannelID int64
+	NewAPIChannelID   int
+	PublicModels      []string
+	Aliases           map[string]string
 }
 
 type PriceSyncRepository interface {
 	AliasPrices(context.Context) ([]aliasPrice, error)
-	ChannelPriceRoute(context.Context, int64) (ChannelPriceRoute, error)
+	OfferChannelRoutes(context.Context, int64) ([]ChannelPriceRoute, error)
 	ActivateOffer(context.Context, int64) error
 }
 
@@ -44,11 +46,19 @@ type PriceSynchronizer struct {
 	mu         sync.Mutex
 }
 
+type channelPriceUpdate struct {
+	newAPIChannelID int
+	models          string
+	mapping         string
+	originalModels  string
+	originalMapping string
+}
+
 func NewPriceSynchronizer(repository PriceSyncRepository, admin AdminNewAPI) *PriceSynchronizer {
 	return &PriceSynchronizer{repository: repository, admin: admin}
 }
 
-func (s *PriceSynchronizer) SyncOffer(ctx context.Context, offerID int64, merchantChannelID int64) error {
+func (s *PriceSynchronizer) SyncOffer(ctx context.Context, offerID int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -68,37 +78,76 @@ func (s *PriceSynchronizer) SyncOffer(ctx context.Context, offerID int64, mercha
 	if err != nil {
 		return err
 	}
-	for _, key := range newAPIPriceOptionKeys {
-		if _, err := s.admin.Do(ctx, http.MethodPut, "/api/option/", map[string]any{"key": key, "value": updates[key]}); err != nil {
-			return fmt.Errorf("同步 New API %s：%w", key, err)
+	routes, err := s.repository.OfferChannelRoutes(ctx, offerID)
+	if err != nil {
+		return fmt.Errorf("读取报价渠道映射：%w", err)
+	}
+	if len(routes) == 0 {
+		return fmt.Errorf("报价没有可同步渠道")
+	}
+	channelUpdates := make([]channelPriceUpdate, 0, len(routes))
+	for _, route := range routes {
+		channelData, err := s.admin.Do(ctx, http.MethodGet, fmt.Sprintf("/api/channel/%d", route.NewAPIChannelID), nil)
+		if err != nil {
+			return fmt.Errorf("读取 New API 渠道：%w", err)
 		}
+		models, mapping, err := mergeChannelRoute(channelData, route)
+		if err != nil {
+			return err
+		}
+		encodedMapping, err := json.Marshal(mapping)
+		if err != nil {
+			return fmt.Errorf("编码渠道模型映射：%w", err)
+		}
+		originalModels, originalMapping, err := decodeChannelConfiguration(channelData)
+		if err != nil {
+			return err
+		}
+		channelUpdates = append(channelUpdates, channelPriceUpdate{
+			newAPIChannelID: route.NewAPIChannelID, models: strings.Join(models, ","), mapping: string(encodedMapping),
+			originalModels: originalModels, originalMapping: originalMapping,
+		})
 	}
 
-	route, err := s.repository.ChannelPriceRoute(ctx, merchantChannelID)
-	if err != nil {
-		return fmt.Errorf("读取渠道报价映射：%w", err)
+	attemptedOptions := make([]string, 0, len(newAPIPriceOptionKeys))
+	attemptedChannels := make([]channelPriceUpdate, 0, len(channelUpdates))
+	for _, key := range newAPIPriceOptionKeys {
+		attemptedOptions = append(attemptedOptions, key)
+		if _, err := s.admin.Do(ctx, http.MethodPut, "/api/option/", map[string]any{"key": key, "value": updates[key]}); err != nil {
+			return s.syncRollbackError(ctx, fmt.Errorf("同步 New API %s：%w", key, err), existing, attemptedOptions, attemptedChannels)
+		}
 	}
-	channelData, err := s.admin.Do(ctx, http.MethodGet, fmt.Sprintf("/api/channel/%d", route.NewAPIChannelID), nil)
-	if err != nil {
-		return fmt.Errorf("读取 New API 渠道：%w", err)
-	}
-	models, mapping, err := mergeChannelRoute(channelData, route)
-	if err != nil {
-		return err
-	}
-	encodedMapping, err := json.Marshal(mapping)
-	if err != nil {
-		return fmt.Errorf("编码渠道模型映射：%w", err)
-	}
-	if _, err := s.admin.Do(ctx, http.MethodPut, "/api/channel/", map[string]any{
-		"id": route.NewAPIChannelID, "models": strings.Join(models, ","), "model_mapping": string(encodedMapping),
-	}); err != nil {
-		return fmt.Errorf("同步 New API 渠道模型：%w", err)
+	for _, update := range channelUpdates {
+		attemptedChannels = append(attemptedChannels, update)
+		if _, err := s.admin.Do(ctx, http.MethodPut, "/api/channel/", map[string]any{
+			"id": update.newAPIChannelID, "models": update.models, "model_mapping": update.mapping,
+		}); err != nil {
+			return s.syncRollbackError(ctx, fmt.Errorf("同步 New API 渠道模型：%w", err), existing, attemptedOptions, attemptedChannels)
+		}
 	}
 	if err := s.repository.ActivateOffer(ctx, offerID); err != nil {
-		return fmt.Errorf("激活报价：%w", err)
+		return s.syncRollbackError(ctx, fmt.Errorf("激活报价：%w", err), existing, attemptedOptions, attemptedChannels)
 	}
 	return nil
+}
+
+func (s *PriceSynchronizer) syncRollbackError(ctx context.Context, syncErr error, existing map[string]string, optionKeys []string, channels []channelPriceUpdate) error {
+	rollbackErrors := []error{syncErr}
+	for index := len(channels) - 1; index >= 0; index-- {
+		channel := channels[index]
+		if _, err := s.admin.Do(ctx, http.MethodPut, "/api/channel/", map[string]any{
+			"id": channel.newAPIChannelID, "models": channel.originalModels, "model_mapping": channel.originalMapping,
+		}); err != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("回滚 New API 渠道 %d：%w", channel.newAPIChannelID, err))
+		}
+	}
+	for index := len(optionKeys) - 1; index >= 0; index-- {
+		key := optionKeys[index]
+		if _, err := s.admin.Do(ctx, http.MethodPut, "/api/option/", map[string]any{"key": key, "value": existing[key]}); err != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("回滚 New API %s：%w", key, err))
+		}
+	}
+	return errors.Join(rollbackErrors...)
 }
 
 func decodeNewAPIOptions(data []byte) (map[string]string, error) {
@@ -148,6 +197,21 @@ func mergeChannelRoute(data []byte, route ChannelPriceRoute) ([]string, map[stri
 	return models, mapping, nil
 }
 
+func decodeChannelConfiguration(data []byte) (string, string, error) {
+	var channel struct {
+		Models       string  `json:"models"`
+		ModelMapping *string `json:"model_mapping"`
+	}
+	if err := json.Unmarshal(data, &channel); err != nil {
+		return "", "", fmt.Errorf("解析 New API 渠道快照：%w", err)
+	}
+	mapping := ""
+	if channel.ModelMapping != nil {
+		mapping = *channel.ModelMapping
+	}
+	return channel.Models, mapping, nil
+}
+
 func buildAliasPriceOptions(existing map[string]string, offers []aliasPrice) (map[string]string, error) {
 	values := make(map[string]map[string]string, len(newAPIPriceOptionKeys))
 	for _, key := range newAPIPriceOptionKeys {
@@ -164,10 +228,16 @@ func buildAliasPriceOptions(existing map[string]string, offers []aliasPrice) (ma
 	}
 
 	for _, offer := range offers {
-		if offer.Alias == "" || offer.MultiplierBPS < 1 || offer.MultiplierBPS > 10_000 {
+		if offer.Alias == "" || offer.MultiplierBPS < 0 || offer.MultiplierBPS > 50_000 {
 			return nil, fmt.Errorf("报价别名或倍率无效")
 		}
-		expression, _, err := buildTieredExpression(offer.Price, offer.MultiplierBPS, offer.Protocol)
+		var expression string
+		var err error
+		if offer.Protocol == "image_generation" {
+			expression, _, err = buildImageExpression(offer.Price.ImagePrices, offer.MultiplierBPS)
+		} else {
+			expression, _, err = buildTieredExpression(offer.Price, offer.MultiplierBPS, offer.Protocol)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("报价 %s 的绝对价格无效：%w", offer.Alias, err)
 		}

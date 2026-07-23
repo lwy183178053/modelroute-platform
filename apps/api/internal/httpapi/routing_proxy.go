@@ -43,6 +43,17 @@ func (s *server) modelProxy(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadRequest, "unsupported_model_protocol", "模型不支持当前接口协议")
 		return
 	}
+	if selection.Protocol == "image_generation" {
+		prices, priceErr := s.services.Routing.ImagePriceItems(r.Context(), selection.CanonicalModelID)
+		if priceErr != nil {
+			writeOpenAIError(w, http.StatusServiceUnavailable, "image_pricing_unavailable", "图片模型价格配置不可用")
+			return
+		}
+		if requestErr := validateImageGenerationRequest(body, prices); requestErr != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", requestErr.Error())
+			return
+		}
+	}
 	if len(selection.Candidates) == 0 {
 		writeOpenAIError(w, http.StatusServiceUnavailable, "no_available_channel", "当前策略范围内没有可用渠道")
 		return
@@ -50,7 +61,7 @@ func (s *server) modelProxy(w http.ResponseWriter, r *http.Request) {
 	requestID, _ := r.Context().Value(requestIDContextKey{}).(string)
 	if err := s.services.Routing.StartRouteDecision(r.Context(), RouteDecision{
 		RequestID: requestID, TokenBindingID: selection.TokenBindingID,
-		CanonicalModelID: selection.CanonicalModelID, OfferID: selection.Candidates[0].OfferID,
+		CanonicalModelID: selection.CanonicalModelID, OfferChannelAliasID: selection.Candidates[0].OfferChannelAliasID,
 		Mode: selection.Mode, Priority: selection.Priority,
 	}); err != nil {
 		writeOpenAIError(w, http.StatusServiceUnavailable, "routing_store_error", "记录路由决策失败")
@@ -71,7 +82,7 @@ func (s *server) modelProxy(w http.ResponseWriter, r *http.Request) {
 			if index+1 < len(selection.Candidates) {
 				continue
 			}
-			_ = s.services.Routing.CompleteRouteDecision(r.Context(), RouteDecisionResult{RequestID: requestID, OfferID: candidate.OfferID, Attempts: index + 1, Result: "transport_error"})
+			_ = s.services.Routing.CompleteRouteDecision(r.Context(), RouteDecisionResult{RequestID: requestID, OfferChannelAliasID: candidate.OfferChannelAliasID, Attempts: index + 1, Result: "transport_error"})
 			writeOpenAIError(w, http.StatusBadGateway, "upstream_connection_error", "模型服务连接失败")
 			return
 		}
@@ -108,7 +119,7 @@ func (s *server) modelProxy(w http.ResponseWriter, r *http.Request) {
 			result = "stream_error"
 		}
 		_ = s.services.Routing.CompleteRouteDecision(r.Context(), RouteDecisionResult{
-			RequestID: requestID, OfferID: candidate.OfferID, Attempts: index + 1,
+			RequestID: requestID, OfferChannelAliasID: candidate.OfferChannelAliasID, Attempts: index + 1,
 			StatusCode: response.StatusCode, FirstByteMS: firstByteMS, Result: result,
 		})
 		return
@@ -126,7 +137,7 @@ func bearerToken(header string) (string, bool) {
 func protocolMatchesPath(protocol string, path string) bool {
 	return (protocol == "chat_completions" && path == "/v1/chat/completions") ||
 		(protocol == "responses" && path == "/v1/responses") ||
-		(protocol == "embeddings" && path == "/v1/embeddings")
+		(protocol == "image_generation" && path == "/v1/images/generations")
 }
 
 func retryableStatus(status int) bool { return status == http.StatusTooManyRequests || status >= 500 }
@@ -138,7 +149,7 @@ func routeOutcome(status int) string {
 	case healthFailureTemporary:
 		return "temporary_failure"
 	case healthFailureHard:
-		return "ignored"
+		return "hard_failure"
 	default:
 		return "ignored"
 	}

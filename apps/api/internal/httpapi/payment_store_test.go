@@ -22,20 +22,19 @@ func TestCreatePaymentSettingPublishesOneCurrentVersion(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE payment_setting_versions SET is_current = false WHERE is_current")).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO payment_setting_versions")).
 		WithArgs("https://zpayz.cn", "1001", []byte("encrypted"), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-			jsonBytes(`[`+`"alipay"`+`]`), int64(1000), int64(2_000_000), int64(720), true, 1).
+			jsonBytes(`[`+`"alipay"`+`]`), int64(100), int64(2_000_000), true, 1).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "version", "gateway_url", "merchant_pid", "encrypted_key", "key_fingerprint", "payment_methods",
-			"minimum_usd_cents", "maximum_usd_cents", "exchange_rate_cny_cents_per_usd", "enabled", "created_at",
+			"minimum_cny_cents", "maximum_cny_cents", "enabled", "created_at",
 		}).AddRow(11, 3, "https://zpayz.cn", "1001", []byte("encrypted"),
-			"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", `["alipay"]`, 1000, 2_000_000, 720, true, createdAt))
+			"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", `["alipay"]`, 100, 2_000_000, true, createdAt))
 	mock.ExpectCommit()
 
 	store := NewSQLPaymentStore(database)
 	setting, err := store.CreatePaymentSetting(context.Background(), CreatePaymentSettingCommand{
 		AdminUserID: 1, GatewayURL: "https://zpayz.cn", MerchantPID: "1001", EncryptedKey: []byte("encrypted"),
 		KeyFingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		PaymentMethods: []string{"alipay"}, MinimumUSDCents: 1000, MaximumUSDCents: 2_000_000,
-		ExchangeRateCNYCentsPerUSD: 720, Enabled: true,
+		PaymentMethods: []string{"alipay"}, MinimumCNYCents: 100, MaximumCNYCents: 2_000_000, Enabled: true,
 	})
 	if err != nil || setting.ID != 11 || setting.Version != 3 || len(setting.PaymentMethods) != 1 {
 		t.Fatalf("支付配置=%+v，错误=%v", setting, err)
@@ -54,13 +53,13 @@ func TestCreatePaymentOrderPersistsLockedAmounts(t *testing.T) {
 	expiresAt := time.Date(2026, 7, 22, 9, 30, 0, 0, time.UTC)
 	createdAt := time.Date(2026, 7, 22, 9, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO payment_orders")).
-		WithArgs("MR202607220001", 7, int64(11), "alipay", int64(10_000), int64(72_000), int64(720), int64(50_000_000), expiresAt).
-		WillReturnRows(paymentOrderRows().AddRow(21, "MR202607220001", 7, 11, "alipay", 10_000, 72_000, 720, 50_000_000,
+		WithArgs("MR202607220001", 7, int64(11), "alipay", int64(10_000), int64(50_000_000), expiresAt).
+		WillReturnRows(paymentOrderRows().AddRow(21, "MR202607220001", 7, 11, "alipay", 10_000, 50_000_000,
 			"pending", "pending", nil, nil, nil, expiresAt, createdAt, createdAt))
 	store := NewSQLPaymentStore(database)
 	order, err := store.CreatePaymentOrder(context.Background(), CreatePaymentOrderCommand{
 		OrderNo: "MR202607220001", UserID: 7, SettingVersionID: 11, PaymentType: "alipay",
-		USDCents: 10_000, CNYCents: 72_000, ExchangeRateCNYCentsPerUSD: 720, NewAPIQuota: 50_000_000, ExpiresAt: expiresAt,
+		AmountCNYCents: 10_000, NewAPIQuota: 50_000_000, ExpiresAt: expiresAt,
 	})
 	if err != nil || order.ID != 21 || order.NewAPIQuota != 50_000_000 {
 		t.Fatalf("支付订单=%+v，错误=%v", order, err)
@@ -81,7 +80,7 @@ func TestAcceptPaymentCallbackCreatesOneCreditOperation(t *testing.T) {
 	createdAt := paidAt.Add(-5 * time.Minute)
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("FROM payment_orders WHERE order_no = $1 FOR UPDATE")).WithArgs("MR202607220001").
-		WillReturnRows(paymentOrderRows().AddRow(21, "MR202607220001", 7, 11, "alipay", 10_000, 72_000, 720, 50_000_000,
+		WillReturnRows(paymentOrderRows().AddRow(21, "MR202607220001", 7, 11, "alipay", 72_000, 50_000_000,
 			"pending", "pending", nil, nil, nil, expiresAt, createdAt, createdAt))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO payment_callback_events")).
 		WithArgs("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", int64(21), "EP202607220009", jsonBytes(`{"money":"720.00"}`), paidAt).
@@ -115,7 +114,7 @@ func TestAcceptPaymentCallbackTreatsSameTradeAsDuplicate(t *testing.T) {
 	now := time.Date(2026, 7, 22, 9, 5, 0, 0, time.UTC)
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("FROM payment_orders WHERE order_no = $1 FOR UPDATE")).WithArgs("MR202607220001").
-		WillReturnRows(paymentOrderRows().AddRow(21, "MR202607220001", 7, 11, "alipay", 10_000, 72_000, 720, 50_000_000,
+		WillReturnRows(paymentOrderRows().AddRow(21, "MR202607220001", 7, 11, "alipay", 72_000, 50_000_000,
 			"paid", "succeeded", "EP202607220009", now, now, now.Add(time.Hour), now.Add(-time.Minute), now))
 	mock.ExpectCommit()
 	store := NewSQLPaymentStore(database)
@@ -139,8 +138,8 @@ func (j jsonBytes) Match(value driver.Value) bool {
 
 func paymentOrderRows() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
-		"id", "order_no", "newapi_user_id", "setting_version_id", "payment_type", "usd_cents", "cny_cents",
-		"exchange_rate_cny_cents_per_usd", "newapi_quota", "payment_status", "credit_status", "third_party_trade_no",
+		"id", "order_no", "newapi_user_id", "setting_version_id", "payment_type", "amount_cny_cents",
+		"newapi_quota", "payment_status", "credit_status", "third_party_trade_no",
 		"paid_at", "credited_at", "expires_at", "created_at", "updated_at",
 	})
 }

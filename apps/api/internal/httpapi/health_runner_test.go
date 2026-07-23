@@ -52,7 +52,7 @@ func TestHealthRunnerMovesThirdTemporaryFailureIntoCooldown(t *testing.T) {
 	}))
 	defer upstream.Close()
 	repository := &healthRepositoryStub{probes: []HealthProbe{{
-		OfferID: 42, MerchantChannelID: 51, CanonicalModelID: 61, NewAPIChannelID: 41,
+		OfferChannelAliasID: 81, OfferID: 42, MerchantChannelID: 51, CanonicalModelID: 61, NewAPIChannelID: 41,
 		InternalAlias: "mkt-ov-42", Protocol: "responses", State: "healthy", ConsecutiveFailures: 2,
 	}}}
 	runner := NewHealthRunner(repository, probeTokenSourceStub{token: newapi.ProbeToken{ID: 77, Key: "sk-probe"}}, newapi.NewClient(upstream.URL, time.Second), &adminNewAPIStub{})

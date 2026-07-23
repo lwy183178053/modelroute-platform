@@ -21,7 +21,6 @@ func (s *server) createCanonicalModel(w http.ResponseWriter, r *http.Request) {
 		PublicName string        `json:"public_name"`
 		Provider   string        `json:"provider"`
 		Protocol   string        `json:"protocol"`
-		Lifecycle  string        `json:"lifecycle"`
 		Price      OfficialPrice `json:"price"`
 	}
 	if err := decodeJSON(r, &request); err != nil {
@@ -30,8 +29,8 @@ func (s *server) createCanonicalModel(w http.ResponseWriter, r *http.Request) {
 	}
 	command := CreateCanonicalModelCommand{
 		PublicName: strings.TrimSpace(request.PublicName), Provider: strings.TrimSpace(request.Provider),
-		Protocol: strings.TrimSpace(request.Protocol), Lifecycle: strings.TrimSpace(request.Lifecycle),
-		AdminID: session.UserID, Price: normalizeOfficialPrice(request.Price),
+		Protocol: strings.TrimSpace(request.Protocol), AdminID: session.UserID,
+		Price: normalizeOfficialPrice(request.Price),
 	}
 	if err := validateCanonicalModel(command); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_model_price", err.Error())
@@ -47,6 +46,73 @@ func (s *server) createCanonicalModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"success": true, "data": model})
+}
+
+func (s *server) detectCanonicalModel(w http.ResponseWriter, r *http.Request) {
+	_, session, ok := s.requireSession(w, r, roleAdmin)
+	if !ok || !s.requireSameOrigin(w, r) || !s.routingReady(w, false) {
+		return
+	}
+	if s.services.ChannelTests == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "model_detect_unavailable", "模型检测服务尚未就绪")
+		return
+	}
+	var request struct {
+		PublicName string `json:"public_name"`
+		Provider   string `json:"provider"`
+		Protocol   string `json:"protocol"`
+		BaseURL    string `json:"base_url"`
+		APIKey     string `json:"api_key"`
+	}
+	if err := decodeJSON(r, &request); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_model_detect", "模型检测参数无效")
+		return
+	}
+	model := CanonicalModel{
+		ID: 1, PublicName: strings.TrimSpace(request.PublicName), Provider: strings.TrimSpace(request.Provider),
+		Protocol: strings.TrimSpace(request.Protocol), Status: "active",
+	}
+	baseURL, err := normalizePublicHTTPSURL(request.BaseURL, false)
+	credential := strings.TrimSpace(request.APIKey)
+	if err != nil || validateModelDescriptor(model.PublicName, model.Provider, model.Protocol) != nil || len(credential) < 8 || len(credential) > 65536 {
+		writeAPIError(w, http.StatusBadRequest, "invalid_model_detect", "模型、基础地址或 API 密钥无效")
+		return
+	}
+	outcome, err := s.services.ChannelTests.Test(r.Context(), ChannelTestRequest{Model: model, BaseURL: baseURL, APIKey: credential})
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "model_detect_failed", "模型 hi 检测失败")
+		return
+	}
+	if err := s.recordAudit(r, session, "model.detect", 0, "success", model.PublicName); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "模型检测成功，但审计记录失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": outcome})
+}
+
+func (s *server) deleteCanonicalModel(w http.ResponseWriter, r *http.Request) {
+	_, session, ok := s.requireSession(w, r, roleAdmin)
+	if !ok || !s.requireSameOrigin(w, r) || !s.routingReady(w, false) {
+		return
+	}
+	modelID, ok := pathInt64(w, r, "id", "标准模型编号无效")
+	if !ok {
+		return
+	}
+	result, err := s.services.Routing.DeleteCanonicalModel(r.Context(), modelID)
+	if errors.Is(err, ErrRoutingNotFound) {
+		writeAPIError(w, http.StatusNotFound, "model_not_found", "标准模型不存在")
+		return
+	}
+	if err != nil {
+		writeAPIError(w, http.StatusConflict, "model_delete_failed", "标准模型当前无法删除或归档")
+		return
+	}
+	if err := s.recordAudit(r, session, "model.delete", int(modelID), "success", result); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "标准模型已处理，但审计记录失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]string{"result": result}})
 }
 
 func (s *server) models(w http.ResponseWriter, r *http.Request) {
@@ -108,12 +174,14 @@ func (s *server) createMerchantOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		MerchantChannelID int64 `json:"merchant_channel_id"`
-		CanonicalModelID  int64 `json:"canonical_model_id"`
-		MultiplierBPS     int   `json:"multiplier_bps"`
+		MultiplierBPS int `json:"multiplier_bps"`
 	}
-	if err := decodeJSON(r, &request); err != nil || request.MerchantChannelID <= 0 || request.CanonicalModelID <= 0 || request.MultiplierBPS < 1 || request.MultiplierBPS > 10_000 {
-		writeAPIError(w, http.StatusBadRequest, "invalid_offer", "报价倍率必须在 1 到 10000 基点之间")
+	modelID, ok := pathInt64(w, r, "model_id", "标准模型编号无效")
+	if !ok {
+		return
+	}
+	if err := decodeJSON(r, &request); err != nil || request.MultiplierBPS < 0 || request.MultiplierBPS > 50_000 {
+		writeAPIError(w, http.StatusBadRequest, "invalid_offer", "报价倍率必须在 0 到 50000 基点之间")
 		return
 	}
 	if s.services.OfferSync == nil {
@@ -121,9 +189,7 @@ func (s *server) createMerchantOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	offer, err := s.services.Routing.CreateOffer(r.Context(), CreateOfferCommand{
-		UserID: session.UserID, MerchantChannelID: request.MerchantChannelID,
-		CanonicalModelID: request.CanonicalModelID, MultiplierBPS: request.MultiplierBPS,
-		InternalAlias: newOfferAlias(),
+		UserID: session.UserID, CanonicalModelID: modelID, MultiplierBPS: request.MultiplierBPS,
 	})
 	if err != nil {
 		status := http.StatusConflict
@@ -135,7 +201,7 @@ func (s *server) createMerchantOffer(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, status, "offer_create_failed", message)
 		return
 	}
-	if err := s.services.OfferSync.SyncOffer(r.Context(), offer.ID, offer.MerchantChannelID); err != nil {
+	if err := s.services.OfferSync.SyncOffer(r.Context(), offer.ID); err != nil {
 		_ = s.services.Routing.MarkOfferSyncFailed(r.Context(), offer.ID, "New API 价格或渠道映射同步失败")
 		writeAPIError(w, http.StatusBadGateway, "offer_sync_failed", "报价未生效，New API 价格或渠道映射同步失败")
 		return
@@ -288,8 +354,8 @@ func validateRoutingPolicy(input RoutingPolicyInput) error {
 	if input.Priority != "price" && input.Priority != "stability" {
 		return errors.New("优先方式必须是价格优先或稳定性优先")
 	}
-	if input.MinimumMultiplierBPS < 1 || input.MaximumMultiplierBPS > 10_000 || input.MinimumMultiplierBPS > input.MaximumMultiplierBPS {
-		return errors.New("倍率区间必须在 1 到 10000 基点之间")
+	if input.MinimumMultiplierBPS < 0 || input.MaximumMultiplierBPS > 50_000 || input.MinimumMultiplierBPS > input.MaximumMultiplierBPS {
+		return errors.New("倍率区间必须在 0 到 50000 基点之间")
 	}
 	if input.Mode == "fixed" && len(uniqueInt64(input.MerchantIDs)) == 0 {
 		return errors.New("固定路由至少选择一个商户")
@@ -298,23 +364,25 @@ func validateRoutingPolicy(input RoutingPolicyInput) error {
 }
 
 func validateCanonicalModel(command CreateCanonicalModelCommand) error {
-	if command.PublicName == "" || len(command.PublicName) > 255 || strings.HasPrefix(command.PublicName, "mkt-ov-") || command.Provider == "" || len(command.Provider) > 80 {
+	if err := validateModelDescriptor(command.PublicName, command.Provider, command.Protocol); err != nil {
+		return err
+	}
+	return validateOfficialPrice(command.Price, command.Protocol)
+}
+
+func validateModelDescriptor(publicName string, provider string, protocol string) error {
+	if publicName == "" || len(publicName) > 255 || strings.HasPrefix(publicName, "mkt-ov-") || provider == "" || len(provider) > 80 {
 		return errors.New("模型名称或厂商无效")
 	}
-	if _, supported := supportedModelProviders[command.Provider]; !supported {
+	if _, supported := supportedModelProviders[provider]; !supported {
 		return errors.New("模型厂商不在平台支持范围")
 	}
-	switch command.Protocol {
-	case "chat_completions", "responses", "embeddings":
+	switch protocol {
+	case "chat_completions", "responses", "image_generation":
 	default:
-		return errors.New("模型协议不在首期开放范围")
+		return errors.New("模型协议不在平台开放范围")
 	}
-	switch command.Lifecycle {
-	case "stable", "preview", "limited", "retiring":
-	default:
-		return errors.New("模型生命周期无效")
-	}
-	return validateAbsolutePrice(command.Price, command.Protocol)
+	return nil
 }
 
 func newOfferAlias() string {

@@ -26,20 +26,16 @@ func TestScaledDecimalUsesIntegerArithmetic(t *testing.T) {
 	}
 }
 
-func TestNextProbeStateAppliesThreeFailuresAndRecoveryGate(t *testing.T) {
+func TestNextProbeStateAppliesThreeFailuresAndSingleRecoveryProbe(t *testing.T) {
 	now := time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC)
 	probe := HealthProbe{State: "healthy", ConsecutiveFailures: 2, CooldownLevel: 0}
 	failure := nextProbeState(probe, healthFailureTemporary, now, 0)
 	if failure.State != "cooling" || failure.CooldownLevel != 1 || !failure.NextProbeAt.Equal(now.Add(time.Minute)) {
 		t.Fatalf("第三次失败状态=%+v", failure)
 	}
-	firstRecovery := nextProbeState(HealthProbe{State: "cooling", CooldownLevel: 1}, healthFailureNone, now.Add(time.Minute), 0)
-	if firstRecovery.State != "recovering" || firstRecovery.RecoverySuccesses != 1 || !firstRecovery.NextProbeAt.Equal(now.Add(time.Minute+10*time.Second)) {
-		t.Fatalf("第一次恢复状态=%+v", firstRecovery)
-	}
-	secondRecovery := nextProbeState(HealthProbe{State: "recovering", CooldownLevel: 1, RecoverySuccesses: 1}, healthFailureNone, now.Add(time.Minute+10*time.Second), 0)
-	if secondRecovery.State != "healthy" || secondRecovery.RecoverySuccesses != 0 {
-		t.Fatalf("第二次恢复状态=%+v", secondRecovery)
+	recovered := nextProbeState(HealthProbe{State: "cooling", CooldownLevel: 1}, healthFailureNone, now.Add(time.Minute), 0)
+	if recovered.State != "healthy" || recovered.CooldownLevel != 0 || !recovered.NextProbeAt.IsZero() {
+		t.Fatalf("一次恢复探测后的状态=%+v", recovered)
 	}
 }
 
@@ -48,6 +44,17 @@ func TestNextProbeStateUsesEscalatingCooldownAndRetryAfter(t *testing.T) {
 	state := nextProbeState(HealthProbe{State: "recovering", CooldownLevel: 2}, healthFailureTemporary, now, 20*time.Minute)
 	if state.CooldownLevel != 3 || !state.NextProbeAt.Equal(now.Add(20*time.Minute)) {
 		t.Fatalf("升级冷却状态=%+v", state)
+	}
+}
+
+func TestCooldownCapsAtTwoHoursAndHealthyRequestsDoNotScheduleProbe(t *testing.T) {
+	if got := cooldownForLevel(6); got != 120*time.Minute {
+		t.Fatalf("第六档冷却=%s", got)
+	}
+	now := time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC)
+	healthy := nextProbeState(HealthProbe{State: "healthy"}, healthFailureNone, now, 0)
+	if !healthy.NextProbeAt.IsZero() {
+		t.Fatalf("健康请求安排了主动探活：%s", healthy.NextProbeAt)
 	}
 }
 

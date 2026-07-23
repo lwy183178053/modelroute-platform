@@ -82,9 +82,9 @@ func TestAdminCreatesEncryptedImmutablePaymentSetting(t *testing.T) {
 		return PaymentSetting{
 			ID: 11, Version: 1, GatewayURL: command.GatewayURL, MerchantPID: command.MerchantPID,
 			EncryptedKey: command.EncryptedKey, KeyFingerprint: command.KeyFingerprint,
-			PaymentMethods: command.PaymentMethods, MinimumUSDCents: command.MinimumUSDCents,
-			MaximumUSDCents: command.MaximumUSDCents, ExchangeRateCNYCentsPerUSD: command.ExchangeRateCNYCentsPerUSD,
-			Enabled: command.Enabled, CreatedAt: time.Date(2026, 7, 22, 9, 0, 0, 0, time.UTC),
+			PaymentMethods: command.PaymentMethods, MinimumCNYCents: command.MinimumCNYCents,
+			MaximumCNYCents: command.MaximumCNYCents,
+			Enabled:         command.Enabled, CreatedAt: time.Date(2026, 7, 22, 9, 0, 0, 0, time.UTC),
 		}, nil
 	}
 	services.Payments = repository
@@ -93,8 +93,8 @@ func TestAdminCreatesEncryptedImmutablePaymentSetting(t *testing.T) {
 	handler := NewServerWithServices("test", Dependencies{}, services)
 	request := httptest.NewRequest(http.MethodPut, "/api/admin/payment-settings", strings.NewReader(`{
 		"gateway_url":"https://zpayz.cn/","merchant_pid":"1001","merchant_key":"payment-secret",
-		"enabled":true,"payment_methods":["alipay","wxpay"],"minimum_usd_cents":1000,
-		"maximum_usd_cents":2000000,"exchange_rate_cny_cents_per_usd":720
+		"enabled":true,"payment_methods":["alipay","wxpay"],"minimum_cny_cents":100,
+		"maximum_cny_cents":2000000
 	}`))
 	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
@@ -130,8 +130,7 @@ func TestAdminKeepsExistingPIDAndKeyWhenRotationFieldsAreBlank(t *testing.T) {
 	handler := NewServerWithServices("test", Dependencies{}, services)
 	request := httptest.NewRequest(http.MethodPut, "/api/admin/payment-settings", strings.NewReader(`{
 		"gateway_url":"https://zpayz.cn","merchant_pid":"","merchant_key":"","enabled":true,
-		"payment_methods":["alipay"],"minimum_usd_cents":1000,"maximum_usd_cents":2000000,
-		"exchange_rate_cny_cents_per_usd":720
+		"payment_methods":["alipay"],"minimum_cny_cents":100,"maximum_cny_cents":2000000
 	}`))
 	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
@@ -142,7 +141,7 @@ func TestAdminKeepsExistingPIDAndKeyWhenRotationFieldsAreBlank(t *testing.T) {
 	}
 }
 
-func TestUserCreatesUSDRechargeOrderAndReceivesSignedPaymentURL(t *testing.T) {
+func TestUserCreatesCNYRechargeOrderAndReceivesSignedPaymentURL(t *testing.T) {
 	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	box := testCredentialBox(t)
 	encrypted, err := box.Encrypt([]byte("payment-secret"))
@@ -151,19 +150,18 @@ func TestUserCreatesUSDRechargeOrderAndReceivesSignedPaymentURL(t *testing.T) {
 	}
 	setting := PaymentSetting{
 		ID: 11, Version: 3, GatewayURL: "https://zpayz.cn", MerchantPID: "1001", EncryptedKey: encrypted,
-		PaymentMethods: []string{"alipay", "wxpay"}, MinimumUSDCents: 1000, MaximumUSDCents: 2000000,
-		ExchangeRateCNYCentsPerUSD: 720, Enabled: true,
+		PaymentMethods: []string{"alipay", "wxpay"}, MinimumCNYCents: 100, MaximumCNYCents: 2_000_000,
+		Enabled: true,
 	}
 	repository := &paymentRepositoryStub{}
 	repository.currentSetting = func(context.Context) (PaymentSetting, error) { return setting, nil }
 	repository.createOrder = func(_ context.Context, command CreatePaymentOrderCommand) (PaymentOrder, error) {
-		if command.UserID != 7 || command.SettingVersionID != 11 || command.USDCents != 10_000 || command.CNYCents != 72_000 || command.NewAPIQuota != 50_000_000 {
+		if command.UserID != 7 || command.SettingVersionID != 11 || command.AmountCNYCents != 10_000 || command.NewAPIQuota != 50_000_000 {
 			t.Fatalf("充值订单参数=%+v", command)
 		}
 		return PaymentOrder{
 			ID: 21, OrderNo: "MR202607220001", UserID: command.UserID, SettingVersionID: command.SettingVersionID,
-			PaymentType: command.PaymentType, USDCents: command.USDCents, CNYCents: command.CNYCents,
-			ExchangeRateCNYCentsPerUSD: command.ExchangeRateCNYCentsPerUSD, NewAPIQuota: command.NewAPIQuota,
+			PaymentType: command.PaymentType, AmountCNYCents: command.AmountCNYCents, NewAPIQuota: command.NewAPIQuota,
 			PaymentStatus: "pending", CreditStatus: "pending", ExpiresAt: command.ExpiresAt,
 		}, nil
 	}
@@ -171,7 +169,7 @@ func TestUserCreatesUSDRechargeOrderAndReceivesSignedPaymentURL(t *testing.T) {
 	services.Credentials = box
 	token := createPlatformSession(t, services, 7, 1)
 	handler := NewServerWithServices("test", Dependencies{}, services)
-	request := httptest.NewRequest(http.MethodPost, "/api/payment-orders", strings.NewReader(`{"usd_cents":10000,"payment_type":"alipay"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/payment-orders", strings.NewReader(`{"amount_cny_cents":10000,"payment_type":"alipay"}`))
 	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()
@@ -193,7 +191,7 @@ func TestUserCreatesUSDRechargeOrderAndReceivesSignedPaymentURL(t *testing.T) {
 		t.Fatalf("支付地址=%q，错误=%v", payload.Data.PaymentURL, err)
 	}
 	query := parsed.Query()
-	if query.Get("out_trade_no") != "MR202607220001" || query.Get("money") != "720.00" || query.Get("notify_url") != "https://aggregate.lwylink.xyz/api/payments/easypay/notify" {
+	if query.Get("out_trade_no") != "MR202607220001" || query.Get("money") != "100.00" || query.Get("notify_url") != "https://aggregate.lwylink.xyz/api/payments/easypay/notify" {
 		t.Fatalf("支付参数=%v", query)
 	}
 	if !verifyEasyPaySign(query, "payment-secret", query.Get("sign")) {
@@ -211,7 +209,7 @@ func TestEasyPayNotifyValidatesBeforeIdempotentAcceptance(t *testing.T) {
 	repository := &paymentRepositoryStub{}
 	repository.callbackContext = func(_ context.Context, orderNo string) (PaymentCallbackContext, error) {
 		return PaymentCallbackContext{
-			Order:   PaymentOrder{ID: 21, OrderNo: orderNo, PaymentType: "alipay", CNYCents: 72_000, PaymentStatus: "pending"},
+			Order:   PaymentOrder{ID: 21, OrderNo: orderNo, PaymentType: "alipay", AmountCNYCents: 72_000, PaymentStatus: "pending"},
 			Setting: PaymentSetting{ID: 11, MerchantPID: "1001", EncryptedKey: encrypted},
 		}, nil
 	}
@@ -285,7 +283,7 @@ func TestPaymentReadAPIsRespectUserOwnershipAndAdminRole(t *testing.T) {
 		return PaymentSetting{
 			ID: 11, Version: 3, GatewayURL: "https://zpayz.cn", MerchantPID: "1234567890",
 			EncryptedKey: []byte("encrypted-secret"), PaymentMethods: []string{"alipay"},
-			MinimumUSDCents: 1000, MaximumUSDCents: 2_000_000, ExchangeRateCNYCentsPerUSD: 720, Enabled: true,
+			MinimumCNYCents: 100, MaximumCNYCents: 2_000_000, Enabled: true,
 		}, nil
 	}
 	repository.ordersForUser = func(_ context.Context, userID int, page int, pageSize int) ([]PaymentOrder, int, error) {
@@ -319,7 +317,7 @@ func TestPaymentReadAPIsRespectUserOwnershipAndAdminRole(t *testing.T) {
 		want       string
 		forbidden  string
 	}{
-		{path: "/api/payment-settings", token: userToken, wantStatus: http.StatusOK, want: `"exchange_rate_cny_cents_per_usd":720`, forbidden: "1234567890"},
+		{path: "/api/payment-settings", token: userToken, wantStatus: http.StatusOK, want: `"minimum_cny_cents":100`, forbidden: "1234567890"},
 		{path: "/api/payment-orders", token: userToken, wantStatus: http.StatusOK, want: "MR-OWN"},
 		{path: "/api/payment-orders/MR-OWN", token: userToken, wantStatus: http.StatusOK, want: "MR-OWN"},
 		{path: "/api/admin/payment-settings", token: userToken, wantStatus: http.StatusForbidden},

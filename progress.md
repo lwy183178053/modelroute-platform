@@ -1303,3 +1303,75 @@
 - `docs/V2数据基线.md`：记录 V2 数据关系、健康、支付和回滚边界。
 - `progress.md`：追加本阶段实现、验证、文件清单和回滚点。
 - 回滚点：代码基线提交 `480487f`；本阶段提交后可执行 `git revert <本阶段提交>` 回退仓库改动。103 尚未执行 V2 重置，本阶段回退不涉及生产数据恢复。
+
+## 2026-07-23 - Task: 完成 V2 单模型渠道、报价、路由、健康、支付与模型种子后端
+
+### What was done
+
+- 商户渠道改为一个渠道绑定一个标准模型，新增 15 分钟 `hi` 自助检测凭证和管理员独立复检，自动保存厂商原生或 OpenAI 兼容适配器。
+- 报价改为“商户 + 模型”唯一版本，同模型多渠道分别生成内部别名；倍率统一为 `0..50000` 基点，文本与图片表达式均支持零倍率。
+- API 密钥创建后绑定独立路由策略，智能与固定商户路由区间统一为 `0.00x..5.00x`；公网增加图片生成并移除 Embeddings。
+- 健康渠道只由真实调用更新，连续三次临时故障后按 `1/5/15/30/60/120` 分钟冷却，到期只探测一次；硬故障直接停用。
+- 充值、余额、账本和运营金额统一为人民币显示口径，订单只保存人民币分和 New API 整数额度；外围分组倍率接口退出。
+- 官方模型种子升级为 `2026-07-23-v2`，收录 23 个对话和图片模型，绑定固定 New API 源码提交并校验官方证据域名。
+
+### Testing
+
+- 使用本地 `postgres:17-alpine` 测试容器清空后执行 `go test -p 1 -count=1 ./...`，所有 Go 单元与 PostgreSQL 集成测试通过。
+- 设置 `NEW_API_RC21_SOURCE_DIR` 后执行固定源码交集测试，源码 HEAD 与 `bde9b2f44887d34ec54799ae191d50f97914359e` 一致，23 个种子模型校验通过。
+- 执行 `go vet ./...`、`go build ./...`、`gofmt -l` 和 `git diff --check`，均通过。
+- 结构检查确认 V2 种子为 23 个模型、0 个 Embeddings、3 个图片模型；分组 GET/PUT 回归测试均锁定为 404。
+
+### Notes
+
+- `apps/api/internal/bootstrap/resources.go`：接入 New API 临时渠道检测服务。
+- `apps/api/internal/httpapi/absolute_pricing.go`：实现无币种文本阶梯、图片矩阵和零至五倍表达式。
+- `apps/api/internal/httpapi/absolute_pricing_test.go`：覆盖文本、缓存、图片和倍率边界。
+- `apps/api/internal/httpapi/channel_detector.go`：新增临时渠道 `hi` 检测与自动适配器选择。
+- `apps/api/internal/httpapi/channel_detector_test.go`：覆盖适配器回退、临时渠道清理和检测结果。
+- `apps/api/internal/httpapi/health_runner.go`：将冷却探测扩展到文本和图片协议。
+- `apps/api/internal/httpapi/health_runner_test.go`：锁定图片探测请求和单次恢复规则。
+- `apps/api/internal/httpapi/merchant_handlers.go`：接入短期检测凭证、单模型渠道和管理员复检。
+- `apps/api/internal/httpapi/merchant_handlers_test.go`：覆盖凭证、单模型提交、复检和响应隐藏。
+- `apps/api/internal/httpapi/merchant_store.go`：按商户与标准模型保存检测、渠道和唯一报价关系。
+- `apps/api/internal/httpapi/merchant_store_test.go`：覆盖渠道健康列表、商户隔离和单模型持久化。
+- `apps/api/internal/httpapi/merchant_types.go`：将商户请求与响应收敛为标准模型和自动适配器字段。
+- `apps/api/internal/httpapi/operations_handlers.go`：删除外围分组倍率处理器。
+- `apps/api/internal/httpapi/operations_handlers_test.go`：锁定分组接口不再暴露。
+- `apps/api/internal/httpapi/overview_store.go`：将运营金额换算为人民币口径。
+- `apps/api/internal/httpapi/overview_store_postgres_test.go`：覆盖人民币运营汇总与整数结算。
+- `apps/api/internal/httpapi/payment_domain.go`：改为人民币分直接换算 New API 额度。
+- `apps/api/internal/httpapi/payment_domain_test.go`：覆盖人民币金额解析和额度边界。
+- `apps/api/internal/httpapi/payment_handlers.go`：调整支付配置和订单 HTTP 契约。
+- `apps/api/internal/httpapi/payment_handlers_test.go`：覆盖人民币订单和无汇率响应。
+- `apps/api/internal/httpapi/payment_store.go`：持久化人民币金额、额度和精简支付设置。
+- `apps/api/internal/httpapi/payment_store_postgres_test.go`：覆盖真实 PostgreSQL 支付幂等与人民币字段。
+- `apps/api/internal/httpapi/payment_store_test.go`：更新支付仓储模拟契约。
+- `apps/api/internal/httpapi/payment_types.go`：删除美元和汇率类型字段。
+- `apps/api/internal/httpapi/pricing_sync.go`：按同模型多渠道同步文本或图片别名。
+- `apps/api/internal/httpapi/pricing_sync_test.go`：覆盖多渠道整体激活、图片表达式和失败补偿。
+- `apps/api/internal/httpapi/routing_domain.go`：实现零至五倍候选排序和六档冷却状态机。
+- `apps/api/internal/httpapi/routing_domain_test.go`：覆盖倍率、冷却、立即恢复和硬故障。
+- `apps/api/internal/httpapi/routing_handlers.go`：调整模型、报价与密钥策略接口。
+- `apps/api/internal/httpapi/routing_handlers_test.go`：覆盖唯一报价、密钥策略和协议白名单。
+- `apps/api/internal/httpapi/routing_proxy.go`：支持图片生成入口和渠道级健康观察。
+- `apps/api/internal/httpapi/routing_proxy_test.go`：覆盖图片代理、首字节切换和内部别名隐藏。
+- `apps/api/internal/httpapi/routing_store.go`：重写 V2 单模型报价、候选、冷却任务和人民币查询。
+- `apps/api/internal/httpapi/routing_store_postgres_test.go`：覆盖真实数据库的唯一报价、多渠道和冷却筛选。
+- `apps/api/internal/httpapi/routing_store_test.go`：更新路由仓储模拟与 SQL 契约。
+- `apps/api/internal/httpapi/server.go`：注册渠道检测、模型删除和图片生成，移除 Embeddings。
+- `apps/api/internal/httpapi/services.go`：增加渠道检测服务依赖。
+- `apps/api/internal/httpapi/settlement_store.go`：按渠道级别名维持结算归属并使用人民币展示口径。
+- `apps/api/internal/httpapi/settlement_store_postgres_test.go`：覆盖 V2 别名结算、退款和公开模型名。
+- `apps/api/internal/migrations/sql/000001_v2_baseline.sql`：补齐 V2 单模型渠道和报价约束。
+- `apps/api/internal/modelseed/apply.go`：移除生命周期比较并支持文本或图片价格幂等导入。
+- `apps/api/internal/modelseed/apply_test.go`：覆盖 V2 种子创建、重复和调价追加。
+- `apps/api/internal/modelseed/catalog.go`：切换 V2 种子并校验厂商官方证据域名。
+- `apps/api/internal/modelseed/catalog_test.go`：锁定 23 模型、三协议、关键模型和价格边界。
+- `apps/api/internal/modelseed/data/2026-07-23-v1.json`：删除旧 21 模型、Embeddings 和汇率种子。
+- `apps/api/internal/modelseed/data/2026-07-23-v2.json`：新增 23 个对话与图片模型及官方证据。
+- `apps/api/internal/modelseed/repository_postgres_test.go`：更新 V2 种子真实数据库幂等数量。
+- `apps/api/internal/modelseed/support_rc21.go`：固化 V2 模型与固定 New API 支持交集。
+- `apps/api/internal/modelseed/support_rc21_external_test.go`：增加源码 HEAD 校验并核对默认清单。
+- `progress.md`：追加本阶段实现、验证、文件清单和回滚点。
+- 回滚点：前一提交为 `e26e125`；执行 `git revert <本阶段提交>` 可回退后端代码。103 尚未重置，当前阶段回退不涉及生产数据；生产执行 V2 重置后须恢复同一备份点的平台库、New API 库、Redis 和受限配置。

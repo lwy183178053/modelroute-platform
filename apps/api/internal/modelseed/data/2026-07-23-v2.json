@@ -1,0 +1,246 @@
+{
+  "version": "2026-07-23-v2",
+  "new_api_version": "v1.0.0-rc.21",
+  "new_api_source_commit": "bde9b2f44887d34ec54799ae191d50f97914359e",
+  "models": [
+    {
+      "public_name": "gpt-5.6-sol",
+      "provider": "OpenAI",
+      "protocol": "responses",
+      "evidence_url": "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": 272000, "input_price_micros": 5000000, "output_price_micros": 30000000, "cache_read_price_micros": 500000 },
+        { "minimum_input_tokens": 272001, "maximum_input_tokens": null, "input_price_micros": 10000000, "output_price_micros": 45000000, "cache_read_price_micros": 1000000 }
+      ] }
+    },
+    {
+      "public_name": "gpt-5.6-terra",
+      "provider": "OpenAI",
+      "protocol": "responses",
+      "evidence_url": "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": 272000, "input_price_micros": 2500000, "output_price_micros": 15000000, "cache_read_price_micros": 250000 },
+        { "minimum_input_tokens": 272001, "maximum_input_tokens": null, "input_price_micros": 5000000, "output_price_micros": 22500000, "cache_read_price_micros": 500000 }
+      ] }
+    },
+    {
+      "public_name": "gpt-5.6-luna",
+      "provider": "OpenAI",
+      "protocol": "responses",
+      "evidence_url": "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": 272000, "input_price_micros": 1000000, "output_price_micros": 6000000, "cache_read_price_micros": 100000 },
+        { "minimum_input_tokens": 272001, "maximum_input_tokens": null, "input_price_micros": 2000000, "output_price_micros": 9000000, "cache_read_price_micros": 200000 }
+      ] }
+    },
+    {
+      "public_name": "gpt-5.5",
+      "provider": "OpenAI",
+      "protocol": "responses",
+      "evidence_url": "https://developers.openai.com/api/docs/models/gpt-5.5",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": 272000, "input_price_micros": 5000000, "output_price_micros": 30000000, "cache_read_price_micros": 500000 },
+        { "minimum_input_tokens": 272001, "maximum_input_tokens": null, "input_price_micros": 10000000, "output_price_micros": 45000000, "cache_read_price_micros": 1000000 }
+      ] }
+    },
+    {
+      "public_name": "gpt-5.4",
+      "provider": "OpenAI",
+      "protocol": "responses",
+      "evidence_url": "https://developers.openai.com/api/docs/models/gpt-5.4",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": 272000, "input_price_micros": 2500000, "output_price_micros": 15000000, "cache_read_price_micros": 250000 },
+        { "minimum_input_tokens": 272001, "maximum_input_tokens": null, "input_price_micros": 5000000, "output_price_micros": 22500000, "cache_read_price_micros": 500000 }
+      ] }
+    },
+    {
+      "public_name": "gpt-image-1",
+      "provider": "OpenAI",
+      "protocol": "image_generation",
+      "evidence_url": "https://developers.openai.com/api/docs/guides/image-generation#image-generation-costs",
+      "price": { "image_prices": [
+        { "quality": "low", "size": "1024x1024", "price_micros": 11000 },
+        { "quality": "low", "size": "1024x1536", "price_micros": 16000 },
+        { "quality": "low", "size": "1536x1024", "price_micros": 16000 },
+        { "quality": "medium", "size": "1024x1024", "price_micros": 42000 },
+        { "quality": "medium", "size": "1024x1536", "price_micros": 63000 },
+        { "quality": "medium", "size": "1536x1024", "price_micros": 63000 },
+        { "quality": "high", "size": "1024x1024", "price_micros": 167000 },
+        { "quality": "high", "size": "1024x1536", "price_micros": 250000 },
+        { "quality": "high", "size": "1536x1024", "price_micros": 250000 }
+      ] }
+    },
+    {
+      "public_name": "gpt-image-1.5",
+      "provider": "OpenAI",
+      "protocol": "image_generation",
+      "evidence_url": "https://developers.openai.com/api/docs/guides/image-generation#image-generation-costs",
+      "price": { "image_prices": [
+        { "quality": "low", "size": "1024x1024", "price_micros": 9000 },
+        { "quality": "low", "size": "1024x1536", "price_micros": 13000 },
+        { "quality": "low", "size": "1536x1024", "price_micros": 13000 },
+        { "quality": "medium", "size": "1024x1024", "price_micros": 34000 },
+        { "quality": "medium", "size": "1024x1536", "price_micros": 50000 },
+        { "quality": "medium", "size": "1536x1024", "price_micros": 50000 },
+        { "quality": "high", "size": "1024x1024", "price_micros": 133000 },
+        { "quality": "high", "size": "1024x1536", "price_micros": 200000 },
+        { "quality": "high", "size": "1536x1024", "price_micros": 200000 }
+      ] }
+    },
+    {
+      "public_name": "gpt-image-2",
+      "provider": "OpenAI",
+      "protocol": "image_generation",
+      "evidence_url": "https://developers.openai.com/api/docs/guides/image-generation#image-generation-costs",
+      "price": { "image_prices": [
+        { "quality": "low", "size": "1024x1024", "price_micros": 6000 },
+        { "quality": "low", "size": "1024x1536", "price_micros": 5000 },
+        { "quality": "low", "size": "1536x1024", "price_micros": 5000 },
+        { "quality": "medium", "size": "1024x1024", "price_micros": 53000 },
+        { "quality": "medium", "size": "1024x1536", "price_micros": 41000 },
+        { "quality": "medium", "size": "1536x1024", "price_micros": 41000 },
+        { "quality": "high", "size": "1024x1024", "price_micros": 211000 },
+        { "quality": "high", "size": "1024x1536", "price_micros": 165000 },
+        { "quality": "high", "size": "1536x1024", "price_micros": 165000 }
+      ] }
+    },
+    {
+      "public_name": "claude-opus-4-8",
+      "provider": "Anthropic",
+      "protocol": "chat_completions",
+      "evidence_url": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 5000000, "output_price_micros": 25000000, "cache_read_price_micros": 500000, "cache_write_price_micros": 6250000 }
+      ] }
+    },
+    {
+      "public_name": "claude-sonnet-4-6",
+      "provider": "Anthropic",
+      "protocol": "chat_completions",
+      "evidence_url": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 3000000, "output_price_micros": 15000000, "cache_read_price_micros": 300000, "cache_write_price_micros": 3750000 }
+      ] }
+    },
+    {
+      "public_name": "claude-haiku-4-5-20251001",
+      "provider": "Anthropic",
+      "protocol": "chat_completions",
+      "evidence_url": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 1000000, "output_price_micros": 5000000, "cache_read_price_micros": 100000, "cache_write_price_micros": 1250000 }
+      ] }
+    },
+    {
+      "public_name": "gemini-3.1-pro-preview",
+      "provider": "Gemini",
+      "protocol": "chat_completions",
+      "evidence_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": 200000, "input_price_micros": 2000000, "output_price_micros": 12000000, "cache_read_price_micros": 200000 },
+        { "minimum_input_tokens": 200001, "maximum_input_tokens": null, "input_price_micros": 4000000, "output_price_micros": 18000000, "cache_read_price_micros": 400000 }
+      ] }
+    },
+    {
+      "public_name": "gemini-3-flash-preview",
+      "provider": "Gemini",
+      "protocol": "chat_completions",
+      "evidence_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 500000, "output_price_micros": 3000000, "cache_read_price_micros": 50000 }
+      ] }
+    },
+    {
+      "public_name": "gemini-2.5-pro",
+      "provider": "Gemini",
+      "protocol": "chat_completions",
+      "evidence_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": 200000, "input_price_micros": 1250000, "output_price_micros": 10000000, "cache_read_price_micros": 125000 },
+        { "minimum_input_tokens": 200001, "maximum_input_tokens": null, "input_price_micros": 2500000, "output_price_micros": 15000000, "cache_read_price_micros": 250000 }
+      ] }
+    },
+    {
+      "public_name": "gemini-2.5-flash",
+      "provider": "Gemini",
+      "protocol": "chat_completions",
+      "evidence_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 300000, "output_price_micros": 2500000, "cache_read_price_micros": 30000 }
+      ] }
+    },
+    {
+      "public_name": "gemini-2.5-flash-lite",
+      "provider": "Gemini",
+      "protocol": "chat_completions",
+      "evidence_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 100000, "output_price_micros": 400000, "cache_read_price_micros": 10000 }
+      ] }
+    },
+    {
+      "public_name": "deepseek-v4-flash",
+      "provider": "DeepSeek",
+      "protocol": "chat_completions",
+      "evidence_url": "https://api-docs.deepseek.com/quick_start/pricing",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 140000, "output_price_micros": 280000, "cache_read_price_micros": 2800 }
+      ] }
+    },
+    {
+      "public_name": "deepseek-v4-pro",
+      "provider": "DeepSeek",
+      "protocol": "chat_completions",
+      "evidence_url": "https://api-docs.deepseek.com/quick_start/pricing",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 435000, "output_price_micros": 870000, "cache_read_price_micros": 3625 }
+      ] }
+    },
+    {
+      "public_name": "qwen-max",
+      "provider": "Qwen",
+      "protocol": "chat_completions",
+      "evidence_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 1600000, "output_price_micros": 6400000 }
+      ] }
+    },
+    {
+      "public_name": "kimi-k3",
+      "provider": "Moonshot",
+      "protocol": "chat_completions",
+      "evidence_url": "https://platform.kimi.com/docs/pricing/chat-k3",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 20000000, "output_price_micros": 100000000, "cache_read_price_micros": 2000000 }
+      ] }
+    },
+    {
+      "public_name": "MiniMax-M3",
+      "provider": "Minimax",
+      "protocol": "chat_completions",
+      "evidence_url": "https://platform.minimaxi.com/docs/guides/pricing-paygo",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": 512000, "input_price_micros": 2100000, "output_price_micros": 8400000, "cache_read_price_micros": 420000 },
+        { "minimum_input_tokens": 512001, "maximum_input_tokens": null, "input_price_micros": 4200000, "output_price_micros": 16800000, "cache_read_price_micros": 840000 }
+      ] }
+    },
+    {
+      "public_name": "MiniMax-M2.7",
+      "provider": "Minimax",
+      "protocol": "chat_completions",
+      "evidence_url": "https://platform.minimaxi.com/docs/guides/pricing-paygo",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 2100000, "output_price_micros": 8400000, "cache_read_price_micros": 420000, "cache_write_price_micros": 2625000 }
+      ] }
+    },
+    {
+      "public_name": "MiniMax-M2.7-highspeed",
+      "provider": "Minimax",
+      "protocol": "chat_completions",
+      "evidence_url": "https://platform.minimaxi.com/docs/guides/pricing-paygo",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 4200000, "output_price_micros": 16800000, "cache_read_price_micros": 420000, "cache_write_price_micros": 2625000 }
+      ] }
+    }
+  ]
+}

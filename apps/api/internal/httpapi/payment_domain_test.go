@@ -8,33 +8,30 @@ import (
 func TestPaymentAmountUsesIntegerArithmetic(t *testing.T) {
 	tests := []struct {
 		name      string
-		usdCents  int64
-		rate      int64
-		wantCNY   int64
+		cnyCents  int64
 		wantQuota int64
 	}{
-		{name: "整美元", usdCents: 10_000, rate: 720, wantCNY: 72_000, wantQuota: 50_000_000},
-		{name: "分币四舍五入", usdCents: 101, rate: 723, wantCNY: 730, wantQuota: 505_000},
+		{name: "一元", cnyCents: 100, wantQuota: 500_000},
+		{name: "一分", cnyCents: 1, wantQuota: 5_000},
+		{name: "任意整数分", cnyCents: 12_345, wantQuota: 61_725_000},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			cnyCents, quota, err := paymentAmounts(test.usdCents, test.rate)
+			quota, err := paymentQuota(test.cnyCents)
 			if err != nil {
 				t.Fatalf("计算支付金额失败：%v", err)
 			}
-			if cnyCents != test.wantCNY || quota != test.wantQuota {
-				t.Fatalf("人民币分=%d，额度=%d", cnyCents, quota)
+			if quota != test.wantQuota {
+				t.Fatalf("人民币分=%d，额度=%d", test.cnyCents, quota)
 			}
 		})
 	}
 }
 
 func TestPaymentAmountRejectsInvalidOrOverflowingValues(t *testing.T) {
-	for _, input := range []struct{ usdCents, rate int64 }{
-		{0, 720}, {-1, 720}, {100, 0}, {1 << 62, 720},
-	} {
-		if _, _, err := paymentAmounts(input.usdCents, input.rate); err == nil {
-			t.Fatalf("应拒绝 usd_cents=%d rate=%d", input.usdCents, input.rate)
+	for _, input := range []int64{0, -1, 1 << 62} {
+		if _, err := paymentQuota(input); err == nil {
+			t.Fatalf("应拒绝 amount_cny_cents=%d", input)
 		}
 	}
 }

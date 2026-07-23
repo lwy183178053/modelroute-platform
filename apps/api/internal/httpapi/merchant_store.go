@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +20,33 @@ type SQLMerchantStore struct {
 
 func NewSQLMerchantStore(database *sql.DB) *SQLMerchantStore {
 	return &SQLMerchantStore{database: database}
+}
+
+func (s *SQLMerchantStore) SaveChannelTest(ctx context.Context, command CreateChannelTest) (ChannelTest, error) {
+	capabilities, err := json.Marshal(command.Capabilities)
+	if err != nil {
+		return ChannelTest{}, fmt.Errorf("编码渠道检测能力：%w", err)
+	}
+	result := ChannelTest{
+		CanonicalModelID: command.CanonicalModelID,
+		AdapterType:      command.AdapterType,
+		Capabilities:     append([]string(nil), command.Capabilities...),
+		LatencyMS:        command.LatencyMS,
+		ExpiresAt:        command.ExpiresAt,
+	}
+	err = s.database.QueryRowContext(ctx, `
+INSERT INTO merchant_channel_tests
+    (newapi_user_id, canonical_model_id, base_url, credential_fingerprint,
+     adapter_type, capabilities, latency_ms, receipt_token_hash, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, expires_at
+`, command.UserID, command.CanonicalModelID, command.BaseURL, command.CredentialFingerprint,
+		command.AdapterType, capabilities, command.LatencyMS, command.ReceiptTokenHash, command.ExpiresAt,
+	).Scan(&result.ID, &result.ExpiresAt)
+	if err != nil {
+		return ChannelTest{}, fmt.Errorf("保存渠道检测结果：%w", err)
+	}
+	return result, nil
 }
 
 func (s *SQLMerchantStore) Identity(ctx context.Context, userID int) (MerchantIdentity, error) {
@@ -69,15 +98,15 @@ RETURNING id, newapi_user_id, display_name, status, is_platform_owned, created_a
 }
 
 func (s *SQLMerchantStore) CreateApplication(ctx context.Context, command CreateMerchantApplication) (MerchantApplication, error) {
-	models, err := json.Marshal(command.Channel.Models)
-	if err != nil {
-		return MerchantApplication{}, fmt.Errorf("编码拟售模型：%w", err)
-	}
 	tx, err := s.database.BeginTx(ctx, nil)
 	if err != nil {
 		return MerchantApplication{}, fmt.Errorf("开始商户申请事务：%w", err)
 	}
 	defer tx.Rollback()
+	test, err := claimChannelTest(ctx, tx, command.UserID, command.Channel)
+	if err != nil {
+		return MerchantApplication{}, err
+	}
 
 	application := MerchantApplication{
 		UserID: command.UserID, DisplayName: command.DisplayName, WebsiteURL: command.WebsiteURL,
@@ -95,17 +124,19 @@ RETURNING id, created_at
 
 	review := MerchantChannelReview{
 		UserID: command.UserID, ApplicationID: application.ID, ChannelName: command.Channel.ChannelName,
-		ChannelType: command.Channel.ChannelType, BaseURL: command.Channel.BaseURL, RequestedModels: command.Channel.Models,
-		Status: "pending", CredentialConfigured: true,
+		CanonicalModelID: command.Channel.CanonicalModelID, Model: test.Model, Provider: test.Provider,
+		Protocol: test.Protocol, AdapterType: test.AdapterType, ChannelTestID: test.ID,
+		BaseURL: command.Channel.BaseURL, Status: "pending", CredentialConfigured: true,
 	}
 	err = tx.QueryRowContext(ctx, `
 INSERT INTO merchant_channel_reviews
-    (merchant_newapi_user_id, application_id, channel_name, channel_type, base_url,
-     requested_models, encrypted_credential, credential_fingerprint)
-VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
+    (merchant_newapi_user_id, application_id, canonical_model_id, channel_test_id,
+     channel_name, base_url, adapter_type, encrypted_credential, credential_fingerprint)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING id, created_at
-`, command.UserID, application.ID, command.Channel.ChannelName, command.Channel.ChannelType,
-		command.Channel.BaseURL, models, command.Channel.EncryptedCredential, command.Channel.CredentialFingerprint,
+`, command.UserID, application.ID, command.Channel.CanonicalModelID, test.ID,
+		command.Channel.ChannelName, command.Channel.BaseURL, test.AdapterType,
+		command.Channel.EncryptedCredential, command.Channel.CredentialFingerprint,
 	).Scan(&review.ID, &review.CreatedAt)
 	if err != nil {
 		return MerchantApplication{}, merchantStoreError(err)
@@ -135,24 +166,32 @@ WHERE a.id = $1
 }
 
 func (s *SQLMerchantStore) CreateChannelReview(ctx context.Context, command CreateMerchantChannel) (MerchantChannelReview, error) {
-	models, err := json.Marshal(command.Channel.Models)
+	tx, err := s.database.BeginTx(ctx, nil)
 	if err != nil {
-		return MerchantChannelReview{}, fmt.Errorf("编码拟售模型：%w", err)
+		return MerchantChannelReview{}, fmt.Errorf("开始渠道审核事务：%w", err)
+	}
+	defer tx.Rollback()
+	test, err := claimChannelTest(ctx, tx, command.UserID, command.Channel)
+	if err != nil {
+		return MerchantChannelReview{}, err
 	}
 	review := MerchantChannelReview{
-		UserID: command.UserID, ChannelName: command.Channel.ChannelName, ChannelType: command.Channel.ChannelType,
-		BaseURL: command.Channel.BaseURL, RequestedModels: command.Channel.Models, Status: "pending", CredentialConfigured: true,
+		UserID: command.UserID, ChannelName: command.Channel.ChannelName,
+		CanonicalModelID: command.Channel.CanonicalModelID, Model: test.Model, Provider: test.Provider,
+		Protocol: test.Protocol, AdapterType: test.AdapterType, ChannelTestID: test.ID,
+		BaseURL: command.Channel.BaseURL, Status: "pending", CredentialConfigured: true,
 	}
-	err = s.database.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 INSERT INTO merchant_channel_reviews
-    (merchant_profile_id, merchant_newapi_user_id, channel_name, channel_type, base_url,
-     requested_models, encrypted_credential, credential_fingerprint)
-SELECT id, $1, $2, $3, $4, $5::jsonb, $6, $7
+    (merchant_profile_id, merchant_newapi_user_id, canonical_model_id, channel_test_id,
+     channel_name, base_url, adapter_type, encrypted_credential, credential_fingerprint)
+SELECT id, $1, $2, $3, $4, $5, $6, $7, $8
 FROM merchant_profiles
 WHERE newapi_user_id = $1 AND status = 'active'
 RETURNING id, created_at
-`, command.UserID, command.Channel.ChannelName, command.Channel.ChannelType, command.Channel.BaseURL,
-		models, command.Channel.EncryptedCredential, command.Channel.CredentialFingerprint,
+`, command.UserID, command.Channel.CanonicalModelID, test.ID, command.Channel.ChannelName,
+		command.Channel.BaseURL, test.AdapterType, command.Channel.EncryptedCredential,
+		command.Channel.CredentialFingerprint,
 	).Scan(&review.ID, &review.CreatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -160,7 +199,46 @@ RETURNING id, created_at
 		}
 		return MerchantChannelReview{}, merchantStoreError(err)
 	}
+	if err := tx.Commit(); err != nil {
+		return MerchantChannelReview{}, fmt.Errorf("提交渠道审核事务：%w", err)
+	}
 	return review, nil
+}
+
+type claimedChannelTest struct {
+	ID          int64
+	AdapterType string
+	Model       string
+	Provider    string
+	Protocol    string
+}
+
+func claimChannelTest(ctx context.Context, tx *sql.Tx, userID int, channel ChannelSubmission) (claimedChannelTest, error) {
+	digest := sha256.Sum256([]byte(channel.TestReceipt))
+	receiptHash := hex.EncodeToString(digest[:])
+	var result claimedChannelTest
+	err := tx.QueryRowContext(ctx, `
+SELECT t.id, t.adapter_type, cm.public_name, cm.provider, cm.protocol
+FROM merchant_channel_tests t
+JOIN canonical_models cm ON cm.id = t.canonical_model_id
+WHERE t.receipt_token_hash = $1 AND t.newapi_user_id = $2
+  AND t.canonical_model_id = $3 AND t.base_url = $4
+  AND t.credential_fingerprint = $5 AND t.expires_at > now()
+  AND t.consumed_at IS NULL AND cm.status = 'active'
+FOR UPDATE OF t
+`, receiptHash, userID, channel.CanonicalModelID, channel.BaseURL, channel.CredentialFingerprint).Scan(
+		&result.ID, &result.AdapterType, &result.Model, &result.Provider, &result.Protocol,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return claimedChannelTest{}, ErrMerchantInvalidState
+	}
+	if err != nil {
+		return claimedChannelTest{}, fmt.Errorf("校验渠道检测凭证：%w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE merchant_channel_tests SET consumed_at = now() WHERE id = $1`, result.ID); err != nil {
+		return claimedChannelTest{}, fmt.Errorf("使用渠道检测凭证：%w", err)
+	}
+	return result, nil
 }
 
 func (s *SQLMerchantStore) ChannelsForUser(ctx context.Context, userID int) ([]MerchantChannel, error) {
@@ -176,8 +254,8 @@ ORDER BY c.id DESC
 
 func (s *SQLMerchantStore) ChannelReviewsForUser(ctx context.Context, userID int) ([]MerchantChannelReview, error) {
 	rows, err := s.database.QueryContext(ctx, reviewSelect+`
-WHERE merchant_newapi_user_id = $1
-ORDER BY id DESC
+WHERE r.merchant_newapi_user_id = $1
+ORDER BY r.id DESC
 `, userID)
 	if err != nil {
 		return nil, fmt.Errorf("查询商户渠道审核：%w", err)
@@ -243,8 +321,8 @@ func (s *SQLMerchantStore) ListChannelReviews(ctx context.Context, page int, pag
 		return nil, 0, fmt.Errorf("统计渠道审核：%w", err)
 	}
 	rows, err := s.database.QueryContext(ctx, reviewSelect+`
-WHERE ($1 = '' OR status = $1)
-ORDER BY id DESC
+WHERE ($1 = '' OR r.status = $1)
+ORDER BY r.id DESC
 LIMIT $2 OFFSET $3
 `, status, pageSize, (page-1)*pageSize)
 	if err != nil {
@@ -342,11 +420,13 @@ WITH claimed AS (
     FROM claimed
     WHERE a.id = claimed.application_id
 )
-SELECT id, merchant_newapi_user_id, COALESCE(application_id, 0), COALESCE(replaces_channel_id, 0),
-       channel_name, channel_type, base_url, requested_models, encrypted_credential,
-       credential_fingerprint, status, COALESCE(verified_models, '[]'::jsonb),
-       COALESCE(verification_error, ''), COALESCE(review_reason, ''), verified_at, reviewed_at, created_at
-FROM claimed
+SELECT c.id, c.merchant_newapi_user_id, COALESCE(c.application_id, 0), COALESCE(c.replaces_channel_id, 0),
+	   c.channel_name, c.canonical_model_id, cm.public_name, cm.provider, cm.protocol,
+	   c.channel_test_id, c.adapter_type, c.base_url, c.encrypted_credential,
+	   c.credential_fingerprint, c.status, COALESCE(c.verification_error, ''),
+	   COALESCE(c.review_reason, ''), c.verified_at, c.reviewed_at, c.created_at
+FROM claimed c
+JOIN canonical_models cm ON cm.id = c.canonical_model_id
 `
 	review, err := scanMerchantReview(s.database.QueryRowContext(ctx, query, reviewID))
 	if errors.Is(err, ErrMerchantNotFound) {
@@ -355,20 +435,16 @@ FROM claimed
 	return review, err
 }
 
-func (s *SQLMerchantStore) FinishVerification(ctx context.Context, reviewID int64, adminID int, models []string, failure string) error {
-	encodedModels, err := json.Marshal(models)
-	if err != nil {
-		return fmt.Errorf("编码验证模型：%w", err)
-	}
+func (s *SQLMerchantStore) FinishVerification(ctx context.Context, reviewID int64, adminID int, adapterType string, failure string) error {
 	status := "verified"
 	if failure != "" {
 		status = "pending"
 	}
 	var returnedID int64
-	err = s.database.QueryRowContext(ctx, `
+	err := s.database.QueryRowContext(ctx, `
 WITH updated AS (
     UPDATE merchant_channel_reviews
-    SET status = $1, verified_models = $2::jsonb, verification_error = NULLIF($3, ''),
+	SET status = $1, adapter_type = CASE WHEN $2 = '' THEN adapter_type ELSE $2 END, verification_error = NULLIF($3, ''),
         verified_by_newapi_user_id = $4, verified_at = now(), updated_at = now()
     WHERE id = $5 AND status = 'verifying'
     RETURNING id, application_id
@@ -379,7 +455,7 @@ WITH updated AS (
     WHERE a.id = updated.application_id
 )
 SELECT id FROM updated
-`, status, encodedModels, failure, adminID, reviewID).Scan(&returnedID)
+`, status, adapterType, failure, adminID, reviewID).Scan(&returnedID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrMerchantInvalidState
 	}
@@ -396,23 +472,23 @@ func (s *SQLMerchantStore) FinishApproval(ctx context.Context, reviewID int64, a
 	}
 	defer tx.Rollback()
 	var review struct {
-		ID, ApplicationID       int64
-		UserID, ChannelType     int
-		ChannelName, BaseURL    string
-		Models                  []byte
-		Fingerprint             string
-		DisplayName, WebsiteURL string
+		ID, ApplicationID, CanonicalModelID int64
+		UserID                              int
+		ChannelName, BaseURL, AdapterType   string
+		Fingerprint                         string
+		DisplayName, WebsiteURL             string
 	}
 	err = tx.QueryRowContext(ctx, `
 SELECT r.id, r.merchant_newapi_user_id, COALESCE(r.application_id, 0),
-       r.channel_name, r.channel_type, r.base_url, r.requested_models,
+	   r.canonical_model_id, r.channel_name, r.base_url, r.adapter_type,
        r.credential_fingerprint, COALESCE(a.display_name, ''), COALESCE(a.website_url, '')
 FROM merchant_channel_reviews r
 LEFT JOIN merchant_applications a ON a.id = r.application_id
 WHERE r.id = $1 AND r.status = 'approving' AND r.encrypted_credential IS NOT NULL
 FOR UPDATE OF r
-`, reviewID).Scan(&review.ID, &review.UserID, &review.ApplicationID, &review.ChannelName, &review.ChannelType,
-		&review.BaseURL, &review.Models, &review.Fingerprint, &review.DisplayName, &review.WebsiteURL)
+`, reviewID).Scan(&review.ID, &review.UserID, &review.ApplicationID, &review.CanonicalModelID,
+		&review.ChannelName, &review.BaseURL, &review.AdapterType, &review.Fingerprint,
+		&review.DisplayName, &review.WebsiteURL)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return MerchantApproval{}, ErrMerchantInvalidState
@@ -443,14 +519,17 @@ RETURNING id
 	var channelID int64
 	err = tx.QueryRowContext(ctx, `
 INSERT INTO merchant_channels
-    (merchant_profile_id, review_id, newapi_channel_id, channel_name, channel_type,
-     base_url, models, credential_fingerprint)
-VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+	(merchant_profile_id, review_id, canonical_model_id, newapi_channel_id,
+	 channel_name, base_url, adapter_type, credential_fingerprint)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING id
-`, merchantID, review.ID, newAPIChannelID, review.ChannelName, review.ChannelType,
-		review.BaseURL, review.Models, review.Fingerprint).Scan(&channelID)
+`, merchantID, review.ID, review.CanonicalModelID, newAPIChannelID, review.ChannelName,
+		review.BaseURL, review.AdapterType, review.Fingerprint).Scan(&channelID)
 	if err != nil {
 		return MerchantApproval{}, merchantStoreError(err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO channel_health (merchant_channel_id) VALUES ($1)`, channelID); err != nil {
+		return MerchantApproval{}, fmt.Errorf("初始化渠道健康状态：%w", err)
 	}
 	result, err := tx.ExecContext(ctx, `
 UPDATE merchant_channel_reviews
@@ -617,27 +696,36 @@ const applicationSelect = `
 SELECT a.id, a.newapi_user_id, a.display_name, a.website_url, a.business_description,
        a.status, COALESCE(a.review_reason, ''), a.reviewed_at, a.created_at,
        r.id, r.merchant_newapi_user_id, COALESCE(r.application_id, 0), COALESCE(r.replaces_channel_id, 0),
-       r.channel_name, r.channel_type, r.base_url, r.requested_models, r.encrypted_credential,
-       r.credential_fingerprint, r.status, COALESCE(r.verified_models, '[]'::jsonb),
-       COALESCE(r.verification_error, ''), COALESCE(r.review_reason, ''), r.verified_at, r.reviewed_at, r.created_at
+	   r.channel_name, r.canonical_model_id, cm.public_name, cm.provider, cm.protocol,
+	   r.channel_test_id, r.adapter_type, r.base_url, r.encrypted_credential,
+	   r.credential_fingerprint, r.status, COALESCE(r.verification_error, ''),
+	   COALESCE(r.review_reason, ''), r.verified_at, r.reviewed_at, r.created_at
 FROM merchant_applications a
 JOIN merchant_channel_reviews r ON r.id = a.initial_channel_review_id
+JOIN canonical_models cm ON cm.id = r.canonical_model_id
 `
 
 const reviewSelect = `
-SELECT id, merchant_newapi_user_id, COALESCE(application_id, 0), COALESCE(replaces_channel_id, 0),
-       channel_name, channel_type, base_url, requested_models, encrypted_credential,
-       credential_fingerprint, status, COALESCE(verified_models, '[]'::jsonb),
-       COALESCE(verification_error, ''), COALESCE(review_reason, ''), verified_at, reviewed_at, created_at
-FROM merchant_channel_reviews
+SELECT r.id, r.merchant_newapi_user_id, COALESCE(r.application_id, 0), COALESCE(r.replaces_channel_id, 0),
+	   r.channel_name, r.canonical_model_id, cm.public_name, cm.provider, cm.protocol,
+	   r.channel_test_id, r.adapter_type, r.base_url, r.encrypted_credential,
+	   r.credential_fingerprint, r.status, COALESCE(r.verification_error, ''),
+	   COALESCE(r.review_reason, ''), r.verified_at, r.reviewed_at, r.created_at
+FROM merchant_channel_reviews r
+JOIN canonical_models cm ON cm.id = r.canonical_model_id
 `
 
 const channelSelect = `
 SELECT c.id, c.merchant_profile_id, c.review_id, c.newapi_channel_id,
-       c.channel_name, c.channel_type, c.base_url, c.models,
-       c.credential_fingerprint, c.status, c.created_at
+	   c.channel_name, c.canonical_model_id, cm.public_name, cm.provider, cm.protocol,
+	   c.adapter_type, c.base_url,
+	   c.credential_fingerprint, c.status, c.created_at,
+	   COALESCE(h.state, 'healthy'), COALESCE(h.availability_ppm, 0),
+	   COALESCE(h.ttft_p95_ms, 0), COALESCE(h.consecutive_failures, 0), h.cooldown_until
 FROM merchant_channels c
 JOIN merchant_profiles p ON p.id = c.merchant_profile_id
+JOIN canonical_models cm ON cm.id = c.canonical_model_id
+LEFT JOIN channel_health h ON h.merchant_channel_id = c.id
 `
 
 type rowScanner interface {
@@ -648,24 +736,18 @@ func scanMerchantApplication(scanner rowScanner) (MerchantApplication, error) {
 	var application MerchantApplication
 	var review MerchantChannelReview
 	var applicationReviewedAt, reviewVerifiedAt, reviewReviewedAt sql.NullTime
-	var requestedModels, verifiedModels []byte
 	var applicationReason, verificationError, reviewReason string
 	err := scanner.Scan(
 		&application.ID, &application.UserID, &application.DisplayName, &application.WebsiteURL,
 		&application.BusinessDescription, &application.Status, &applicationReason, &applicationReviewedAt, &application.CreatedAt,
 		&review.ID, &review.UserID, &review.ApplicationID, &review.ReplacesChannelID,
-		&review.ChannelName, &review.ChannelType, &review.BaseURL, &requestedModels, &review.EncryptedCredential,
-		&review.CredentialFingerprint, &review.Status, &verifiedModels, &verificationError, &reviewReason,
+		&review.ChannelName, &review.CanonicalModelID, &review.Model, &review.Provider, &review.Protocol,
+		&review.ChannelTestID, &review.AdapterType, &review.BaseURL, &review.EncryptedCredential,
+		&review.CredentialFingerprint, &review.Status, &verificationError, &reviewReason,
 		&reviewVerifiedAt, &reviewReviewedAt, &review.CreatedAt,
 	)
 	if err != nil {
 		return MerchantApplication{}, merchantStoreError(err)
-	}
-	if err := json.Unmarshal(requestedModels, &review.RequestedModels); err != nil {
-		return MerchantApplication{}, fmt.Errorf("解析拟售模型：%w", err)
-	}
-	if err := json.Unmarshal(verifiedModels, &review.VerifiedModels); err != nil {
-		return MerchantApplication{}, fmt.Errorf("解析验证模型：%w", err)
 	}
 	application.ReviewReason = applicationReason
 	application.ReviewedAt = nullableTime(applicationReviewedAt)
@@ -680,22 +762,16 @@ func scanMerchantApplication(scanner rowScanner) (MerchantApplication, error) {
 
 func scanMerchantReview(scanner rowScanner) (MerchantChannelReview, error) {
 	var review MerchantChannelReview
-	var requestedModels, verifiedModels []byte
 	var verifiedAt, reviewedAt sql.NullTime
 	err := scanner.Scan(
 		&review.ID, &review.UserID, &review.ApplicationID, &review.ReplacesChannelID,
-		&review.ChannelName, &review.ChannelType, &review.BaseURL, &requestedModels, &review.EncryptedCredential,
-		&review.CredentialFingerprint, &review.Status, &verifiedModels, &review.VerificationError,
+		&review.ChannelName, &review.CanonicalModelID, &review.Model, &review.Provider, &review.Protocol,
+		&review.ChannelTestID, &review.AdapterType, &review.BaseURL, &review.EncryptedCredential,
+		&review.CredentialFingerprint, &review.Status, &review.VerificationError,
 		&review.ReviewReason, &verifiedAt, &reviewedAt, &review.CreatedAt,
 	)
 	if err != nil {
 		return MerchantChannelReview{}, merchantStoreError(err)
-	}
-	if err := json.Unmarshal(requestedModels, &review.RequestedModels); err != nil {
-		return MerchantChannelReview{}, fmt.Errorf("解析拟售模型：%w", err)
-	}
-	if err := json.Unmarshal(verifiedModels, &review.VerifiedModels); err != nil {
-		return MerchantChannelReview{}, fmt.Errorf("解析验证模型：%w", err)
 	}
 	review.VerifiedAt = nullableTime(verifiedAt)
 	review.ReviewedAt = nullableTime(reviewedAt)
@@ -708,17 +784,17 @@ func scanMerchantChannels(rows *sql.Rows) ([]MerchantChannel, error) {
 	items := make([]MerchantChannel, 0)
 	for rows.Next() {
 		var channel MerchantChannel
-		var models []byte
 		var fingerprint string
+		var cooldownUntil sql.NullTime
 		if err := rows.Scan(&channel.ID, &channel.MerchantID, &channel.ReviewID, &channel.NewAPIChannelID,
-			&channel.ChannelName, &channel.ChannelType, &channel.BaseURL, &models, &fingerprint,
-			&channel.Status, &channel.CreatedAt); err != nil {
+			&channel.ChannelName, &channel.CanonicalModelID, &channel.Model, &channel.Provider,
+			&channel.Protocol, &channel.AdapterType, &channel.BaseURL, &fingerprint,
+			&channel.Status, &channel.CreatedAt, &channel.HealthState, &channel.AvailabilityPPM,
+			&channel.TTFTP95MS, &channel.ConsecutiveFailures, &cooldownUntil); err != nil {
 			return nil, fmt.Errorf("解析商户渠道：%w", err)
 		}
-		if err := json.Unmarshal(models, &channel.Models); err != nil {
-			return nil, fmt.Errorf("解析渠道模型：%w", err)
-		}
 		channel.CredentialFingerprint = shortFingerprint(fingerprint)
+		channel.CooldownUntil = nullableTime(cooldownUntil)
 		items = append(items, channel)
 	}
 	if err := rows.Err(); err != nil {

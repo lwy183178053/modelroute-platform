@@ -19,13 +19,19 @@ import (
 const (
 	pinnedNewAPIVersion = "v1.0.0-rc.21"
 	pinnedNewAPICommit  = "bde9b2f44887d34ec54799ae191d50f97914359e"
-	currentCatalogPath  = "data/2026-07-23-v1.json"
+	currentCatalogPath  = "data/2026-07-23-v2.json"
 )
 
 var (
 	//go:embed data/*.json
-	catalogFS      embed.FS
-	versionPattern = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}-v[1-9][0-9]*$`)
+	catalogFS             embed.FS
+	versionPattern        = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}-v[1-9][0-9]*$`)
+	officialEvidenceHosts = map[string]string{
+		"OpenAI": "developers.openai.com", "Anthropic": "platform.claude.com",
+		"Gemini": "ai.google.dev", "DeepSeek": "api-docs.deepseek.com",
+		"Qwen": "www.alibabacloud.com", "Moonshot": "platform.kimi.com",
+		"Minimax": "platform.minimaxi.com",
+	}
 )
 
 type Catalog struct {
@@ -37,11 +43,11 @@ type Catalog struct {
 }
 
 type SeedModel struct {
-	PublicName string                `json:"public_name"`
-	Provider   string                `json:"provider"`
-	Protocol   string                `json:"protocol"`
-	Lifecycle  string                `json:"lifecycle"`
-	Price      httpapi.OfficialPrice `json:"price"`
+	PublicName  string                `json:"public_name"`
+	Provider    string                `json:"provider"`
+	Protocol    string                `json:"protocol"`
+	EvidenceURL string                `json:"evidence_url"`
+	Price       httpapi.OfficialPrice `json:"price"`
 }
 
 func CurrentCatalog() (Catalog, error) {
@@ -101,7 +107,7 @@ func validateCatalog(catalog *Catalog) error {
 		model.PublicName = strings.TrimSpace(model.PublicName)
 		model.Provider = strings.TrimSpace(model.Provider)
 		model.Protocol = strings.TrimSpace(model.Protocol)
-		model.Lifecycle = strings.TrimSpace(model.Lifecycle)
+		model.EvidenceURL = strings.TrimSpace(model.EvidenceURL)
 		if _, exists := seen[model.PublicName]; exists {
 			return fmt.Errorf("模型种子存在重复 API 标识：%s", model.PublicName)
 		}
@@ -109,18 +115,17 @@ func validateCatalog(catalog *Catalog) error {
 		if !supportedByPinnedNewAPI(model.Provider, model.PublicName) {
 			return fmt.Errorf("模型 %s 未进入固定 New API rc.21 支持清单", model.PublicName)
 		}
-		if model.Price.CheckedAt.IsZero() {
-			return fmt.Errorf("模型 %s 缺少核价时间", model.PublicName)
-		}
-		source, err := url.Parse(model.Price.SourceURL)
+		source, err := url.Parse(model.EvidenceURL)
 		if err != nil || source.Scheme != "https" || source.Host == "" {
 			return fmt.Errorf("模型 %s 的核价来源无效", model.PublicName)
+		}
+		if source.Hostname() != officialEvidenceHosts[model.Provider] {
+			return fmt.Errorf("模型 %s 的核价来源不是 %s 官方域名", model.PublicName, model.Provider)
 		}
 		command := httpapi.CreateCanonicalModelCommand{
 			PublicName: model.PublicName,
 			Provider:   model.Provider,
 			Protocol:   model.Protocol,
-			Lifecycle:  model.Lifecycle,
 			AdminID:    1,
 			Price:      model.Price,
 		}

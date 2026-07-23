@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"strings"
+	"sort"
 	"time"
 
 	"github.com/lwy183178053/modelroute-platform/apps/api/internal/httpapi"
@@ -53,7 +53,6 @@ func Apply(ctx context.Context, repository Repository, catalog Catalog, administ
 				PublicName: seed.PublicName,
 				Provider:   seed.Provider,
 				Protocol:   seed.Protocol,
-				Lifecycle:  seed.Lifecycle,
 				AdminID:    administratorID,
 				Price:      seed.Price,
 			})
@@ -64,8 +63,8 @@ func Apply(ctx context.Context, repository Repository, catalog Catalog, administ
 			result.Created++
 			continue
 		}
-		if model.Provider != seed.Provider || model.Protocol != seed.Protocol || model.Lifecycle != seed.Lifecycle {
-			return Result{}, fmt.Errorf("模型 %s 的厂商、协议或生命周期与种子不一致", seed.PublicName)
+		if model.Provider != seed.Provider || model.Protocol != seed.Protocol {
+			return Result{}, fmt.Errorf("模型 %s 的厂商或协议与种子不一致", seed.PublicName)
 		}
 		if pricesEqual(model.Price, seed.Price) {
 			result.Unchanged++
@@ -92,21 +91,30 @@ func pricesEqual(left httpapi.OfficialPrice, right httpapi.OfficialPrice) bool {
 }
 
 func comparablePrice(price httpapi.OfficialPrice) httpapi.OfficialPrice {
+	price.Tiers = append([]httpapi.PriceTier(nil), price.Tiers...)
+	price.ImagePrices = append([]httpapi.ImagePriceItem(nil), price.ImagePrices...)
 	price.ID = 0
 	price.Version = 0
 	price.PublishedAt = time.Time{}
-	price.CheckedAt = price.CheckedAt.UTC()
-	price.SourceURL = strings.TrimSpace(price.SourceURL)
-	price.BillingMode = "token"
-	price.PricingScheme = "absolute"
+	price.PriceKind = "text"
+	if len(price.ImagePrices) > 0 {
+		price.PriceKind = "image"
+	}
 	for index := range price.Tiers {
 		price.Tiers[index].ID = 0
 		price.Tiers[index].TierOrder = 0
 	}
+	sort.Slice(price.ImagePrices, func(left int, right int) bool {
+		if price.ImagePrices[left].Quality != price.ImagePrices[right].Quality {
+			return price.ImagePrices[left].Quality < price.ImagePrices[right].Quality
+		}
+		return price.ImagePrices[left].Size < price.ImagePrices[right].Size
+	})
 	return price
 }
 
 func clonePrice(price httpapi.OfficialPrice) httpapi.OfficialPrice {
 	price.Tiers = append([]httpapi.PriceTier(nil), price.Tiers...)
+	price.ImagePrices = append([]httpapi.ImagePriceItem(nil), price.ImagePrices...)
 	return price
 }

@@ -27,7 +27,6 @@ func TestCurrentCatalogMatchesPinnedNewAPISource(t *testing.T) {
 		"DeepSeek":  "relay/channel/deepseek/constants.go",
 		"Qwen":      "relay/channel/ali/constants.go",
 		"Moonshot":  "relay/channel/moonshot/constants.go",
-		"Minimax":   "relay/channel/minimax/constants.go",
 	}
 	contents := make(map[string]string, len(providerFiles))
 	for provider, relativePath := range providerFiles {
@@ -51,7 +50,7 @@ func TestCurrentCatalogMatchesPinnedNewAPISource(t *testing.T) {
 func listedByDefault(provider string, model string) bool {
 	genericModels := map[string]bool{
 		"gpt-5.6-sol": true, "gpt-5.6-terra": true, "gpt-5.6-luna": true,
-		"gpt-5.5": true, "gpt-image-2": true, "kimi-k3": true, "MiniMax-M3": true,
+		"gpt-5.5": true, "gpt-image-2": true, "kimi-k3": true,
 	}
 	return !genericModels[model]
 }

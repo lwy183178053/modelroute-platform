@@ -138,3 +138,24 @@ func TestModelRouteIsClosedDuringFoundationPhase(t *testing.T) {
 		t.Fatalf("OpenAI 错误格式不符合预期：%+v", body)
 	}
 }
+
+func TestModelListProxyForwardsUserAPIKeyToNewAPI(t *testing.T) {
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/models" {
+			t.Fatalf("模型列表上游请求=%s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer sk-user-route" {
+			t.Fatalf("模型列表鉴权=%q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-5.6","object":"model"}]}`))
+	}))
+	handler := NewServerWithServices("test", Dependencies{}, services)
+	request := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	request.Header.Set("Authorization", "Bearer sk-user-route")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"gpt-5.6"`) {
+		t.Fatalf("模型列表响应=%d %s", response.Code, response.Body.String())
+	}
+}

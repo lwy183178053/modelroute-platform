@@ -168,6 +168,20 @@ func (s *server) merchantChannels(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "merchant_store_error", "读取渠道审核记录失败")
 		return
 	}
+	if repository, ok := s.services.Merchants.(MultiModelMerchantRepository); ok {
+		for index := range channels {
+			if models, modelErr := repository.ChannelModels(r.Context(), channels[index].ID); modelErr == nil {
+				for _, model := range models {
+					channels[index].Models = append(channels[index].Models, model.UpstreamModelName)
+				}
+			}
+		}
+		for index := range reviews {
+			if models, modelErr := repository.ReviewModels(r.Context(), reviews[index].ID); modelErr == nil {
+				reviews[index].Models = models
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"merchant": identity, "items": channels, "reviews": reviews}})
 }
 
@@ -181,12 +195,29 @@ func (s *server) createMerchantChannel(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "渠道申请格式无效")
 		return
 	}
-	channel, err := s.buildChannelSubmission(request.ChannelName, request.CanonicalModelID, request.BaseURL, request.APIKey, request.TestReceipt)
+	var channel ChannelSubmission
+	var err error
+	if strings.TrimSpace(request.ChannelType) != "" {
+		channel, err = s.buildMultiModelSubmission(r, session, request.ChannelName, request.ChannelType, request.BaseURL, request.APIKey)
+	} else {
+		channel, err = s.buildChannelSubmission(request.ChannelName, request.CanonicalModelID, request.BaseURL, request.APIKey, request.TestReceipt)
+	}
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	review, err := s.services.Merchants.CreateChannelReview(r.Context(), CreateMerchantChannel{UserID: session.UserID, Channel: channel})
+	command := CreateMerchantChannel{UserID: session.UserID, Channel: channel}
+	var review MerchantChannelReview
+	if len(channel.UpstreamModels) > 0 {
+		repository, supported := s.services.Merchants.(MultiModelMerchantRepository)
+		if !supported {
+			writeAPIError(w, http.StatusServiceUnavailable, "multimodel_unavailable", "多模型渠道服务尚未就绪")
+			return
+		}
+		review, err = repository.CreateMultiModelChannelReview(r.Context(), command)
+	} else {
+		review, err = s.services.Merchants.CreateChannelReview(r.Context(), command)
+	}
 	if err != nil {
 		s.writeMerchantStoreError(w, err)
 		return
@@ -240,6 +271,13 @@ func (s *server) adminChannelReviews(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "merchant_store_error", "读取渠道审核失败")
 		return
 	}
+	if repository, ok := s.services.Merchants.(MultiModelMerchantRepository); ok {
+		for index := range items {
+			if models, modelErr := repository.ReviewModels(r.Context(), items[index].ID); modelErr == nil {
+				items[index].Models = models
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"page": page, "page_size": pageSize, "total": total, "items": items}})
 }
 
@@ -263,7 +301,15 @@ func (s *server) adminMerchantChannels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page, pageSize := pagination(r)
-	items, total, err := s.services.Merchants.ListChannels(r.Context(), page, pageSize, r.URL.Query().Get("status"))
+	var items []MerchantChannel
+	var total int
+	var err error
+	if repository, filtered := s.services.Merchants.(FilteredMerchantChannelRepository); filtered {
+		merchantID, _ := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("merchant_id")), 10, 64)
+		items, total, err = repository.ListChannelsFiltered(r.Context(), page, pageSize, r.URL.Query().Get("status"), r.URL.Query().Get("keyword"), merchantID)
+	} else {
+		items, total, err = s.services.Merchants.ListChannels(r.Context(), page, pageSize, r.URL.Query().Get("status"))
+	}
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "merchant_store_error", "读取渠道列表失败")
 		return
@@ -294,6 +340,19 @@ func (s *server) adminVerifyReviewID(w http.ResponseWriter, r *http.Request, rev
 	if err != nil {
 		s.writeMerchantStoreError(w, err)
 		return
+	}
+	if repository, ok := s.services.Merchants.(MultiModelMerchantRepository); ok {
+		if bindings, modelErr := repository.ReviewModels(r.Context(), reviewID); modelErr == nil && len(bindings) > 0 {
+			if finishErr := s.services.Merchants.FinishVerification(r.Context(), reviewID, session.UserID, review.AdapterType, ""); finishErr != nil {
+				writeAPIError(w, http.StatusInternalServerError, "merchant_store_error", "保存审核状态失败")
+				return
+			}
+			_ = s.recordAudit(r, session, "merchant.channel.verify", int(reviewID), "success", "等待管理员逐模型检查")
+			writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{
+				"review_id": reviewID, "adapter_type": review.AdapterType, "models": bindings,
+			}})
+			return
+		}
 	}
 	credential, err := s.services.Credentials.Decrypt(review.EncryptedCredential)
 	if err != nil {
@@ -388,6 +447,12 @@ func (s *server) adminApproveReviewID(w http.ResponseWriter, r *http.Request, re
 		s.writeMerchantStoreError(w, err)
 		return
 	}
+	if repository, ok := s.services.Merchants.(MultiModelMerchantRepository); ok {
+		if err := repository.PromoteReviewModels(r.Context(), reviewID, approval.ChannelID); err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "merchant_store_error", "保存正式渠道模型失败")
+			return
+		}
+	}
 	if err := s.recordAudit(r, session, "merchant.channel.approve", int(reviewID), "success", ""); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "渠道已导入，但审计记录失败")
 		return
@@ -404,12 +469,27 @@ func (s *server) createAndTestNewAPIChannel(r *http.Request, session platformaut
 	if channelType == 1 {
 		baseURL = strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1")
 	}
+	models := []string{review.Model}
+	if repository, ok := s.services.Merchants.(MultiModelMerchantRepository); ok {
+		if bindings, modelErr := repository.ReviewModels(r.Context(), review.ID); modelErr == nil {
+			models = models[:0]
+			for _, binding := range bindings {
+				if binding.MatchStatus == "matched" && binding.CanonicalModelID > 0 {
+					models = append(models, binding.UpstreamModelName)
+				}
+			}
+			if len(models) == 0 {
+				models = []string{review.Model}
+			}
+		}
+	}
+	modelList := strings.Join(models, ",")
 	_, err := s.services.NewAPI.Do(r.Context(), http.MethodPost, "/api/channel/", map[string]any{
 		"mode": "single",
 		"channel": map[string]any{
 			"type": channelType, "key": credential, "name": channelName,
-			"base_url": baseURL, "models": review.Model, "group": "default", "status": 1,
-			"test_model": review.Model, "tag": fmt.Sprintf("modelroute-u%d", review.UserID),
+			"base_url": baseURL, "models": modelList, "group": "default", "status": 1,
+			"test_model": models[0], "tag": fmt.Sprintf("modelroute-u%d", review.UserID),
 		},
 	}, upstreamAuth(session))
 	if err != nil {
@@ -440,7 +520,7 @@ func (s *server) createAndTestNewAPIChannel(r *http.Request, session platformaut
 	if channelID <= 0 {
 		return 0, errors.New("New API 未返回新渠道编号")
 	}
-	_, err = s.services.NewAPI.Do(r.Context(), http.MethodGet, fmt.Sprintf("/api/channel/test/%d?%s", channelID, url.Values{"model": []string{review.Model}}.Encode()), nil, upstreamAuth(session))
+	_, err = s.services.NewAPI.Do(r.Context(), http.MethodGet, fmt.Sprintf("/api/channel/test/%d?%s", channelID, url.Values{"model": []string{models[0]}}.Encode()), nil, upstreamAuth(session))
 	if err != nil {
 		_, _ = s.services.NewAPI.Do(r.Context(), http.MethodDelete, fmt.Sprintf("/api/channel/%d", channelID), nil, upstreamAuth(session))
 		return 0, err
@@ -452,11 +532,7 @@ func channelTypeForAdapter(adapter string) (int, bool) {
 	for _, candidate := range []channelAdapter{
 		{name: "openai_compatible", channelType: 1},
 		{name: "anthropic", channelType: 14},
-		{name: "qwen", channelType: 17},
 		{name: "gemini", channelType: 24},
-		{name: "moonshot", channelType: 25},
-		{name: "minimax", channelType: 35},
-		{name: "deepseek", channelType: 43},
 	} {
 		if candidate.name == adapter {
 			return candidate.channelType, true
@@ -560,6 +636,7 @@ type merchantChannelRequest struct {
 	ChannelName      string `json:"channel_name"`
 	CanonicalModelID int64  `json:"canonical_model_id"`
 	TestReceipt      string `json:"test_receipt"`
+	ChannelType      string `json:"channel_type"`
 	BaseURL          string `json:"base_url"`
 	APIKey           string `json:"api_key"`
 }
@@ -619,6 +696,26 @@ func (s *server) buildChannelSubmission(name string, canonicalModelID int64, bas
 		ChannelName: name, CanonicalModelID: canonicalModelID, TestReceipt: testReceipt,
 		BaseURL: normalizedBase, EncryptedCredential: ciphertext, CredentialFingerprint: fingerprint,
 	}, nil
+}
+
+func (s *server) buildMultiModelSubmission(r *http.Request, session platformauth.Session, name, channelType, baseURL, apiKey string) (ChannelSubmission, error) {
+	name = strings.TrimSpace(name)
+	if len(name) < 2 || len(name) > 100 {
+		return ChannelSubmission{}, errors.New("渠道名称需为 2 至 100 字")
+	}
+	models, numericType, err := s.fetchAndMatchChannelModels(r, session, channelType, baseURL, apiKey)
+	if err != nil {
+		return ChannelSubmission{}, err
+	}
+	credential := []byte(strings.TrimSpace(apiKey))
+	ciphertext, err := s.services.Credentials.Encrypt(credential)
+	if err != nil {
+		zeroBytes(credential)
+		return ChannelSubmission{}, errors.New("加密渠道凭据失败")
+	}
+	fingerprint := s.services.Credentials.Fingerprint(credential)
+	zeroBytes(credential)
+	return ChannelSubmission{ChannelName: name, ChannelType: numericType, AdapterType: adapterForChannelType(numericType), BaseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"), UpstreamModels: models, EncryptedCredential: ciphertext, CredentialFingerprint: fingerprint}, nil
 }
 
 func (s *server) requireAdminApplication(w http.ResponseWriter, r *http.Request) (MerchantApplication, bool) {

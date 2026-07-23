@@ -126,7 +126,7 @@ export default function MarketView({ navigate }) {
 
         <div className="table-wrap market-table-wrap">
           <table className="data-table market-table">
-            <thead><tr><th>排名</th><th>模型与商户</th><th>协议</th><th>状态</th><th>可用率</th><th>P95 首字</th><th>当前价格</th><th>倍率</th><th>渠道</th><th></th></tr></thead>
+            <thead><tr><th>排名</th><th>模型与商户</th><th>协议</th><th>状态</th><th>可用率</th><th>P95 首字</th><th>当前价格</th><th>倍率</th><th>渠道</th></tr></thead>
             <tbody>
               {offers.map((offer, index) => {
                 const model = modelMap.get(offer.model);
@@ -140,7 +140,6 @@ export default function MarketView({ navigate }) {
                   <td><strong>{offerPrice(offer)}</strong>{offer.price_tiers?.length > 1 && <small>{offer.price_tiers.length} 个上下文阶梯</small>}</td>
                   <td><span className="price-multiple">{formatMultiplier(offer.multiplier_bps)}</span></td>
                   <td><strong>{offer.channel_count || 0} 个</strong></td>
-                  <td><Button variant="ghost" onClick={() => navigate('console')}>用于路由</Button></td>
                 </tr>;
               })}
             </tbody>

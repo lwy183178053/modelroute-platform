@@ -22,9 +22,6 @@ var pinnedNewAPIModels = map[string]map[string]struct{}{
 	"Moonshot": {
 		"kimi-k3": {},
 	},
-	"Minimax": {
-		"MiniMax-M3": {}, "MiniMax-M2.7": {}, "MiniMax-M2.7-highspeed": {},
-	},
 }
 
 func supportedByPinnedNewAPI(provider string, model string) bool {

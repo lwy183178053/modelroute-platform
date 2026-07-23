@@ -320,7 +320,12 @@ FOR UPDATE OF mp, cm
 	}
 	rows, err := tx.QueryContext(ctx, `
 SELECT id, newapi_channel_id, channel_name FROM merchant_channels
-WHERE merchant_profile_id = $1 AND canonical_model_id = $2 AND status = 'active'
+WHERE merchant_profile_id = $1 AND status = 'active'
+  AND (canonical_model_id = $2 OR EXISTS (
+      SELECT 1 FROM merchant_channel_model_bindings binding
+      WHERE binding.merchant_channel_id = merchant_channels.id
+        AND binding.canonical_model_id = $2 AND binding.match_status = 'matched'
+  ))
 ORDER BY id
 `, offer.MerchantID, command.CanonicalModelID)
 	if err != nil {
@@ -748,6 +753,11 @@ JOIN merchant_channels mc ON mc.id = aliases.merchant_channel_id AND mc.status =
 JOIN merchant_profiles mp ON mp.id = mc.merchant_profile_id AND mp.status = 'active'
 JOIN channel_health h ON h.merchant_channel_id = mc.id
 WHERE p.id = $1
+  AND (mc.canonical_model_id = $2 OR EXISTS (
+      SELECT 1 FROM merchant_channel_model_bindings binding
+      WHERE binding.merchant_channel_id = mc.id
+        AND binding.canonical_model_id = $2 AND binding.match_status = 'matched'
+  ))
   AND o.multiplier_bps BETWEEN p.minimum_multiplier_bps AND p.maximum_multiplier_bps
   AND h.state IN ('healthy', 'degraded')
   AND (p.mode = 'smart' OR EXISTS (
@@ -1294,6 +1304,7 @@ SELECT EXISTS (
     SELECT 1 FROM merchant_channel_tests WHERE canonical_model_id = $1
     UNION ALL SELECT 1 FROM merchant_channel_reviews WHERE canonical_model_id = $1
     UNION ALL SELECT 1 FROM merchant_channels WHERE canonical_model_id = $1
+    UNION ALL SELECT 1 FROM merchant_channel_model_bindings WHERE canonical_model_id = $1
     UNION ALL SELECT 1 FROM offer_versions WHERE canonical_model_id = $1
 )
 FROM canonical_models

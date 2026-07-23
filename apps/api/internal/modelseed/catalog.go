@@ -30,7 +30,6 @@ var (
 		"OpenAI": "developers.openai.com", "Anthropic": "platform.claude.com",
 		"Gemini": "ai.google.dev", "DeepSeek": "api-docs.deepseek.com",
 		"Qwen": "www.alibabacloud.com", "Moonshot": "platform.kimi.com",
-		"Minimax": "platform.minimaxi.com",
 	}
 )
 

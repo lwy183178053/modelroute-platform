@@ -28,30 +28,54 @@ type MerchantIdentity struct {
 }
 
 type MerchantChannelReview struct {
-	ID                    int64      `json:"id"`
-	UserID                int        `json:"user_id"`
-	ApplicationID         int64      `json:"application_id,omitempty"`
-	ReplacesChannelID     int64      `json:"replaces_channel_id,omitempty"`
-	ChannelName           string     `json:"channel_name"`
-	ChannelType           int        `json:"-"`
-	CanonicalModelID      int64      `json:"canonical_model_id"`
-	Model                 string     `json:"model"`
-	Provider              string     `json:"provider"`
-	Protocol              string     `json:"protocol"`
-	AdapterType           string     `json:"adapter_type"`
-	ChannelTestID         int64      `json:"channel_test_id"`
-	BaseURL               string     `json:"base_url"`
-	RequestedModels       []string   `json:"-"`
-	VerifiedModels        []string   `json:"-"`
-	Status                string     `json:"status"`
-	CredentialConfigured  bool       `json:"credential_configured"`
-	EncryptedCredential   []byte     `json:"-"`
-	CredentialFingerprint string     `json:"-"`
-	VerificationError     string     `json:"verification_error,omitempty"`
-	ReviewReason          string     `json:"review_reason,omitempty"`
-	VerifiedAt            *time.Time `json:"verified_at,omitempty"`
-	ReviewedAt            *time.Time `json:"reviewed_at,omitempty"`
-	CreatedAt             time.Time  `json:"created_at"`
+	ID                    int64                `json:"id"`
+	UserID                int                  `json:"user_id"`
+	ApplicationID         int64                `json:"application_id,omitempty"`
+	ReplacesChannelID     int64                `json:"replaces_channel_id,omitempty"`
+	ChannelName           string               `json:"channel_name"`
+	ChannelType           int                  `json:"-"`
+	CanonicalModelID      int64                `json:"canonical_model_id"`
+	Model                 string               `json:"model"`
+	Provider              string               `json:"provider"`
+	Protocol              string               `json:"protocol"`
+	AdapterType           string               `json:"adapter_type"`
+	ChannelTestID         int64                `json:"channel_test_id"`
+	BaseURL               string               `json:"base_url"`
+	RequestedModels       []string             `json:"-"`
+	VerifiedModels        []string             `json:"-"`
+	Status                string               `json:"status"`
+	CredentialConfigured  bool                 `json:"credential_configured"`
+	EncryptedCredential   []byte               `json:"-"`
+	CredentialFingerprint string               `json:"-"`
+	VerificationError     string               `json:"verification_error,omitempty"`
+	ReviewReason          string               `json:"review_reason,omitempty"`
+	VerifiedAt            *time.Time           `json:"verified_at,omitempty"`
+	ReviewedAt            *time.Time           `json:"reviewed_at,omitempty"`
+	CreatedAt             time.Time            `json:"created_at"`
+	Models                []ReviewModelBinding `json:"models,omitempty"`
+}
+
+// ReviewModelBinding is the model-level state captured during channel review.
+type ReviewModelBinding struct {
+	ID                   int64      `json:"id"`
+	ReviewID             int64      `json:"review_id,omitempty"`
+	UpstreamModelName    string     `json:"upstream_model_name"`
+	CanonicalModelID     int64      `json:"canonical_model_id,omitempty"`
+	MatchStatus          string     `json:"match_status"`
+	TestStatus           string     `json:"test_status"`
+	TestedByNewAPIUserID int        `json:"tested_by_newapi_user_id,omitempty"`
+	TestedAt             *time.Time `json:"tested_at,omitempty"`
+	TestLatencyMS        int        `json:"test_latency_ms,omitempty"`
+	TestError            string     `json:"test_error,omitempty"`
+}
+
+type ChannelModelBinding struct {
+	ID                int64     `json:"id"`
+	ChannelID         int64     `json:"channel_id,omitempty"`
+	UpstreamModelName string    `json:"upstream_model_name"`
+	CanonicalModelID  int64     `json:"canonical_model_id,omitempty"`
+	MatchStatus       string    `json:"match_status"`
+	LastSyncedAt      time.Time `json:"last_synced_at"`
 }
 
 type MerchantApplication struct {
@@ -142,12 +166,14 @@ type ChannelTester interface {
 type ChannelSubmission struct {
 	ChannelName           string
 	ChannelType           int
+	AdapterType           string
 	CanonicalModelID      int64
 	TestReceipt           string
 	BaseURL               string
 	Models                []string
 	EncryptedCredential   []byte
 	CredentialFingerprint string
+	UpstreamModels        []SyncedChannelModel
 }
 
 type CreateMerchantApplication struct {
@@ -197,4 +223,25 @@ type MerchantRepository interface {
 	RejectReview(context.Context, int64, int, string) error
 	Merchant(context.Context, int64) (MerchantProfile, error)
 	SetMerchantStatus(context.Context, int64, bool, int, string) (MerchantStatusChange, error)
+}
+
+// MultiModelMerchantRepository is optional so existing integrations and test
+// doubles can keep the single-model repository contract while V2 flows opt in.
+type MultiModelMerchantRepository interface {
+	CreateMultiModelChannelReview(context.Context, CreateMerchantChannel) (MerchantChannelReview, error)
+	SyncReviewModels(context.Context, int64, []SyncedChannelModel) error
+	SyncChannelModels(context.Context, int64, []SyncedChannelModel) error
+	ReviewModels(context.Context, int64) ([]ReviewModelBinding, error)
+	ChannelModels(context.Context, int64) ([]ChannelModelBinding, error)
+	SetReviewModelTest(context.Context, int64, int64, int, string, int, string) error
+	PromoteReviewModels(context.Context, int64, int64) error
+}
+
+type MerchantChannelManagement interface {
+	SetChannelStatus(context.Context, int64, int64, bool) error
+	DeleteChannel(context.Context, int64, int64) error
+}
+
+type FilteredMerchantChannelRepository interface {
+	ListChannelsFiltered(context.Context, int, int, string, string, int64) ([]MerchantChannel, int, error)
 }

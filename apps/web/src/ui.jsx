@@ -18,12 +18,11 @@ import {
 import Anthropic from '@lobehub/icons/es/Anthropic/components/Mono';
 import DeepSeek from '@lobehub/icons/es/DeepSeek/components/Mono';
 import Gemini from '@lobehub/icons/es/Gemini/components/Mono';
-import Minimax from '@lobehub/icons/es/Minimax/components/Mono';
 import Moonshot from '@lobehub/icons/es/Moonshot/components/Mono';
 import OpenAI from '@lobehub/icons/es/OpenAI/components/Mono';
 import Qwen from '@lobehub/icons/es/Qwen/components/Mono';
 
-const providerIcons = { OpenAI, Anthropic, Gemini, DeepSeek, Qwen, Moonshot, Minimax };
+const providerIcons = { OpenAI, Anthropic, Gemini, DeepSeek, Qwen, Moonshot };
 
 export function ProviderLogo({ provider, size = 20 }) {
   const Icon = providerIcons[provider] || Database;

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -203,6 +204,209 @@ RETURNING id, created_at
 		return MerchantChannelReview{}, fmt.Errorf("提交渠道审核事务：%w", err)
 	}
 	return review, nil
+}
+
+// CreateMultiModelChannelReview stores one encrypted credential and one review
+// binding per upstream model. The legacy canonical_model_id keeps the first
+// matched model so older list and routing code remains compatible.
+func (s *SQLMerchantStore) CreateMultiModelChannelReview(ctx context.Context, command CreateMerchantChannel) (MerchantChannelReview, error) {
+	if len(command.Channel.UpstreamModels) == 0 {
+		return MerchantChannelReview{}, ErrMerchantInvalidState
+	}
+	var primary SyncedChannelModel
+	for _, model := range command.Channel.UpstreamModels {
+		if model.MatchStatus == "matched" && model.CanonicalModelID > 0 {
+			primary = model
+			break
+		}
+	}
+	if primary.CanonicalModelID <= 0 {
+		return MerchantChannelReview{}, ErrMerchantInvalidState
+	}
+	tx, err := s.database.BeginTx(ctx, nil)
+	if err != nil {
+		return MerchantChannelReview{}, fmt.Errorf("开始多模型渠道审核事务：%w", err)
+	}
+	defer tx.Rollback()
+	adapter := command.Channel.AdapterType
+	if adapter == "" {
+		adapter = adapterForChannelType(command.Channel.ChannelType)
+	}
+	review := MerchantChannelReview{
+		UserID: command.UserID, ChannelName: command.Channel.ChannelName,
+		CanonicalModelID: primary.CanonicalModelID, Model: primary.Model,
+		Provider: primary.Provider, Protocol: primary.Protocol, AdapterType: adapter,
+		BaseURL: command.Channel.BaseURL, Status: "pending", CredentialConfigured: true,
+	}
+	err = tx.QueryRowContext(ctx, `
+INSERT INTO merchant_channel_reviews
+    (merchant_profile_id, merchant_newapi_user_id, canonical_model_id, channel_test_id,
+     channel_type, channel_name, base_url, adapter_type, encrypted_credential, credential_fingerprint,
+     last_synced_at)
+SELECT id, $1, $2, NULL, $3, $4, $5, $6, $7, $8, now()
+FROM merchant_profiles
+WHERE newapi_user_id = $1 AND status = 'active'
+RETURNING id, created_at
+`, command.UserID, primary.CanonicalModelID, command.Channel.ChannelType, command.Channel.ChannelName,
+		command.Channel.BaseURL, adapter, command.Channel.EncryptedCredential, command.Channel.CredentialFingerprint,
+	).Scan(&review.ID, &review.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return MerchantChannelReview{}, ErrMerchantInvalidState
+	}
+	if err != nil {
+		return MerchantChannelReview{}, merchantStoreError(err)
+	}
+	for _, model := range command.Channel.UpstreamModels {
+		status := model.MatchStatus
+		if status != "matched" {
+			status = "unmatched"
+		}
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO merchant_review_model_bindings
+    (review_id, upstream_model_name, canonical_model_id, match_status)
+VALUES ($1, $2, NULLIF($3, 0), $4)
+ON CONFLICT (review_id, upstream_model_name) DO UPDATE
+SET canonical_model_id = EXCLUDED.canonical_model_id, match_status = EXCLUDED.match_status,
+    updated_at = now()
+`, review.ID, strings.TrimSpace(model.UpstreamModelName), model.CanonicalModelID, status); err != nil {
+			return MerchantChannelReview{}, fmt.Errorf("保存审核模型绑定：%w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return MerchantChannelReview{}, fmt.Errorf("提交多模型渠道审核事务：%w", err)
+	}
+	return review, nil
+}
+
+func adapterForChannelType(channelType int) string {
+	switch channelType {
+	case 14:
+		return "anthropic"
+	case 24:
+		return "gemini"
+	default:
+		return "openai_compatible"
+	}
+}
+
+func (s *SQLMerchantStore) SyncReviewModels(ctx context.Context, reviewID int64, models []SyncedChannelModel) error {
+	tx, err := s.database.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, model := range models {
+		status := "unmatched"
+		if model.MatchStatus == "matched" {
+			status = "matched"
+		}
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO merchant_review_model_bindings (review_id, upstream_model_name, canonical_model_id, match_status)
+VALUES ($1, $2, NULLIF($3, 0), $4)
+ON CONFLICT (review_id, upstream_model_name) DO UPDATE
+SET canonical_model_id = EXCLUDED.canonical_model_id, match_status = EXCLUDED.match_status, updated_at = now()
+`, reviewID, model.UpstreamModelName, model.CanonicalModelID, status); err != nil {
+			return err
+		}
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE merchant_channel_reviews SET last_synced_at = now(), updated_at = now() WHERE id = $1`, reviewID)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *SQLMerchantStore) SyncChannelModels(ctx context.Context, channelID int64, models []SyncedChannelModel) error {
+	tx, err := s.database.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, model := range models {
+		status := "unmatched"
+		if model.MatchStatus == "matched" {
+			status = "matched"
+		}
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO merchant_channel_model_bindings (merchant_channel_id, upstream_model_name, canonical_model_id, match_status)
+VALUES ($1, $2, NULLIF($3, 0), $4)
+ON CONFLICT (merchant_channel_id, upstream_model_name) DO UPDATE
+SET canonical_model_id = EXCLUDED.canonical_model_id, match_status = EXCLUDED.match_status,
+    last_synced_at = now(), updated_at = now()
+`, channelID, model.UpstreamModelName, model.CanonicalModelID, status); err != nil {
+			return err
+		}
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE merchant_channels SET last_synced_at = now(), updated_at = now() WHERE id = $1`, channelID)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *SQLMerchantStore) PromoteReviewModels(ctx context.Context, reviewID int64, channelID int64) error {
+	_, err := s.database.ExecContext(ctx, `
+INSERT INTO merchant_channel_model_bindings
+    (merchant_channel_id, upstream_model_name, canonical_model_id, match_status)
+SELECT $1, upstream_model_name, canonical_model_id, match_status
+FROM merchant_review_model_bindings
+WHERE review_id = $2
+ON CONFLICT (merchant_channel_id, upstream_model_name) DO UPDATE
+SET canonical_model_id = EXCLUDED.canonical_model_id, match_status = EXCLUDED.match_status,
+    last_synced_at = now(), updated_at = now()
+`, channelID, reviewID)
+	return err
+}
+
+func (s *SQLMerchantStore) ReviewModels(ctx context.Context, reviewID int64) ([]ReviewModelBinding, error) {
+	rows, err := s.database.QueryContext(ctx, `SELECT id, review_id, upstream_model_name, COALESCE(canonical_model_id, 0), match_status, test_status, COALESCE(tested_by_newapi_user_id, 0), tested_at, COALESCE(test_latency_ms, 0), COALESCE(test_error, '') FROM merchant_review_model_bindings WHERE review_id = $1 ORDER BY id`, reviewID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]ReviewModelBinding, 0)
+	for rows.Next() {
+		var item ReviewModelBinding
+		var testedAt sql.NullTime
+		if err := rows.Scan(&item.ID, &item.ReviewID, &item.UpstreamModelName, &item.CanonicalModelID, &item.MatchStatus, &item.TestStatus, &item.TestedByNewAPIUserID, &testedAt, &item.TestLatencyMS, &item.TestError); err != nil {
+			return nil, err
+		}
+		item.TestedAt = nullableTime(testedAt)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *SQLMerchantStore) ChannelModels(ctx context.Context, channelID int64) ([]ChannelModelBinding, error) {
+	rows, err := s.database.QueryContext(ctx, `SELECT id, merchant_channel_id, upstream_model_name, COALESCE(canonical_model_id, 0), match_status, last_synced_at FROM merchant_channel_model_bindings WHERE merchant_channel_id = $1 ORDER BY id`, channelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]ChannelModelBinding, 0)
+	for rows.Next() {
+		var item ChannelModelBinding
+		if err := rows.Scan(&item.ID, &item.ChannelID, &item.UpstreamModelName, &item.CanonicalModelID, &item.MatchStatus, &item.LastSyncedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *SQLMerchantStore) SetReviewModelTest(ctx context.Context, reviewID int64, bindingID int64, adminID int, status string, latency int, testError string) error {
+	if status != "passed" && status != "failed" {
+		return ErrMerchantInvalidState
+	}
+	result, err := s.database.ExecContext(ctx, `UPDATE merchant_review_model_bindings SET test_status = $1, tested_by_newapi_user_id = $2, tested_at = now(), test_latency_ms = $3, test_error = NULLIF($4, ''), updated_at = now() WHERE id = $5 AND review_id = $6`, status, adminID, latency, testError, bindingID, reviewID)
+	if err != nil {
+		return err
+	}
+	count, _ := result.RowsAffected()
+	if count != 1 {
+		return ErrMerchantInvalidState
+	}
+	return nil
 }
 
 type claimedChannelTest struct {
@@ -402,6 +606,34 @@ LIMIT $2 OFFSET $3
 	return returnChannels, total, nil
 }
 
+func (s *SQLMerchantStore) ListChannelsFiltered(ctx context.Context, page int, pageSize int, status, keyword string, merchantID int64) ([]MerchantChannel, int, error) {
+	items, _, err := s.ListChannels(ctx, 1, 100, status)
+	if err != nil {
+		return nil, 0, err
+	}
+	keyword = strings.ToLower(strings.TrimSpace(keyword))
+	filtered := make([]MerchantChannel, 0, len(items))
+	for _, item := range items {
+		if merchantID > 0 && item.MerchantID != merchantID {
+			continue
+		}
+		if keyword != "" && !strings.Contains(strings.ToLower(item.ChannelName), keyword) && !strings.Contains(strings.ToLower(item.Model), keyword) && !strings.Contains(strconv.FormatInt(item.MerchantID, 10), keyword) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	page, pageSize = boundedPagination(page, pageSize)
+	start := (page - 1) * pageSize
+	if start >= len(filtered) {
+		return []MerchantChannel{}, len(filtered), nil
+	}
+	end := start + pageSize
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	return filtered[start:end], len(filtered), nil
+}
+
 func (s *SQLMerchantStore) ClaimReview(ctx context.Context, reviewID int64, targetStatus string) (MerchantChannelReview, error) {
 	var allowed string
 	switch targetStatus {
@@ -426,7 +658,7 @@ WITH claimed AS (
 )
 SELECT c.id, c.merchant_newapi_user_id, COALESCE(c.application_id, 0), COALESCE(c.replaces_channel_id, 0),
 	   c.channel_name, c.canonical_model_id, cm.public_name, cm.provider, cm.protocol,
-	   c.channel_test_id, c.adapter_type, c.base_url, c.encrypted_credential,
+	   COALESCE(c.channel_test_id, 0), c.adapter_type, c.base_url, c.encrypted_credential,
 	   c.credential_fingerprint, c.status, COALESCE(c.verification_error, ''),
 	   COALESCE(c.review_reason, ''), c.verified_at, c.reviewed_at, c.created_at
 FROM claimed c
@@ -696,12 +928,52 @@ RETURNING newapi_user_id
 	return MerchantStatusChange{MerchantID: merchantID, UserID: userID, Status: status}, nil
 }
 
+func (s *SQLMerchantStore) SetChannelStatus(ctx context.Context, channelID int64, merchantID int64, enabled bool) error {
+	status := "disabled"
+	if enabled {
+		status = "active"
+	}
+	query := `UPDATE merchant_channels SET status = $1, updated_at = now() WHERE id = $2 AND status <> 'archived'`
+	args := []any{status, channelID}
+	if merchantID > 0 {
+		query += " AND merchant_profile_id = $3"
+		args = append(args, merchantID)
+	}
+	result, err := s.database.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	count, _ := result.RowsAffected()
+	if count != 1 {
+		return ErrMerchantInvalidState
+	}
+	return nil
+}
+
+func (s *SQLMerchantStore) DeleteChannel(ctx context.Context, channelID int64, merchantID int64) error {
+	query := `UPDATE merchant_channels SET status = 'archived', updated_at = now() WHERE id = $1`
+	args := []any{channelID}
+	if merchantID > 0 {
+		query += " AND merchant_profile_id = $2"
+		args = append(args, merchantID)
+	}
+	result, err := s.database.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	count, _ := result.RowsAffected()
+	if count != 1 {
+		return ErrMerchantInvalidState
+	}
+	return nil
+}
+
 const applicationSelect = `
 SELECT a.id, a.newapi_user_id, a.display_name, a.website_url, a.business_description,
        a.status, COALESCE(a.review_reason, ''), a.reviewed_at, a.created_at,
        r.id, r.merchant_newapi_user_id, COALESCE(r.application_id, 0), COALESCE(r.replaces_channel_id, 0),
 	   r.channel_name, r.canonical_model_id, cm.public_name, cm.provider, cm.protocol,
-	   r.channel_test_id, r.adapter_type, r.base_url, r.encrypted_credential,
+	   COALESCE(r.channel_test_id, 0), r.adapter_type, r.base_url, r.encrypted_credential,
 	   r.credential_fingerprint, r.status, COALESCE(r.verification_error, ''),
 	   COALESCE(r.review_reason, ''), r.verified_at, r.reviewed_at, r.created_at
 FROM merchant_applications a
@@ -712,7 +984,7 @@ JOIN canonical_models cm ON cm.id = r.canonical_model_id
 const reviewSelect = `
 SELECT r.id, r.merchant_newapi_user_id, COALESCE(r.application_id, 0), COALESCE(r.replaces_channel_id, 0),
 	   r.channel_name, r.canonical_model_id, cm.public_name, cm.provider, cm.protocol,
-	   r.channel_test_id, r.adapter_type, r.base_url, r.encrypted_credential,
+	   COALESCE(r.channel_test_id, 0), r.adapter_type, r.base_url, r.encrypted_credential,
 	   r.credential_fingerprint, r.status, COALESCE(r.verification_error, ''),
 	   COALESCE(r.review_reason, ''), r.verified_at, r.reviewed_at, r.created_at
 FROM merchant_channel_reviews r

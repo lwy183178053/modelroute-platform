@@ -41,8 +41,8 @@ func TestCurrentCatalogCoversPinnedProvidersAndProtocols(t *testing.T) {
 	if catalog.Version != "2026-07-23-v2" || catalog.Digest == "" {
 		t.Fatalf("种子版本或摘要无效：%+v", catalog)
 	}
-	if len(catalog.Models) != 23 {
-		t.Fatalf("当前种子模型数=%d，期望 23", len(catalog.Models))
+	if len(catalog.Models) != 20 {
+		t.Fatalf("当前种子模型数=%d，期望 20", len(catalog.Models))
 	}
 	providers := map[string]bool{}
 	protocols := map[string]bool{}
@@ -52,10 +52,13 @@ func TestCurrentCatalogCoversPinnedProvidersAndProtocols(t *testing.T) {
 		protocols[model.Protocol] = true
 		models[model.PublicName] = true
 	}
-	for _, provider := range []string{"OpenAI", "Anthropic", "Gemini", "DeepSeek", "Qwen", "Moonshot", "Minimax"} {
+	for _, provider := range []string{"OpenAI", "Anthropic", "Gemini", "DeepSeek", "Qwen", "Moonshot"} {
 		if !providers[provider] {
 			t.Fatalf("当前种子缺少厂商 %s", provider)
 		}
+	}
+	if providers["Minimax"] {
+		t.Fatal("当前种子不应包含 MiniMax")
 	}
 	for _, protocol := range []string{"chat_completions", "responses", "image_generation"} {
 		if !protocols[protocol] {

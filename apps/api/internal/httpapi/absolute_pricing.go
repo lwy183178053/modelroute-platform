@@ -18,7 +18,7 @@ const (
 
 var supportedModelProviders = map[string]struct{}{
 	"OpenAI": {}, "Anthropic": {}, "Gemini": {}, "DeepSeek": {},
-	"Qwen": {}, "Moonshot": {}, "Minimax": {},
+	"Qwen": {}, "Moonshot": {},
 }
 
 func normalizeOfficialPrice(price OfficialPrice) OfficialPrice {

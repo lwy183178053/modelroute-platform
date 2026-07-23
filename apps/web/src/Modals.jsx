@@ -328,29 +328,27 @@ function MerchantApplyModal({ close, config, notify }) {
 
 function ChannelModal({ close, config, notify }) {
   const [channelName, setChannelName] = useState('');
-  const [modelID, setModelID] = useState(String(config.models?.[0]?.id || ''));
+  const [channelType, setChannelType] = useState('openai_compatible');
   const [baseURL, setBaseURL] = useState('');
   const [apiKey, setAPIKey] = useState('');
-  const [testReceipt, setTestReceipt] = useState('');
-  const [testResult, setTestResult] = useState(null);
+  const [syncedModels, setSyncedModels] = useState([]);
+  const [syncedAt, setSyncedAt] = useState('');
   const [busy, setBusy] = useState(false);
-  const [testing, setTesting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState('');
-  const testChannel = async () => {
-    setTesting(true);
+  const syncModels = async () => {
+    setSyncing(true);
     setError('');
-    setTestReceipt('');
-    setTestResult(null);
     try {
-      const result = await apiRequest('/api/merchant/channel-tests', { method: 'POST', body: {
-        canonical_model_id: Number(modelID), base_url: baseURL.trim(), api_key: apiKey,
+      const result = await apiRequest('/api/merchant/channel-models/sync', { method: 'POST', body: {
+        channel_type: channelType, base_url: baseURL.trim(), api_key: apiKey,
       } });
-      setTestReceipt(result.test_receipt);
-      setTestResult(result);
+      setSyncedModels(result.items || []);
+      setSyncedAt(result.synced_at || new Date().toISOString());
     } catch (requestError) {
-      setError(requestError.message || '渠道检测失败');
+      setError(requestError.message || '同步上游模型失败');
     } finally {
-      setTesting(false);
+      setSyncing(false);
     }
   };
   const submitChannel = async () => {
@@ -358,8 +356,7 @@ function ChannelModal({ close, config, notify }) {
     setError('');
     try {
       await apiRequest('/api/merchant/channels', { method: 'POST', body: {
-        channel_name: channelName.trim(), canonical_model_id: Number(modelID), test_receipt: testReceipt,
-        base_url: baseURL.trim(), api_key: apiKey,
+        channel_name: channelName.trim(), channel_type: channelType, base_url: baseURL.trim(), api_key: apiKey,
       } });
       await config.onSaved?.();
       notify('渠道已提交审核');
@@ -371,13 +368,14 @@ function ChannelModal({ close, config, notify }) {
     }
   };
   return (
-    <Modal title="提交新渠道" description="每条渠道绑定一个标准模型，hi 检测结果 15 分钟内有效。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !testReceipt} icon={Plus} onClick={submitChannel} variant="primary">{busy ? '提交中' : '提交渠道审核'}</Button></>}>
+    <Modal title="提交新渠道" description="一份上游地址和密钥可以承载多个模型，平台会自动匹配已收录模型。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !syncedModels.some((model) => model.match_status === 'matched')} icon={Plus} onClick={submitChannel} variant="primary">{busy ? '提交中' : '提交渠道审核'}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
       <Field label="渠道名称"><TextInput onChange={(event) => setChannelName(event.target.value)} placeholder="例如 OpenAI 企业线路" value={channelName} /></Field>
-      <Field label="标准模型"><Select onChange={(event) => { setModelID(event.target.value); setTestReceipt(''); }} value={modelID}>{(config.models || []).map((model) => <option key={model.id} value={model.id}>{model.public_name} · {model.provider}</option>)}</Select></Field>
-      <Field label="上游基础地址"><TextInput onChange={(event) => { setBaseURL(event.target.value); setTestReceipt(''); }} placeholder="https://api.example.com/v1" value={baseURL} /></Field>
-      <Field label="上游 API 密钥"><TextInput onChange={(event) => { setAPIKey(event.target.value); setTestReceipt(''); }} placeholder="保存后不再回显" type="password" value={apiKey} /></Field>
-      <div className="config-actions"><Button disabled={testing || !modelID || !baseURL.trim() || apiKey.trim().length < 8} icon={ShieldCheck} onClick={testChannel} variant="primary">{testing ? '检测中' : '发送 hi 检测'}</Button>{testResult && <StatusLine result={testResult} />}</div>
+      <Field label="上游类型"><Select value={channelType} onChange={(event) => { setChannelType(event.target.value); setSyncedModels([]); }}><option value="openai_compatible">OpenAI 兼容</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option></Select></Field>
+      <Field label="上游基础地址"><TextInput onChange={(event) => { setBaseURL(event.target.value); setSyncedModels([]); }} placeholder="https://api.example.com/v1" value={baseURL} /></Field>
+      <Field label="上游 API 密钥"><TextInput onChange={(event) => { setAPIKey(event.target.value); setSyncedModels([]); }} placeholder="保存后不再回显" type="password" value={apiKey} /></Field>
+      <div className="config-actions"><Button disabled={syncing || !baseURL.trim() || apiKey.trim().length < 8} icon={ShieldCheck} onClick={syncModels} variant="primary">{syncing ? '同步中' : '一键同步模型'}</Button>{syncedAt && <InlineNotice>同步于 {new Date(syncedAt).toLocaleString('zh-CN')}</InlineNotice>}</div>
+      {syncedModels.length > 0 && <div className="model-sync-list"><strong>已匹配 {syncedModels.filter((model) => model.match_status === 'matched').length} 个模型</strong>{syncedModels.map((model) => <div key={model.upstream_model_name}><span>{model.upstream_model_name}</span><Status>{model.match_status === 'matched' ? '已收录' : '平台未收录'}</Status></div>)}</div>}
     </Modal>
   );
 }

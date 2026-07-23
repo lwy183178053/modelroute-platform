@@ -3,7 +3,7 @@ import { BadgeDollarSign, Plus, RefreshCw, ShieldCheck, Trash2 } from 'lucide-re
 import { apiRequest, formatImagePrice, formatPriceMicros } from '../../api';
 import { Button, Field, InlineNotice, Modal, ProviderLogo, Section, Select, Status, TextInput } from '../../ui';
 
-const providers = ['OpenAI', 'Anthropic', 'Gemini', 'DeepSeek', 'Qwen', 'Moonshot', 'Minimax'];
+const providers = ['OpenAI', 'Anthropic', 'Gemini', 'DeepSeek', 'Qwen', 'Moonshot'];
 const protocolNames = {
   chat_completions: 'Chat Completions', responses: 'Responses', image_generation: 'Image Generation',
 };

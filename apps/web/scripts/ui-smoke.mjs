@@ -158,7 +158,7 @@ async function mockAdminAPI(targetPage, state, account = null) {
         },
       } });
     }
-    if (url.pathname === '/api/admin/usage' && request.method() === 'GET') {
+    if ((url.pathname === '/api/admin/usage' || url.pathname === '/api/admin/channel-logs') && request.method() === 'GET') {
       return json({ success: true, data: {
         start_timestamp: 1784131200, end_timestamp: 1784736000,
         stats: { quota: 4750000, rpm: 7, tpm: 9200 },
@@ -443,7 +443,7 @@ try {
   await announcementDialog.getByRole('button', { name: '保存草稿' }).click();
   await page.getByText('公告草稿已保存').waitFor();
   assert(adminMockState.announcementCreateCalls === 1 && adminMockState.announcementCreateBody.audiences.includes('user'), '公告创建没有提交受众');
-  await page.getByRole('button', { name: '调用日志' }).click();
+  await page.getByRole('button', { name: '渠道调用日志' }).click();
   await page.getByText('req-admin-9001').waitFor();
   await page.getByText('alice', { exact: true }).waitFor();
   await page.getByRole('button', { name: '模型与定价' }).click();
@@ -496,11 +496,8 @@ try {
   await page.getByText('已停用').waitFor();
   const importedAdminChannels = page.getByRole('heading', { name: '已导入渠道' }).locator('xpath=ancestor::section');
   await importedAdminChannels.getByText('¥12.50', { exact: true }).waitFor();
-  await importedAdminChannels.getByRole('button', { name: '测试渠道' }).first().click();
-  await page.getByText('渠道测试完成').waitFor();
-  await importedAdminChannels.getByRole('button', { name: '刷新余额' }).first().click();
-  await page.getByText('渠道余额已刷新').waitFor();
-  assert(adminMockState.channelTestCalls === 1 && adminMockState.channelBalanceCalls === 1, '渠道测试或余额刷新没有调用真实接口');
+  assert(await importedAdminChannels.getByRole('button', { name: '测试渠道' }).count() === 0, '已导入渠道仍显示行内测试按钮');
+  assert(await importedAdminChannels.getByRole('button', { name: '刷新余额' }).count() === 0, '已导入渠道仍显示刷新余额按钮');
   await page.getByRole('button', { name: '恢复渠道' }).click();
   await page.getByText('渠道已进入恢复探测').waitFor();
   assert(adminMockState.healthResetCalls === 1, '恢复渠道没有调用真实健康接口');

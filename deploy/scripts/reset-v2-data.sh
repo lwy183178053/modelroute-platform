@@ -69,7 +69,8 @@ docker compose --env-file .env up -d --wait --remove-orphans
 deploy/scripts/verify.sh http://127.0.0.1:28100
 
 MIGRATIONS=$(docker compose --env-file .env exec -T postgres psql -At -U "$POSTGRES_SUPERUSER" -d "$PLATFORM_DB_NAME" -c "SELECT name FROM platform_schema_migrations ORDER BY name")
-test "$MIGRATIONS" = "000001_v2_baseline.sql"
+test "$MIGRATIONS" = "000001_v2_baseline.sql
+000002_multimodel_channels.sql"
 SEED_VERSION=$(docker compose --env-file .env exec -T postgres psql -At -U "$POSTGRES_SUPERUSER" -d "$PLATFORM_DB_NAME" -c "SELECT value FROM platform_runtime_metadata WHERE key='official_model_seed_version'")
 test "$SEED_VERSION" = "2026-07-23-v2"
 

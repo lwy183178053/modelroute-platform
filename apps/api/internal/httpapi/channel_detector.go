@@ -102,10 +102,6 @@ func adaptersForProvider(provider string) []channelAdapter {
 		"OpenAI":    {name: "openai_compatible", channelType: 1},
 		"Anthropic": {name: "anthropic", channelType: 14},
 		"Gemini":    {name: "gemini", channelType: 24},
-		"DeepSeek":  {name: "deepseek", channelType: 43},
-		"Qwen":      {name: "qwen", channelType: 17},
-		"Moonshot":  {name: "moonshot", channelType: 25},
-		"Minimax":   {name: "minimax", channelType: 35},
 	}
 	adapter, exists := native[strings.TrimSpace(provider)]
 	if !exists || adapter.channelType == 1 {

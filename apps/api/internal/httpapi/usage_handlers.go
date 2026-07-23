@@ -15,7 +15,7 @@ import (
 	"github.com/lwy183178053/modelroute-platform/apps/api/internal/platformauth"
 )
 
-var internalOfferAliasPattern = regexp.MustCompile(`mkt-ov-[0-9a-fA-F]{24}`)
+var internalOfferAliasPattern = regexp.MustCompile(`mkt-(?:ov-[0-9a-fA-F]{24}|o[0-9]+-c[0-9]+)`)
 
 func (s *server) usage(w http.ResponseWriter, r *http.Request) {
 	_, session, ok := s.requireSession(w, r, roleCommon)
@@ -30,6 +30,16 @@ func (s *server) adminUsage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.writeUsage(w, r, session, true)
+}
+
+func (s *server) adminChannelLogs(w http.ResponseWriter, r *http.Request) {
+	_, session, ok := s.requireSession(w, r, roleAdmin)
+	if !ok {
+		return
+	}
+	// New API already indexes its usage log by channel; keep the platform
+	// endpoint as a narrow alias so the UI can use channel-specific wording.
 	s.writeUsage(w, r, session, true)
 }
 

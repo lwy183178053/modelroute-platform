@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -9,6 +11,92 @@ import (
 )
 
 const maxModelRequestBytes = 64 << 20
+const maxModelListBytes = 4 << 20
+
+func (s *server) modelListProxy(w http.ResponseWriter, r *http.Request) {
+	if s.services.NewAPI == nil {
+		writeOpenAIError(w, http.StatusServiceUnavailable, "service_not_ready", "模型列表服务尚未就绪")
+		return
+	}
+	bearer, ok := bearerToken(r.Header.Get("Authorization"))
+	if !ok {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid_api_key", "缺少有效的 Bearer 密钥")
+		return
+	}
+	response, err := s.services.NewAPI.Proxy(r.Context(), r.Method, r.URL.Path, r.Header, nil)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadGateway, "upstream_connection_error", "模型列表服务连接失败")
+		return
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxModelListBytes+1))
+	if err != nil || len(body) > maxModelListBytes {
+		writeOpenAIError(w, http.StatusBadGateway, "upstream_response_error", "模型列表响应无效")
+		return
+	}
+	if response.StatusCode >= http.StatusBadRequest {
+		copyResponseHeaders(w.Header(), response.Header)
+		w.WriteHeader(response.StatusCode)
+		_, _ = w.Write(body)
+		return
+	}
+	value, err := decodeJSONValue(body)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadGateway, "upstream_response_error", "模型列表响应格式无效")
+		return
+	}
+	aliases := collectInternalAliases(value)
+	mappings := map[string]string{}
+	if len(aliases) > 0 && s.services.UsageAliases != nil {
+		mappings, err = s.services.UsageAliases.PublicModelNames(r.Context(), aliases)
+		if err != nil {
+			writeOpenAIError(w, http.StatusBadGateway, "model_mapping_error", "模型列表映射失败")
+			return
+		}
+	}
+	value = sanitizeInternalAliases(value, mappings)
+	if s.services.Routing != nil && s.services.Credentials != nil {
+		value = s.filterRoutableModelList(r, value, s.services.Credentials.Fingerprint([]byte(bearer)))
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadGateway, "upstream_response_error", "模型列表响应编码失败")
+		return
+	}
+	copyResponseHeaders(w.Header(), response.Header)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, _ = io.Copy(w, bytes.NewReader(encoded))
+}
+
+func (s *server) filterRoutableModelList(r *http.Request, value any, fingerprint string) any {
+	filter := func(items []any) []any {
+		result := make([]any, 0, len(items))
+		for _, item := range items {
+			object, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			name, ok := object["id"].(string)
+			if !ok || strings.TrimSpace(name) == "" {
+				continue
+			}
+			if _, err := s.services.Routing.ResolveRoute(r.Context(), fingerprint, name); err == nil {
+				result = append(result, item)
+			}
+		}
+		return result
+	}
+	switch typed := value.(type) {
+	case map[string]any:
+		if items, ok := typed["data"].([]any); ok {
+			typed["data"] = filter(items)
+		}
+	case []any:
+		return filter(typed)
+	}
+	return value
+}
 
 func (s *server) modelProxy(w http.ResponseWriter, r *http.Request) {
 	if s.services.Routing == nil || s.services.Credentials == nil || s.services.NewAPI == nil {

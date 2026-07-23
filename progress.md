@@ -1614,3 +1614,36 @@
 - `docs/商户与渠道审核接口.md`：说明检测凭证摘要与渠道密钥指纹的用途边界。
 - `progress.md`：追加生产故障证据、修复验证、文件清单和回滚点。
 - 回滚点：前一提交为 `b0a72023c84d`；执行 `git revert <本阶段提交>` 可回退本轮渠道凭证摘要修复。本轮不改数据库结构，修复前生成的检测凭证需重新发送 `hi` 获取。
+
+## 2026-07-23 - Task: 多模型渠道与运营界面升级
+
+### What was done
+
+- 增加多模型渠道同步、规范化匹配、审核模型绑定和正式渠道模型绑定；服务端在提交审核时重新同步上游模型，审批后创建包含全部匹配模型的 New API 渠道。
+- 增加管理员逐模型 `hi` 检查、商户渠道再次同步、渠道启用/下架/归档和管理员渠道关键词/商户筛选接口。
+- 路由和报价查询兼容多模型绑定；新增渠道调用日志入口；用户模型列表继续隐藏内部报价别名。
+- 移除 MiniMax 模型种子、厂商白名单、厂商图标和前端选项；移除密钥查看、市场用于路由、管理员刷新余额和正式渠道行内测试按钮。
+- 商户渠道弹窗改为三类上游协议和一键同步模型；管理员渠道页增加逐模型检查、搜索、商户筛选和状态操作。
+
+### Testing
+
+- `go test ./...` 通过。
+- `go vet ./...` 通过。
+- `go build ./...` 通过。
+- `npm.cmd run build` 通过。
+- `npm.cmd run test:ui` 通过，桌面和移动端三套工作区冒烟流程完成。
+- `python -m unittest discover -s deploy/tests -p 'test_*.py' -v` 通过，27 个部署与发布脚本测试通过。
+- 多模型匹配、MiniMax 类型拒绝、上游模型列表解析和 `/v1/models` 代理测试通过。
+
+### Notes
+
+- `apps/api/internal/migrations/sql/000002_multimodel_channels.sql`：新增多模型渠道字段、审核绑定表、正式渠道绑定表和 MiniMax 历史归档。
+- `apps/api/internal/httpapi/channel_models.go`、`channel_models_handlers.go`：实现模型匹配、同步、逐模型检查和渠道管理接口。
+- `apps/api/internal/httpapi/merchant_store.go`、`merchant_types.go`、`merchant_handlers.go`：保存审核/正式模型绑定并支持多模型审批。
+- `apps/api/internal/httpapi/routing_store.go`：报价创建和路由候选查询支持多模型渠道绑定。
+- `apps/web/src/Modals.jsx`、`views/MerchantView.jsx`、`views/admin/AdminChannels.jsx`：更新渠道同步、审核、下架删除和筛选界面。
+- `apps/web/src/views/ConsoleView.jsx`、`MarketView.jsx`、`AdminView.jsx`、`AdminUsage.jsx`：移除旧操作入口并接入渠道调用日志筛选。
+- `apps/web/scripts/ui-smoke.mjs`：同步渠道调用日志新文案和已移除管理员按钮的回归断言。
+- `deploy/scripts/reset-v2-data.sh`：开发库重置验收纳入多模型渠道迁移。
+- `docs/多模型渠道运营升级.md`：记录业务流程、接口和数据边界。
+- 回滚点：本阶段提交前的基线为 `918d1bb`；执行 `git revert <本阶段提交>` 可回退本轮代码、前端和迁移改动。开发库回滚需同时恢复本阶段迁移前的平台库与 New API 备份。

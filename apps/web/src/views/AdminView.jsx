@@ -33,7 +33,7 @@ import AdminAnnouncements from './admin/AdminAnnouncements';
 
 const baseSections = [
   { id: 'overview', label: '运营总览', icon: Activity },
-  { id: 'usage', label: '调用日志', icon: FileText },
+  { id: 'usage', label: '渠道调用日志', icon: FileText },
   { id: 'users', label: '用户管理', icon: UserRoundCog },
   { id: 'merchants', label: '商户审核', icon: Building2 },
   { id: 'models', label: '模型与定价', icon: BadgeDollarSign },

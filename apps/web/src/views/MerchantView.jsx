@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   BadgeDollarSign, CloudCog, HeartPulse, Landmark, LayoutDashboard,
-  Plus, ReceiptText, ServerCog, WalletCards, Waypoints,
+  Plus, ReceiptText, ServerCog, WalletCards, Waypoints, RefreshCw, Trash2, Power,
 } from 'lucide-react';
 import { apiRequest, formatImagePrice, formatOfferPrice, formatQuota } from '../api';
 import { Button, InlineNotice, Metric, PageHeader, Section, Status } from '../ui';
@@ -73,6 +73,7 @@ export default function MerchantView({ account, openModal }) {
   const [withdrawals, setWithdrawals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [busyChannel, setBusyChannel] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -102,6 +103,25 @@ export default function MerchantView({ account, openModal }) {
   }, [account?.merchant_id]);
 
   useEffect(() => { load(); }, [load]);
+  const syncChannel = async (channel) => {
+    setBusyChannel(channel.id);
+    try { await apiRequest(`/api/merchant/channels/${channel.id}/models/sync`, { method: 'POST' }); await load(); }
+    catch (requestError) { setError(requestError.message || '同步渠道模型失败'); }
+    finally { setBusyChannel(0); }
+  };
+  const toggleChannel = async (channel) => {
+    setBusyChannel(channel.id);
+    try { await apiRequest(`/api/merchant/channels/${channel.id}/status`, { method: 'POST', body: { enabled: channel.status !== 'active' } }); await load(); }
+    catch (requestError) { setError(requestError.message || '修改渠道状态失败'); }
+    finally { setBusyChannel(0); }
+  };
+  const archiveChannel = async (channel) => {
+    if (!window.confirm(`确认下架渠道“${channel.channel_name}”吗？`)) return;
+    setBusyChannel(channel.id);
+    try { await apiRequest(`/api/merchant/channels/${channel.id}`, { method: 'DELETE' }); await load(); }
+    catch (requestError) { setError(requestError.message || '下架渠道失败'); }
+    finally { setBusyChannel(0); }
+  };
   const activeCount = channels.filter((channel) => channel.status === 'active').length;
   const pendingCount = reviews.filter((review) => ['pending', 'verifying', 'verified', 'approving'].includes(review.status)).length;
   const activeOffers = offers.filter((offer) => offer.offer_status === 'active').length;
@@ -144,9 +164,9 @@ export default function MerchantView({ account, openModal }) {
               </tbody></table></div>
             </Section>
             <Section title="已导入渠道">
-              <div className="table-wrap"><table className="data-table"><thead><tr><th>渠道</th><th>New API 编号</th><th>模型</th><th>检测适配器</th><th>基础地址</th><th>密钥指纹</th><th>状态</th></tr></thead><tbody>
-                {channels.map((channel) => <tr key={channel.id}><td><strong>{channel.channel_name}</strong><small>C{channel.id} · R{channel.review_id}</small></td><td><code>{channel.newapi_channel_id}</code></td><td>{channel.model || '-'}</td><td>{channel.adapter_type || '-'}</td><td><code>{channel.base_url}</code></td><td><code>{channel.credential_fingerprint || '-'}</code></td><td><Status>{statusNames[channel.status] || channel.status}</Status></td></tr>)}
-                {!loading && channels.length === 0 && <tr><td className="table-message" colSpan="7">暂无已导入渠道</td></tr>}
+              <div className="table-wrap"><table className="data-table"><thead><tr><th>渠道</th><th>New API 编号</th><th>已同步模型</th><th>检测适配器</th><th>基础地址</th><th>密钥指纹</th><th>状态</th><th></th></tr></thead><tbody>
+                {channels.map((channel) => <tr key={channel.id}><td><strong>{channel.channel_name}</strong><small>C{channel.id} · R{channel.review_id}</small></td><td><code>{channel.newapi_channel_id}</code></td><td>{channel.models?.length ? channel.models.map((model) => <span className="tag" key={model}>{model}</span>) : (channel.model || '-')}</td><td>{channel.adapter_type || '-'}</td><td><code>{channel.base_url}</code></td><td><code>{channel.credential_fingerprint || '-'}</code></td><td><Status>{statusNames[channel.status] || channel.status}</Status></td><td><div className="row-actions"><Button icon={RefreshCw} disabled={busyChannel === channel.id} variant="ghost" onClick={() => syncChannel(channel)}>同步模型</Button><Button icon={Power} disabled={busyChannel === channel.id || channel.status === 'archived'} variant="ghost" onClick={() => toggleChannel(channel)}>{channel.status === 'active' ? '下架' : '启用'}</Button><Button icon={Trash2} disabled={busyChannel === channel.id} variant="danger" onClick={() => archiveChannel(channel)}>删除</Button></div></td></tr>)}
+                {!loading && channels.length === 0 && <tr><td className="table-message" colSpan="8">暂无已导入渠道</td></tr>}
               </tbody></table></div>
             </Section>
           </>}

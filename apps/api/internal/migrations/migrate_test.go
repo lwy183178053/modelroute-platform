@@ -10,8 +10,8 @@ func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Files() 返回错误：%v", err)
 	}
-	if len(files) != 1 {
-		t.Fatalf("V2 必须只有一个空库基线迁移，实际 = %d", len(files))
+	if len(files) != 2 {
+		t.Fatalf("V2 多模型渠道必须包含两份连续迁移，实际 = %d", len(files))
 	}
 	file := files[0]
 	if file.Version != 1 || file.Name != "000001_v2_baseline.sql" {
@@ -55,12 +55,21 @@ func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
 	}
 
 	for _, removed := range []string{
-		"channel_type", "requested_models", "lifecycle", "original_currency",
+		"requested_models", "lifecycle", "original_currency",
 		"usd_exchange_rate_micros", "source_url", "checked_at", "usd_cents",
 		"exchange_rate_cny_cents_per_usd", "embeddings",
 	} {
 		if strings.Contains(file.SQL, removed) {
 			t.Fatalf("V2 基线仍包含已删除字段或能力 %q", removed)
 		}
+	}
+	if !strings.Contains(files[1].SQL, "merchant_review_model_bindings") || !strings.Contains(files[1].SQL, "merchant_channel_model_bindings") {
+		t.Fatal("多模型渠道迁移缺少模型绑定表")
+	}
+	if !strings.Contains(files[1].SQL, "channel_type integer NOT NULL DEFAULT 1") || !strings.Contains(files[1].SQL, "test_status") {
+		t.Fatal("多模型渠道迁移缺少渠道类型或逐模型检查字段")
+	}
+	if !strings.Contains(files[1].SQL, "ALTER COLUMN channel_test_id DROP NOT NULL") {
+		t.Fatal("多模型渠道迁移未允许没有旧版检测凭证的审核记录")
 	}
 }

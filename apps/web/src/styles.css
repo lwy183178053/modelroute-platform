@@ -69,11 +69,10 @@ code { font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; }
 .announcement-detail > button { width: max-content; padding: 0; border: 0; background: transparent; color: var(--teal-dark); font-size: 10px; }
 .announcement-detail > strong { margin-top: 5px; font-size: 14px; line-height: 22px; }
 .announcement-detail p { margin: 7px 0 0; color: #40514d; line-height: 22px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.profile-button { height: 44px; padding: 4px 6px; border: 0; background: transparent; display: flex; align-items: center; gap: 8px; text-align: left; }
-.profile-button:hover { background: var(--surface-soft); border-radius: 6px; }
-.profile-button > span:nth-child(2) { display: grid; min-width: 88px; }
-.profile-button strong { font-size: 12px; }
-.profile-button small { color: var(--muted); font-size: 10px; }
+.profile-summary { height: 44px; padding: 4px 6px; display: flex; align-items: center; gap: 8px; text-align: left; }
+.profile-summary > span:nth-child(2) { display: grid; min-width: 88px; }
+.profile-summary strong { font-size: 12px; }
+.profile-summary small { color: var(--muted); font-size: 10px; }
 .avatar { width: 30px; height: 30px; border-radius: 50%; background: #dcefeb; color: var(--teal-dark); display: grid; place-items: center; font-weight: 700; }
 .mobile-menu { display: none; }
 
@@ -386,8 +385,8 @@ main { min-height: calc(100vh - 66px); }
   .main-nav button { min-width: 78px; padding: 0 9px; }
   .main-nav button svg { display: none; }
   .balance-chip span { display: none; }
-  .profile-button > span:nth-child(2) { display: none; }
-  .profile-button { padding-right: 0; }
+  .profile-summary > span:nth-child(2) { display: none; }
+  .profile-summary { padding-right: 0; }
   .dashboard-grid { grid-template-columns: minmax(0, 1.5fr) minmax(280px, .8fr); }
   .admin-layout { grid-template-columns: 172px minmax(0, 1fr); }
   .admin-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -412,7 +411,7 @@ main { min-height: calc(100vh - 66px); }
   .main-nav button svg { display: block; }
   .main-nav button::after { display: none; }
   .main-nav button.active { background: var(--teal-soft); }
-  .balance-chip, .topbar-tools > .icon-button:not(.mobile-menu), .profile-button { display: none; }
+  .balance-chip, .topbar-tools > .icon-button:not(.mobile-menu), .profile-summary { display: none; }
   .announcement-popover { position: fixed; top: 58px; right: 12px; left: 12px; width: auto; max-height: calc(100vh - 70px); }
   .mobile-menu { display: inline-grid; }
   main { min-height: calc(100vh - 60px); }

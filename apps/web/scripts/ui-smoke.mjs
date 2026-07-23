@@ -364,7 +364,13 @@ try {
   await page.getByText('本周五统一处理人工提现。').waitFor();
   assert(adminMockState.announcementReadCalls === 1, '打开公告详情没有标记已读');
   await page.getByRole('button', { name: '关闭公告' }).click();
-  await page.getByRole('button', { name: /平台管理员/ }).click();
+  const profileSummary = page.locator('.profile-summary');
+  assert(await profileSummary.count() === 1, '右上角身份摘要缺失');
+  assert(await profileSummary.evaluate((element) => element.tagName === 'DIV'), '身份摘要仍然是可点击区域');
+  assert((await profileSummary.locator('.avatar').textContent()).trim() === '平', '头像没有显示昵称首字符');
+  assert((await profileSummary.locator('strong').textContent()).trim() === '平台管理员', '右上角没有显示用户昵称');
+  assert((await profileSummary.locator('small').textContent()).trim() === '管理员', '身份文案发生变化');
+  await page.getByRole('button', { name: '控制台', exact: true }).click();
   await page.getByRole('heading', { name: '账户概览' }).waitFor();
 
   const views = [

@@ -30,6 +30,13 @@ function allowedNavigation(account) {
   return items;
 }
 
+function avatarInitial(value) {
+  const text = String(value || '').trim();
+  const match = text.match(/[\u4e00-\u9fffA-Za-z0-9]/);
+  if (!match) return text.slice(0, 1) || '?';
+  return /[A-Za-z]/.test(match[0]) ? match[0].toUpperCase() : match[0];
+}
+
 function Topbar({ account, active, navigate, onLogin, onLogout }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [announcements, setAnnouncements] = useState({ items: [], unread_count: 0 });
@@ -112,7 +119,7 @@ function Topbar({ account, active, navigate, onLogin, onLogout }) {
                 </div>}
               </div>}
             </span>
-            <button aria-label={`${displayName}，进入控制台`} className="profile-button" onClick={() => switchView('console')} title="进入控制台" type="button"><span className="avatar">{displayName.slice(0, 1).toUpperCase()}</span><span><strong>{displayName}</strong><small>{roleName}</small></span></button>
+            <div aria-label={`${displayName}，${roleName}`} className="profile-summary"><span className="avatar">{avatarInitial(displayName)}</span><span><strong>{displayName}</strong><small>{roleName}</small></span></div>
             <IconButton label="退出登录" icon={LogOut} onClick={onLogout} />
           </> : account === null ? <Button className="login-button" icon={LogIn} onClick={onLogin} variant="primary">登录</Button> : null}
           <IconButton className="mobile-menu" label={mobileOpen ? '关闭菜单' : '打开菜单'} icon={mobileOpen ? X : Menu} onClick={() => setMobileOpen((value) => !value)} />

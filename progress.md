@@ -2247,3 +2247,28 @@
 - `docs/账号与管理员接口.md`：补充列表操作菜单行为说明。
 - `apps/web/artifacts/*.png`：按本地构建更新受影响的桌面和移动端截图。
 - 回滚点：执行 `git revert <本轮提交哈希>` 可回退统一菜单代码、测试、文档和截图；本轮仅本地修改，未上传服务器。
+
+## 2026-07-23 - Task: 调整顶部用户身份摘要
+
+### What was done
+
+- 右上角显示账号昵称，头像自动取昵称中的第一个汉字、字母或数字，英文字母统一转为大写显示。
+- 身份文案继续显示管理员、商户或普通用户；身份摘要改为静态展示，移除点击跳转控制台行为。
+- 更新生产界面验收脚本，确认桌面头像首字符、身份文案和非按钮语义；移动端隐藏规则保持原样。
+
+### Testing
+
+- `npm.cmd run test:ui` 通过。
+- `npm.cmd run capture` 通过，桌面与移动端截图生成完成。
+- `node data/ui-preview/verify.mjs` 通过，运行时错误为 0、根页面无横向溢出。
+- `node data/ui-preview/account-settings-check.mjs` 通过，控制台桌面和移动端布局无横向溢出。
+- `git diff --check` 通过。
+
+### Notes
+
+- `apps/web/src/main.jsx`：新增头像首字符提取逻辑，将可点击按钮改为静态身份摘要。
+- `apps/web/src/styles.css`：同步身份摘要和移动端隐藏样式，移除 hover 点击反馈。
+- `apps/web/scripts/production-smoke.mjs`：更新头像静态展示和模型操作菜单验收。
+- `docs/账号与管理员接口.md`：补充顶部昵称、首字符头像和身份文案规则。
+- `progress.md`：追加本轮验证和回滚记录。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可回退顶部身份摘要代码、测试和文档；本轮仅本地修改，未上传服务器。

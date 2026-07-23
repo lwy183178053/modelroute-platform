@@ -30,6 +30,13 @@ async function navigate(page, label, mobile) {
     .click();
 }
 
+async function clickRowAction(page, label, index = 0) {
+  await page.getByRole('button', { name: '操作', exact: true }).nth(index).click();
+  const menu = page.getByRole('menu').last();
+  await menu.waitFor();
+  await menu.getByRole('menuitem', { name: label, exact: true }).click();
+}
+
 async function verifyViewport(browser, viewport, suffix) {
   const mobile = viewport.width < 700;
   const context = await browser.newContext({ viewport, locale: 'zh-CN' });
@@ -72,8 +79,11 @@ async function verifyViewport(browser, viewport, suffix) {
   await page.getByRole('button', { name: '关闭公告' }).click();
 
   if (!mobile) {
-    await page.locator('.profile-button').click();
-    await page.getByRole('heading', { name: '账户概览' }).waitFor();
+    const profile = page.locator('.profile-summary');
+    await profile.waitFor();
+    assert(await profile.evaluate((element) => element.tagName === 'DIV'), `${suffix} profile summary should not be clickable`);
+    assert((await profile.locator('.avatar').textContent()).trim().length === 1, `${suffix} profile avatar should contain one initial`);
+    assert((await profile.locator('small').textContent()).trim() === '管理员', `${suffix} profile identity label mismatch`);
   }
 
   await navigate(page, '商户中心', mobile);
@@ -97,7 +107,7 @@ async function verifyViewport(browser, viewport, suffix) {
   await adminSidebar.getByRole('button', { name: '模型与定价', exact: true }).click();
   await page.getByRole('heading', { name: '标准模型与基础价格' }).waitFor();
   await page.getByText(/^价格版本 v\d+$/).first().waitFor();
-  await page.getByRole('button', { name: '发布价格', exact: true }).first().click();
+  await clickRowAction(page, '发布价格');
   const dialog = page.getByRole('dialog', { name: '发布模型价格' });
   await dialog.waitFor();
   await dialog.getByText('每百万 Token 价格', { exact: true }).waitFor();
@@ -110,7 +120,7 @@ async function verifyViewport(browser, viewport, suffix) {
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), `${suffix} final horizontal overflow`);
   assert(runtimeErrors.length === 0, `${suffix} runtime errors: ${runtimeErrors.join('; ')}`);
   assert(serverErrors.length === 0, `${suffix} server errors: ${serverErrors.join('; ')}`);
-  console.log(`${suffix}=success merchant_sidebar=shared announcement=visible profile=${mobile ? 'responsive-hidden' : 'console-link'} pricing=absolute no_overflow=true`);
+  console.log(`${suffix}=success merchant_sidebar=shared announcement=visible profile=${mobile ? 'responsive-hidden' : 'static-summary'} pricing=absolute no_overflow=true`);
   await context.close();
 }
 

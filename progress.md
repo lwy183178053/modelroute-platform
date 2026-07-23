@@ -2132,3 +2132,23 @@
 
 - 本条为上一条模型市场任务的验证补充，不增加业务代码。
 - 回滚点：沿用上一条模型市场任务的提交回滚点。
+
+## 2026-07-23 - Task: 移除模型市场可用渠道重复文案
+
+### What was done
+
+- 删除模型市场每行数量下方重复的“可用渠道”小字，仅保留表头列名和渠道数量。
+
+### Testing
+
+- `npm.cmd run test:ui` 通过，断言页面只保留一个“可用渠道”文本。
+- `npm.cmd run capture` 通过，桌面与移动端模型市场截图已更新。
+- `node data/ui-preview/verify.mjs` 通过，运行时错误为 `0`，根页面无横向溢出。
+- `git diff --check` 通过。
+
+### Notes
+
+- `apps/web/src/views/MarketView.jsx`：移除渠道数量行内重复说明。
+- `apps/web/scripts/ui-smoke.mjs`、`data/ui-preview/verify.mjs`：增加重复文案回归断言。
+- `apps/web/artifacts/market-desktop.png`：更新桌面端市场截图。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可恢复行内重复文案；本轮未上传或部署服务器。

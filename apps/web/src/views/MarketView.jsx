@@ -139,7 +139,7 @@ export default function MarketView({ navigate }) {
                   <td><strong>{formatCompactCount(offer.token_usage)}</strong></td>
                   <td><strong>{formatLastCalled(offer.last_called_at)}</strong></td>
                   <td><span className="price-multiple">{formatMultiplier(offer.multiplier_bps)}</span></td>
-                  <td><strong>{offer.channel_count || 0} 个</strong><small>可用渠道</small></td>
+                  <td><strong>{offer.channel_count || 0} 个</strong></td>
                 </tr>;
               })}
             </tbody>

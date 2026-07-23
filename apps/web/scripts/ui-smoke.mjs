@@ -339,6 +339,7 @@ try {
   await page.getByText('32.4K', { exact: true }).waitFor();
   await page.getByText('2.6B', { exact: true }).waitFor();
   await page.getByText('10分钟前', { exact: true }).waitFor();
+  assert(await page.getByText('可用渠道', { exact: true }).count() === 1, '模型市场行内重复显示可用渠道');
   assert(await page.getByText('当前价格', { exact: true }).count() === 0, '模型市场仍显示当前价格');
   assert(await page.getByText('GPT-5.2').count() === 0, '模型市场仍展示演示报价');
   assert(await page.getByRole('button', { name: '接入文档', exact: true }).count() === 0, '模型市场仍显示无效接入文档按钮');

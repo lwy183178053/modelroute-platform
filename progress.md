@@ -1511,3 +1511,26 @@
 
 - `progress.md`：追加提交后完整本地验收、隔离契约清理和回滚点。
 - 回滚点：代码与工具基线提交为 `7641ea9`；本条只追加验证证据，可随本轮提交执行 `git revert <本阶段提交>`。103 尚未执行 V2 重置。
+
+## 2026-07-23 - Task: 修复 New API 长用户名初始化并支持中断续跑
+
+### What was done
+
+- 修复 New API `/api/setup` 只接受最多 12 字符用户名导致目标管理员邮箱初始化失败的问题；新库先创建受控临时根账号，再通过 New API 原生用户接口改为目标管理员用户名。
+- 改名后强制使用目标用户名重新登录并校验根角色，SMTP 设置只通过最终管理员会话恢复。
+- 增加 setup 已完成但尚未改名时的恢复路径，初始化脚本可从该中断点继续，不需要再次清理数据库。
+
+### Testing
+
+- 新增长用户名失败用例并先确认旧脚本因 17 字符用户名超过 setup 上限而失败；实现后执行 `python -m unittest deploy.tests.test_bootstrap_newapi -v`，3 个定向测试全部通过。
+- 新增已初始化临时管理员的中断恢复用例并先确认旧流程无法继续；实现后该用例通过。
+- 执行 `python -m unittest discover -s deploy/tests -p 'test_*.py' -v`，24 个部署测试全部通过；执行 `python -m compileall -q deploy/scripts/bootstrap-newapi.py` 和 `git diff --check` 通过。
+- 使用固定镜像 `calciumion/new-api:v1.0.0-rc.21` 启动隔离 PostgreSQL、Redis 和 New API，真实完成短名 setup、原生根账号改名和目标邮箱重新登录；测试容器、卷及网络随后全部清理。
+
+### Notes
+
+- `deploy/scripts/bootstrap-newapi.py`：增加短用户名初始化、原生根账号改名、最终登录校验和中断恢复。
+- `deploy/tests/test_bootstrap_newapi.py`：覆盖长目标用户名和 setup 后中断两条回归路径。
+- `docs/部署运行手册.md`：记录 New API 首次初始化的用户名限制、改名顺序和续跑方式。
+- `progress.md`：追加本轮实现、测试证据、文件清单和回滚点。
+- 回滚点：前一提交为 `9575ae8`；执行 `git revert <本阶段提交>` 可回退本轮初始化脚本。若 103 已完成根账号改名，代码回退不会自动改回数据库用户名；数据级回滚使用 `/opt/modelroute-platform/shared/backups/20260723T025901Z`。

@@ -22,6 +22,8 @@ SMTP_KEYS = {
     "SMTPToken",
 }
 
+BOOTSTRAP_USERNAME = "mradmin"
+
 
 def request(opener, base_url, method, path, payload=None, headers=None):
     body = None
@@ -64,6 +66,37 @@ def load_smtp_options(path):
     return {key: str(value) for key, value in values.items()}
 
 
+def validate_root(login):
+    if int(login.get("role", 0)) != 100 or int(login.get("id", 0)) <= 0:
+        raise RuntimeError("New API 唯一管理员身份校验失败")
+
+
+def rename_bootstrap_admin(opener, base_url, username, password):
+    bootstrap_login = request(
+        opener,
+        base_url,
+        "POST",
+        "/api/user/login",
+        {"username": BOOTSTRAP_USERNAME, "password": password},
+    )
+    validate_root(bootstrap_login)
+    request(
+        opener,
+        base_url,
+        "PUT",
+        "/api/user/",
+        {
+            "id": bootstrap_login["id"],
+            "username": username,
+            "display_name": "ModelRoute",
+            "group": "default",
+            "role": 100,
+            "status": 1,
+        },
+        {"New-Api-User": str(bootstrap_login["id"])},
+    )
+
+
 def main():
     if len(sys.argv) != 3:
         raise SystemExit("用法：bootstrap-newapi.py <New API 地址> <SMTP 设置备份>")
@@ -84,13 +117,27 @@ def main():
             "POST",
             "/api/setup",
             {
-                "username": username,
+                "username": BOOTSTRAP_USERNAME,
                 "password": password,
                 "confirmPassword": password,
                 "SelfUseModeEnabled": False,
                 "DemoSiteEnabled": False,
             },
         )
+
+        rename_bootstrap_admin(opener, base_url, username, password)
+
+    if setup.get("status"):
+        try:
+            request(
+                opener,
+                base_url,
+                "POST",
+                "/api/user/login",
+                {"username": username, "password": password},
+            )
+        except RuntimeError:
+            rename_bootstrap_admin(opener, base_url, username, password)
 
     login = request(
         opener,
@@ -99,8 +146,7 @@ def main():
         "/api/user/login",
         {"username": username, "password": password},
     )
-    if int(login.get("role", 0)) != 100 or int(login.get("id", 0)) <= 0:
-        raise RuntimeError("New API 唯一管理员身份校验失败")
+    validate_root(login)
     headers = {"New-Api-User": str(login["id"])}
     for key, value in load_smtp_options(smtp_path).items():
         request(

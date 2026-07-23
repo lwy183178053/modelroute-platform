@@ -3,7 +3,7 @@ set -eu
 
 BASE_URL="${1:-https://aggregate.lwylink.xyz}"
 BASE_URL="${BASE_URL%/}"
-ADMIN_USERNAME="${ADMIN_USERNAME:-modelroute}"
+ADMIN_USERNAME="${ADMIN_USERNAME:-3180615598@qq.com}"
 ADMIN_PASSWORD_FILE="${ADMIN_PASSWORD_FILE:-/opt/modelroute-platform/shared/bootstrap-admin.txt}"
 
 if [ ! -r "$ADMIN_PASSWORD_FILE" ]; then

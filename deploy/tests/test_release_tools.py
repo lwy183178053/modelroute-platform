@@ -34,8 +34,48 @@ class ReleaseToolContractTest(unittest.TestCase):
             '-b "$USER_COOKIE_JAR"',
             '"$NEW_API_BASE_URL/api/user/"',
             '-X DELETE "$NEW_API_BASE_URL/api/user/$TEST_USER_ID"',
+            "/api/merchant/channel-tests",
+            '"canonical_model_id"',
+            '"test_receipt"',
+            "merchant_channel_tests",
+            "receipt_token_hash",
+            "PLATFORM_ENCRYPTION_KEY",
         ):
             self.assertIn(marker, verifier)
+        for old_field in ('"channel_type"', '"models"'):
+            self.assertNotIn(old_field, verifier)
+
+    def test_production_verifiers_use_the_unique_admin_username(self):
+        for name in (
+            "verify-accounts.sh",
+            "verify-merchants.sh",
+            "verify-routing.sh",
+            "verify-payments.sh",
+            "verify-settlement.sh",
+            "verify-operations.sh",
+        ):
+            self.assertIn(
+                'ADMIN_USERNAME="${ADMIN_USERNAME:-3180615598@qq.com}"',
+                read_script(name),
+                name,
+            )
+
+    def test_routing_verifier_uses_the_v2_zero_to_five_range(self):
+        verifier = read_script("verify-routing.sh")
+        for marker in (
+            'assert int(policy["minimum_multiplier_bps"]) == 0',
+            'assert int(policy["maximum_multiplier_bps"]) == 50000',
+            '"minimum_multiplier_bps":0',
+            '"maximum_multiplier_bps":50000',
+        ):
+            self.assertIn(marker, verifier)
+        for old_marker in (
+            'assert int(policy["minimum_multiplier_bps"]) == 1',
+            'assert int(policy["maximum_multiplier_bps"]) == 10000',
+            '"minimum_multiplier_bps":1',
+            '"maximum_multiplier_bps":10000',
+        ):
+            self.assertNotIn(old_marker, verifier)
 
     def test_official_model_seed_catalog_is_included_in_release(self):
         catalog = ROOT / "apps" / "api" / "internal" / "modelseed" / "data" / "2026-07-23-v2.json"

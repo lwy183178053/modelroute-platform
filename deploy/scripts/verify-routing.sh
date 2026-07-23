@@ -4,7 +4,7 @@ umask 077
 
 BASE_URL="${1:-https://aggregate.lwylink.xyz}"
 BASE_URL="${BASE_URL%/}"
-ADMIN_USERNAME="${ADMIN_USERNAME:-modelroute}"
+ADMIN_USERNAME="${ADMIN_USERNAME:-3180615598@qq.com}"
 ADMIN_PASSWORD_FILE="${ADMIN_PASSWORD_FILE:-/opt/modelroute-platform/shared/bootstrap-admin.txt}"
 
 if [ ! -r "$ADMIN_PASSWORD_FILE" ]; then
@@ -83,18 +83,18 @@ policy = data["data"]
 assert data.get("success") is True
 assert int(policy["newapi_token_id"]) == int(sys.argv[2])
 assert policy["mode"] == "smart" and policy["priority"] == "stability"
-assert int(policy["minimum_multiplier_bps"]) == 1
-assert int(policy["maximum_multiplier_bps"]) == 10000
+assert int(policy["minimum_multiplier_bps"]) == 0
+assert int(policy["maximum_multiplier_bps"]) == 50000
 PY
 
-status="$(printf '{"mode":"fixed","priority":"stability","minimum_multiplier_bps":1,"maximum_multiplier_bps":10000,"merchant_ids":[]}' |
+status="$(printf '{"mode":"fixed","priority":"stability","minimum_multiplier_bps":0,"maximum_multiplier_bps":50000,"merchant_ids":[]}' |
   curl -sS -o "$WORK_DIR/invalid-fixed.json" -w '%{http_code}' -b "$COOKIE_JAR" -H "Origin: $BASE_URL" -H 'Content-Type: application/json' --data-binary @- -X PUT "$BASE_URL/api/routing-policies/$KEY_ID")"
 if [ "$status" != "400" ]; then
   echo "空固定商户策略状态码为 $status，预期 400" >&2
   exit 1
 fi
 
-printf '{"mode":"smart","priority":"price","minimum_multiplier_bps":1,"maximum_multiplier_bps":10000,"merchant_ids":[]}' |
+printf '{"mode":"smart","priority":"price","minimum_multiplier_bps":0,"maximum_multiplier_bps":50000,"merchant_ids":[]}' |
 curl -fsS -b "$COOKIE_JAR" -H "Origin: $BASE_URL" -H 'Content-Type: application/json' --data-binary @- -X PUT "$BASE_URL/api/routing-policies/$KEY_ID" >"$WORK_DIR/saved-policy.json"
 
 curl -fsS -b "$COOKIE_JAR" -H "Origin: $BASE_URL" -X POST "$BASE_URL/api/keys/$KEY_ID/reveal" >"$WORK_DIR/key.json"

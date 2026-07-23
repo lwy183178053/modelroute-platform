@@ -12,6 +12,7 @@ import (
 
 const maxModelRequestBytes = 64 << 20
 const maxModelListBytes = 4 << 20
+const routeAlgorithmVersion = "weighted-v1"
 
 func (s *server) modelListProxy(w http.ResponseWriter, r *http.Request) {
 	if s.services.NewAPI == nil {
@@ -149,8 +150,10 @@ func (s *server) modelProxy(w http.ResponseWriter, r *http.Request) {
 	requestID, _ := r.Context().Value(requestIDContextKey{}).(string)
 	if err := s.services.Routing.StartRouteDecision(r.Context(), RouteDecision{
 		RequestID: requestID, TokenBindingID: selection.TokenBindingID,
+		PolicyID:         selection.PolicyID,
 		CanonicalModelID: selection.CanonicalModelID, OfferChannelAliasID: selection.Candidates[0].OfferChannelAliasID,
-		Mode: selection.Mode, Priority: selection.Priority,
+		Mode: selection.Mode, Priority: selection.Priority, AlgorithmVersion: routeAlgorithmVersion,
+		CandidateCount: len(selection.Candidates), SelectedMetrics: routeDecisionMetrics(selection.Candidates[0]),
 	}); err != nil {
 		writeOpenAIError(w, http.StatusServiceUnavailable, "routing_store_error", "记录路由决策失败")
 		return
@@ -211,6 +214,20 @@ func (s *server) modelProxy(w http.ResponseWriter, r *http.Request) {
 			StatusCode: response.StatusCode, FirstByteMS: firstByteMS, Result: result,
 		})
 		return
+	}
+}
+
+func routeDecisionMetrics(candidate RouteCandidate) map[string]any {
+	return map[string]any{
+		"merchant_id":                 candidate.MerchantID,
+		"merchant_channel_id":         candidate.MerchantChannelID,
+		"multiplier_bps":              candidate.MultiplierBPS,
+		"availability_ppm":            candidate.AvailabilityPPM,
+		"ttft_p95_ms":                 candidate.TTFTP95MS,
+		"cache_hit_ppm":               candidate.CacheHitPPM,
+		"cache_weight_ready":          candidate.CacheWeightReady,
+		"merchant_cache_hit_ppm":      candidate.MerchantCacheHitPPM,
+		"merchant_cache_weight_ready": candidate.MerchantCacheWeightReady,
 	}
 }
 

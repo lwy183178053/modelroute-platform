@@ -10,12 +10,6 @@ import (
 	"time"
 )
 
-var withdrawalRecipientTypes = map[string]bool{
-	"alipay": true,
-	"bank":   true,
-	"other":  true,
-}
-
 func (s *server) merchantBalance(w http.ResponseWriter, r *http.Request) {
 	_, session, _, ok := s.requireMerchant(w, r)
 	if !ok || !s.settlementReady(w) {
@@ -52,17 +46,19 @@ func (s *server) createMerchantWithdrawal(w http.ResponseWriter, r *http.Request
 	}
 	var request struct {
 		AmountQuota      int64  `json:"amount_quota"`
-		RecipientType    string `json:"recipient_type"`
 		RecipientAccount string `json:"recipient_account"`
 	}
 	if err := decodeJSON(r, &request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_withdrawal", "提现参数无效")
 		return
 	}
-	request.RecipientType = strings.TrimSpace(request.RecipientType)
 	request.RecipientAccount = strings.TrimSpace(request.RecipientAccount)
-	if request.AmountQuota <= 0 || !withdrawalRecipientTypes[request.RecipientType] || len(request.RecipientAccount) < 5 || len(request.RecipientAccount) > 256 {
-		writeAPIError(w, http.StatusBadRequest, "invalid_withdrawal", "提现金额或收款账户无效")
+	if _, _, ok := withdrawalBreakdown(request.AmountQuota); !ok {
+		writeAPIError(w, http.StatusBadRequest, "invalid_withdrawal_amount", "提现金额必须为不低于 50 元的整数")
+		return
+	}
+	if len(request.RecipientAccount) < 5 || len(request.RecipientAccount) > 256 {
+		writeAPIError(w, http.StatusBadRequest, "invalid_alipay_account", "支付宝账户无效")
 		return
 	}
 	accountBytes := []byte(request.RecipientAccount)
@@ -80,7 +76,7 @@ func (s *server) createMerchantWithdrawal(w http.ResponseWriter, r *http.Request
 	}
 	withdrawal, err := s.services.Settlement.CreateMerchantWithdrawal(r.Context(), CreateMerchantWithdrawalCommand{
 		WithdrawalNo: withdrawalNo, UserID: session.UserID, AmountQuota: request.AmountQuota,
-		RecipientType: request.RecipientType, EncryptedRecipientAccount: encrypted,
+		RecipientType: "alipay", EncryptedRecipientAccount: encrypted,
 		RecipientAccountMasked: maskRecipientAccount(request.RecipientAccount), CreatedAt: now,
 	})
 	if err != nil {

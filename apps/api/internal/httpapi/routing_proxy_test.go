@@ -88,6 +88,10 @@ func TestModelProxyRetriesBeforeFirstByteAndPreservesStream(t *testing.T) {
 	if len(repository.started) != 1 || repository.started[0].OfferChannelAliasID != 101 || len(repository.completed) != 1 || repository.completed[0].OfferChannelAliasID != 102 || repository.completed[0].Attempts != 2 {
 		t.Fatalf("路由决策记录不完整：started=%+v completed=%+v", repository.started, repository.completed)
 	}
+	decision := repository.started[0]
+	if decision.PolicyID != 91 || decision.AlgorithmVersion != "weighted-v1" || decision.CandidateCount != 2 || decision.SelectedMetrics["merchant_channel_id"] != int64(51) {
+		t.Fatalf("路由决策上下文不完整：%+v", decision)
+	}
 	if len(repository.observations) != 2 || repository.observations[0].Outcome != "temporary_failure" || repository.observations[1].Outcome != "success" {
 		t.Fatalf("被动健康记录=%+v", repository.observations)
 	}

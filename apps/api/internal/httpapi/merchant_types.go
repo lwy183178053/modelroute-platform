@@ -9,6 +9,7 @@ import (
 var (
 	ErrMerchantNotFound     = errors.New("merchant not found")
 	ErrMerchantConflict     = errors.New("merchant state conflict")
+	ErrMerchantNameConflict = errors.New("merchant display name conflict")
 	ErrMerchantInvalidState = errors.New("merchant invalid state")
 )
 
@@ -181,6 +182,7 @@ type ChannelSubmission struct {
 type CreateMerchantApplication struct {
 	UserID              int
 	DisplayName         string
+	DisplayNameKey      string
 	WebsiteURL          string
 	BusinessDescription string
 	Channel             ChannelSubmission

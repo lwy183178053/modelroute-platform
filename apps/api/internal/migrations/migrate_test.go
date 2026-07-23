@@ -10,8 +10,8 @@ func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Files() 返回错误：%v", err)
 	}
-	if len(files) != 3 {
-		t.Fatalf("V2 多模型渠道和模型生命周期必须包含三份连续迁移，实际 = %d", len(files))
+	if len(files) != 6 {
+		t.Fatalf("V2 七天缓存指标必须包含六份连续迁移，实际 = %d", len(files))
 	}
 	file := files[0]
 	if file.Version != 1 || file.Name != "000001_v2_baseline.sql" {
@@ -48,6 +48,9 @@ func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
 		"maximum_multiplier_bps BETWEEN 0 AND 50000",
 		"next_probe_at timestamptz",
 		"minimum_cny_cents", "maximum_cny_cents", "amount_cny_cents", "newapi_quota",
+		"amount_quota >= 25000000", "amount_quota % 500000 = 0",
+		"tax_quota bigint GENERATED ALWAYS AS", "net_payout_quota bigint GENERATED ALWAYS AS",
+		"recipient_type = 'alipay'",
 	} {
 		if !strings.Contains(file.SQL, fragment) {
 			t.Fatalf("V2 基线缺少约束或字段 %q", fragment)
@@ -74,5 +77,40 @@ func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
 	}
 	if !strings.Contains(files[2].SQL, "'deleted'") {
 		t.Fatal("模型生命周期迁移缺少 deleted 状态")
+	}
+	for _, fragment := range []string{
+		"display_name_key", "CREATE TABLE merchant_name_reservations",
+		"merchant_name_reservations_pkey", "status IN ('pending', 'active')",
+	} {
+		if !strings.Contains(files[3].SQL, fragment) {
+			t.Fatalf("商户名称迁移缺少 %q", fragment)
+		}
+	}
+	for _, fragment := range []string{
+		"newapi_user_id bigint NOT NULL",
+		"name varchar(50) NOT NULL",
+		"priority IN ('balanced', 'price', 'success', 'latency', 'cache')",
+		"minimum_cache_hit_ppm",
+		"routing_policy_id bigint NOT NULL REFERENCES routing_policies(id)",
+		"algorithm_version varchar(32)",
+		"candidate_count integer",
+		"selected_metrics jsonb",
+	} {
+		if !strings.Contains(files[4].SQL, fragment) {
+			t.Fatalf("独立路由迁移缺少 %q", fragment)
+		}
+	}
+	for _, fragment := range []string{
+		"CREATE TABLE route_metric_buckets",
+		"CREATE TABLE route_metric_snapshots",
+		"prompt_tokens bigint",
+		"cache_tokens bigint",
+		"cache_hit_ppm integer",
+		"cache_weight_ready boolean",
+		"metrics_updated_at timestamptz",
+	} {
+		if !strings.Contains(files[5].SQL, fragment) {
+			t.Fatalf("缓存指标迁移缺少 %q", fragment)
+		}
 	}
 }

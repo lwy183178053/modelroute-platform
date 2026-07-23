@@ -45,6 +45,12 @@ function formatMultiplier(value) {
   return bps === 0 ? '免费' : `${(bps / 10_000).toFixed(2)}x`;
 }
 
+function formatCacheHit(value, ready, protocol = '') {
+  if (protocol === 'image_generation') return '-';
+  if (!ready) return '样本不足';
+  return `${(Number(value || 0) / 10_000).toFixed(2)}%`;
+}
+
 function channelLifecycleRows(reviews, channels) {
   const importedReviews = new Set(channels.map((channel) => Number(channel.review_id || 0)).filter(Boolean));
   const reviewRows = reviews
@@ -156,7 +162,7 @@ export default function MerchantView({ account, openModal }) {
 
   return (
     <div className="view-shell merchant-view">
-      <PageHeader eyebrow={`商户中心 · 用户 ID ${account.id}`} title="商户经营概览" description="管理渠道、上架模型、调用收入和人工提现。" actions={merchant && <Status>{merchant.merchant_status === 'active' ? '正常' : statusNames[merchant.merchant_status] || merchant.merchant_status}</Status>} />
+      <PageHeader eyebrow={`商户中心 · 用户 ID ${account.id}`} title="商户经营概览" description="管理渠道、上架模型、调用收入和人工提现。" actions={merchant && <span className="merchant-name-badge" title={merchant.merchant_name}>{merchant.merchant_name}</span>} />
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}
       {!error && !loading && !canSubmit && <InlineNotice tone="warning">当前商户资料尚未就绪</InlineNotice>}
 
@@ -190,18 +196,19 @@ export default function MerchantView({ account, openModal }) {
           </Section>}
 
           {section === 'offers' && <Section title="上架模型" description="一个模型统一设置价格，可由多个已审核渠道承载" actions={canSubmit && <Button disabled={!channels.length || !models.length} icon={BadgeDollarSign} variant="primary" onClick={() => openModal({ type: 'quote', models: models.filter((model) => model.status === 'active'), onSaved: load })}>设置模型价格</Button>}>
-            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>模型</th><th>价格倍率</th><th>调用次数</th><th>Token 用量</th><th>最后调用</th><th>可用渠道</th><th>状态</th><th>健康</th><th>操作</th></tr></thead><tbody>
+            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>模型</th><th>价格倍率</th><th>调用次数</th><th>Token 用量</th><th>缓存命中率</th><th>最后调用</th><th>可用渠道</th><th>状态</th><th>健康</th><th>操作</th></tr></thead><tbody>
               {offers.map((offer) => <FragmentOfferRow key={offer.offer_id} offer={offer} expanded={expandedOffer === offer.offer_id} actions={<ActionMenu items={[{ label: '修改模型价格', onClick: () => openModal({ type: 'quote', models, offer, onSaved: load }) }, offer.offer_status === 'active' ? { label: '下架', onClick: () => changeOfferStatus(offer, false) } : { label: '上架', onClick: () => changeOfferStatus(offer, true) }, { label: expandedOffer === offer.offer_id ? '收起渠道状态' : '查看渠道状态', onClick: () => setExpandedOffer(expandedOffer === offer.offer_id ? 0 : offer.offer_id) }, { label: '删除', danger: true, onClick: () => deleteOffer(offer) }]} /> } />)}
-              {!loading && offers.length === 0 && <tr><td className="table-message" colSpan="10">暂无上架模型</td></tr>}
+              {!loading && offers.length === 0 && <tr><td className="table-message" colSpan="11">暂无上架模型</td></tr>}
             </tbody></table></div>
           </Section>}
 
           {section === 'usage' && <UsageLogTable view="merchant" data={usage.data} error={usage.error} filters={<div className="filter-toolbar"><Select aria-label="筛选模型" onChange={(event) => { setUsageModel(event.target.value); setUsagePage(1); }} value={usageModel}><option value="all">全部模型</option>{(usage.data?.filters?.models || []).map((model) => <option key={model} value={model}>{model}</option>)}</Select></div>} loading={usage.loading} onRefresh={usage.load} page={usagePage} pageSize={usagePageSize} total={usage.data?.logs?.total} onPageChange={setUsagePage} onPageSizeChange={(nextPageSize) => { setUsagePageSize(nextPageSize); setUsagePage(1); }} />}
 
-          {section === 'withdrawals' && <Section title="提现记录" actions={canSubmit && <Button disabled={!balance?.available_quota} icon={Landmark} variant="primary" onClick={() => openModal({ type: 'withdraw', balance, onSaved: load })}>申请提现</Button>}>
-            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>申请号</th><th>金额</th><th>收款方式</th><th>收款账户</th><th>状态</th><th>申请时间</th></tr></thead><tbody>
-              {withdrawals.map((item) => <tr key={item.id}><td><code>{item.id}</code></td><td><code>{item.withdrawal_no}</code></td><td><strong>{formatQuota(item.amount_quota)}</strong></td><td>{item.recipient_type === 'alipay' ? '支付宝' : item.recipient_type === 'bank' ? '银行卡' : '其他'}</td><td><code>{item.recipient_account_masked}</code></td><td><Status>{withdrawalStatusNames[item.status] || item.status}</Status></td><td>{formatDate(item.created_at)}</td></tr>)}
-              {!loading && withdrawals.length === 0 && <tr><td className="table-message" colSpan="7">暂无提现申请</td></tr>}
+          {section === 'withdrawals' && <Section title="提现记录" actions={canSubmit && <Button disabled={Number(balance?.available_quota || 0) < 25_000_000} icon={Landmark} variant="primary" onClick={() => openModal({ type: 'withdraw', balance, onSaved: load })}>申请提现</Button>}>
+            {Number(balance?.available_quota || 0) < 25_000_000 && <InlineNotice tone="warning">可提现余额满 ¥50.00 后开放申请，还差 {formatQuota(25_000_000 - Number(balance?.available_quota || 0))}。</InlineNotice>}
+            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>申请号</th><th>申请金额</th><th>税费（3%）</th><th>实际到账</th><th>支付宝账户</th><th>状态</th><th>申请时间</th></tr></thead><tbody>
+              {withdrawals.map((item) => <tr key={item.id}><td><code>{item.id}</code></td><td><code>{item.withdrawal_no}</code></td><td><strong>{formatQuota(item.amount_quota)}</strong></td><td>{formatQuota(item.tax_quota)}</td><td><strong>{formatQuota(item.net_payout_quota)}</strong></td><td><code>{item.recipient_account_masked}</code></td><td><Status>{withdrawalStatusNames[item.status] || item.status}</Status></td><td>{formatDate(item.created_at)}</td></tr>)}
+              {!loading && withdrawals.length === 0 && <tr><td className="table-message" colSpan="8">暂无提现申请</td></tr>}
             </tbody></table></div>
             <Pagination page={withdrawalPage} pageSize={withdrawalPageSize} total={withdrawalTotal} onPageChange={setWithdrawalPage} onPageSizeChange={(nextPageSize) => { setWithdrawalPageSize(nextPageSize); setWithdrawalPage(1); }} />
           </Section>}
@@ -213,7 +220,7 @@ export default function MerchantView({ account, openModal }) {
 
 function FragmentOfferRow({ offer, expanded, actions }) {
   return <>
-    <tr><td><code>{offer.offer_id}</code></td><td><strong>{offer.model}</strong><small>{protocolNames[offer.protocol] || offer.protocol}</small></td><td><span className="price-multiple">{formatMultiplier(offer.multiplier_bps)}</span></td><td>{formatCompactCount(offer.call_count)}</td><td>{formatCompactCount(offer.token_usage)}</td><td>{formatLastCalled(offer.last_called_at)}</td><td>{offer.channel_count || 0} 个</td><td><Status>{offer.offer_status === 'active' ? '已上架' : statusNames[offer.offer_status] || offer.offer_status}</Status></td><td><Status>{healthNames[offer.health_state] || offer.health_state}</Status></td><td>{actions}</td></tr>
-    {expanded && <tr className="offer-channel-detail"><td colSpan="10"><div className="table-wrap"><table className="data-table compact-table"><thead><tr><th>渠道 ID</th><th>渠道名称</th><th>状态</th><th>可用率</th><th>P95 首字</th></tr></thead><tbody>{(offer.channels || []).map((channel) => <tr key={channel.merchant_channel_id}><td><code>{channel.merchant_channel_id}</code></td><td>{channel.channel_name}</td><td><Status>{healthNames[channel.health_state] || channel.health_state}</Status></td><td>{formatAvailability(channel.availability_ppm)}</td><td>{formatLatency(channel.ttft_p95_ms)}</td></tr>)}</tbody></table></div></td></tr>}
+    <tr><td><code>{offer.offer_id}</code></td><td><strong>{offer.model}</strong><small>{protocolNames[offer.protocol] || offer.protocol}</small></td><td><span className="price-multiple">{formatMultiplier(offer.multiplier_bps)}</span></td><td>{formatCompactCount(offer.call_count)}</td><td>{formatCompactCount(offer.token_usage)}</td><td>{formatCacheHit(offer.cache_hit_ppm, offer.cache_weight_ready, offer.protocol)}</td><td>{formatLastCalled(offer.last_called_at)}</td><td>{offer.channel_count || 0} 个</td><td><Status>{offer.offer_status === 'active' ? '已上架' : statusNames[offer.offer_status] || offer.offer_status}</Status></td><td><Status>{healthNames[offer.health_state] || offer.health_state}</Status></td><td>{actions}</td></tr>
+    {expanded && <tr className="offer-channel-detail"><td colSpan="11"><div className="table-wrap"><table className="data-table compact-table"><thead><tr><th>渠道 ID</th><th>渠道名称</th><th>状态</th><th>可用率</th><th>P95 首字</th><th>缓存命中率</th></tr></thead><tbody>{(offer.channels || []).map((channel) => <tr key={channel.merchant_channel_id}><td><code>{channel.merchant_channel_id}</code></td><td>{channel.channel_name}</td><td><Status>{healthNames[channel.health_state] || channel.health_state}</Status></td><td>{formatAvailability(channel.availability_ppm)}</td><td>{formatLatency(channel.ttft_p95_ms)}</td><td>{formatCacheHit(channel.cache_hit_ppm, channel.cache_weight_ready, offer.protocol)}</td></tr>)}</tbody></table></div></td></tr>}
   </>;
 }

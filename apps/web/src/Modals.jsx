@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Check, CreditCard, KeyRound, Landmark, LockKeyhole, Plus, RotateCcw, Send, ShieldCheck, Store } from 'lucide-react';
 import AuthModal from './AuthModal';
 import { apiRequest, formatPriceMicros, formatQuota } from './api';
-import { Button, Field, InlineNotice, Modal, Select, Status, TextInput } from './ui';
+import { Button, Field, InlineNotice, Modal, Pagination, Select, Status, TextInput } from './ui';
 
 function Footer({ cancel, submit, submitText, icon = Check }) {
   return <><Button onClick={cancel}>取消</Button><Button icon={icon} variant="primary" onClick={submit}>{submitText}</Button></>;
@@ -12,21 +12,62 @@ function StatusLine({ result }) {
   return <InlineNotice>检测通过 · {result.adapter_type} · {result.latency_ms} ms</InlineNotice>;
 }
 
+function merchantNameUnits(value) {
+  let units = 0;
+  for (const character of value) {
+    if (/^[A-Za-z0-9]$/.test(character)) units += 1;
+    else if (/^\p{Script=Han}$/u.test(character)) units += 2;
+    else return -1;
+  }
+  return units;
+}
+
 function RouteModal({ close, config, notify }) {
   const policy = config.policy || {};
+  const editing = Boolean(policy.id);
+  const [name, setName] = useState(policy.name || '');
   const [mode, setMode] = useState(policy.mode || 'smart');
-  const [priority, setPriority] = useState(policy.priority || 'stability');
+  const [priority, setPriority] = useState(policy.priority || 'balanced');
   const [minimum, setMinimum] = useState(String(Number(policy.minimum_multiplier_bps ?? 0) / 10_000));
   const [maximum, setMaximum] = useState(String(Number(policy.maximum_multiplier_bps ?? 50_000) / 10_000));
   const [merchantIDs, setMerchantIDs] = useState(policy.merchant_ids || []);
+  const [cacheFloorEnabled, setCacheFloorEnabled] = useState(policy.minimum_cache_hit_ppm != null);
+  const [cacheFloor, setCacheFloor] = useState(String(Number(policy.minimum_cache_hit_ppm ?? 0) / 10_000));
+  const [merchantQuery, setMerchantQuery] = useState('');
+  const [merchantPage, setMerchantPage] = useState(1);
+  const [merchantPageSize, setMerchantPageSize] = useState(20);
+  const [merchantResult, setMerchantResult] = useState({ items: [], total: 0 });
+  const [merchantLoading, setMerchantLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (mode !== 'fixed') return undefined;
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      setMerchantLoading(true);
+      try {
+        const query = new URLSearchParams({ keyword: merchantQuery.trim(), p: String(merchantPage), page_size: String(merchantPageSize) });
+        const result = await apiRequest(`/api/routing-merchants?${query}`);
+        if (active) setMerchantResult(result || { items: [], total: 0 });
+      } catch (requestError) {
+        if (active) setError(requestError.message || '读取可选商户失败');
+      } finally {
+        if (active) setMerchantLoading(false);
+      }
+    }, 150);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [merchantPage, merchantPageSize, merchantQuery, mode]);
 
   const toggleMerchant = (merchantID) => {
     setMerchantIDs((current) => current.includes(merchantID) ? current.filter((id) => id !== merchantID) : [...current, merchantID]);
   };
 
   const submit = async () => {
+    if (!name.trim()) {
+      setError('请输入路由名称');
+      return;
+    }
     const minimumBPS = Math.round(Number(minimum) * 10_000);
     const maximumBPS = Math.round(Number(maximum) * 10_000);
     if (!Number.isInteger(minimumBPS) || !Number.isInteger(maximumBPS) || minimumBPS < 0 || maximumBPS > 50_000 || minimumBPS > maximumBPS) {
@@ -37,20 +78,26 @@ function RouteModal({ close, config, notify }) {
       setError('固定路由至少选择一个商户');
       return;
     }
+    const minimumCacheHitPPM = mode === 'smart' && cacheFloorEnabled ? Math.round(Number(cacheFloor) * 10_000) : null;
+    if (minimumCacheHitPPM != null && (!Number.isInteger(minimumCacheHitPPM) || minimumCacheHitPPM < 0 || minimumCacheHitPPM > 1_000_000)) {
+      setError('最低缓存命中率必须在 0.00% 到 100.00% 之间');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
-      await apiRequest(`/api/routing-policies/${config.key.id}`, {
-        method: 'PUT',
+      await apiRequest(editing ? `/api/routing-policies/${policy.id}` : '/api/routing-policies', {
+        method: editing ? 'PUT' : 'POST',
         body: {
-          mode, priority,
+          name: name.trim(), mode, priority,
           minimum_multiplier_bps: minimumBPS,
           maximum_multiplier_bps: maximumBPS,
+          minimum_cache_hit_ppm: minimumCacheHitPPM,
           merchant_ids: mode === 'fixed' ? merchantIDs : [],
         },
       });
       await config.onSaved?.();
-      notify('路由策略已保存');
+      notify(editing ? '路由已保存' : '路由已创建');
       close();
     } catch (requestError) {
       setError(requestError.message || '保存路由策略失败');
@@ -60,16 +107,17 @@ function RouteModal({ close, config, notify }) {
   };
   return (
     <Modal
-      title="编辑路由策略"
-      description="策略按当前 API 密钥绑定，只影响保存后的新请求。"
+      title={editing ? '编辑路由策略' : '创建路由'}
+      description="路由可被多把 API 密钥复用，修改后立即影响全部绑定密钥。"
       onClose={close}
       wide
       footer={<><Button onClick={close}>取消</Button><Button disabled={busy} icon={Check} variant="primary" onClick={submit}>{busy ? '保存中' : '保存策略'}</Button></>}
     >
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
+      <Field label="路由名称"><TextInput maxLength="50" onChange={(event) => setName(event.target.value)} placeholder="例如：稳定主路由" value={name} /></Field>
       <div className="form-section"><h3>路由方式</h3><div className="choice-grid">
         <label className={`choice-card ${mode === 'smart' ? 'selected' : ''}`}><input aria-label="智能路由" checked={mode === 'smart'} name="route-mode" onChange={() => setMode('smart')} type="radio" /><span className="choice-icon"><ShieldCheck size={20} /></span><strong>智能路由</strong><small>从所有符合倍率和健康条件的商户中选择</small></label>
-        <label className={`choice-card ${mode === 'fixed' ? 'selected' : ''}`}><input aria-label="固定商户" checked={mode === 'fixed'} name="route-mode" onChange={() => setMode('fixed')} type="radio" /><span className="choice-icon"><Store size={20} /></span><strong>固定商户</strong><small>只从指定商户中选择，越界时直接返回无渠道错误</small></label>
+        <label className={`choice-card ${mode === 'fixed' ? 'selected' : ''}`}><input aria-label="固定商户" checked={mode === 'fixed'} name="route-mode" onChange={() => setMode('fixed')} type="radio" /><span className="choice-icon"><Store size={20} /></span><strong>固定商户</strong><small>只从指定商户中加权选择</small></label>
       </div></div>
 
       <div className="form-grid two-column">
@@ -77,16 +125,29 @@ function RouteModal({ close, config, notify }) {
         <Field label="最高成交倍率" hint="高于此倍率的报价不参与路由"><TextInput value={maximum} onChange={(event) => setMaximum(event.target.value)} min="0" max="5" step="0.01" type="number" /></Field>
       </div>
 
-      <div className="form-section"><h3>选择优先级</h3><div className="radio-row">
-        <label><input checked={priority === 'stability'} name="priority" onChange={() => setPriority('stability')} type="radio" />稳定性优先<span>可用率和首字时间优先，再比较价格</span></label>
-        <label><input checked={priority === 'price'} name="priority" onChange={() => setPriority('price')} type="radio" />价格优先<span>倍率最低优先，再比较健康和可用率</span></label>
+      <div className="form-section"><h3>选择优先方式</h3><div className="radio-row priority-options">
+        <label><input checked={priority === 'balanced'} name="priority" onChange={() => setPriority('balanced')} type="radio" />均衡分配<span>价格、成功率、速度和缓存各占 25%</span></label>
+        <label><input checked={priority === 'price'} name="priority" onChange={() => setPriority('price')} type="radio" />价格优先<span>价格权重 70%</span></label>
+        <label><input checked={priority === 'success'} name="priority" onChange={() => setPriority('success')} type="radio" />成功率优先<span>成功率权重 70%</span></label>
+        <label><input checked={priority === 'latency'} name="priority" onChange={() => setPriority('latency')} type="radio" />响应速度优先<span>首字速度权重 70%</span></label>
+        <label><input checked={priority === 'cache'} name="priority" onChange={() => setPriority('cache')} type="radio" />缓存命中率优先<span>缓存指标权重 70%</span></label>
       </div></div>
 
-      {mode === 'fixed' && <div className="form-section"><h3>固定商户范围</h3><div className="merchant-checks">
-        {(config.merchants || []).map((merchant) => <label key={merchant.id}><input aria-label={`选择商户 ${merchant.name}`} checked={merchantIDs.includes(merchant.id)} onChange={() => toggleMerchant(merchant.id)} type="checkbox" /><span><strong>{merchant.name}</strong><small>{(Number(merchant.availability_ppm || 0) / 10_000).toFixed(2)}% 可用率 · 最低 {(Number(merchant.minimum_multiplier_bps || 0) / 10_000).toFixed(2)}x</small></span></label>)}
-        {(config.merchants || []).length === 0 && <InlineNotice tone="warning">当前市场没有可选择的商户</InlineNotice>}
-      </div></div>}
-      <InlineNotice tone="warning">没有符合固定商户名单、倍率区间和健康条件的候选时，将返回无可用渠道错误且不扣费。</InlineNotice>
+      {mode === 'smart' && <div className="form-section cache-floor-setting"><h3>缓存筛选</h3>
+        <label className="toggle-line"><input aria-label="启用最低缓存命中率" checked={cacheFloorEnabled} onChange={(event) => setCacheFloorEnabled(event.target.checked)} type="checkbox" /><span><strong>启用最低缓存命中率</strong><small>开启后过滤样本不足或低于阈值的商户模型</small></span></label>
+        {cacheFloorEnabled && <Field label="最低缓存命中率" hint="按最近 7 天商户与模型汇总数据判断"><div className="suffix-input"><TextInput max="100" min="0" onChange={(event) => setCacheFloor(event.target.value)} step="0.01" type="number" value={cacheFloor} /><span>%</span></div></Field>}
+      </div>}
+
+      {mode === 'fixed' && <div className="form-section"><h3>固定商户范围</h3>
+        <div className="filter-toolbar"><TextInput aria-label="搜索固定商户" onChange={(event) => { setMerchantQuery(event.target.value); setMerchantPage(1); }} placeholder="搜索商户名称或用户 ID" value={merchantQuery} /><span className="selection-count">已选择 {merchantIDs.length} 家</span></div>
+        <div className="table-wrap route-merchant-table"><table className="data-table"><thead><tr><th>选择</th><th>ID</th><th>商户</th><th>模型</th><th>倍率范围</th><th>成功率</th><th>缓存命中率</th></tr></thead><tbody>
+          {(merchantResult.items || []).map((merchant) => <tr key={merchant.id}><td><input aria-label={`选择商户 ${merchant.name}`} checked={merchantIDs.includes(merchant.id)} onChange={() => toggleMerchant(merchant.id)} type="checkbox" /></td><td><code>{merchant.id}</code></td><td><strong>{merchant.name}</strong><small>用户 ID {merchant.user_id}</small></td><td>{merchant.model_count}</td><td>{(Number(merchant.minimum_multiplier_bps || 0) / 10_000).toFixed(2)}x - {(Number(merchant.maximum_multiplier_bps || 0) / 10_000).toFixed(2)}x</td><td>{(Number(merchant.availability_ppm || 0) / 10_000).toFixed(2)}%</td><td>{merchant.cache_weight_ready ? `${(Number(merchant.cache_hit_ppm || 0) / 10_000).toFixed(2)}%` : '样本不足'}</td></tr>)}
+          {!merchantLoading && !(merchantResult.items || []).length && <tr><td className="table-message" colSpan="7">没有符合条件的商户</td></tr>}
+          {merchantLoading && <tr><td className="table-message" colSpan="7">正在读取商户</td></tr>}
+        </tbody></table></div>
+        <Pagination disabled={merchantLoading} page={merchantPage} pageSize={merchantPageSize} total={merchantResult.total || 0} onPageChange={setMerchantPage} onPageSizeChange={(value) => { setMerchantPageSize(value); setMerchantPage(1); }} />
+      </div>}
+      <InlineNotice tone="warning">没有符合策略条件的候选时返回无可用渠道错误，本次请求不扣费。</InlineNotice>
     </Modal>
   );
 }
@@ -275,6 +336,7 @@ function MerchantApplyModal({ close, config, notify }) {
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState('');
+  const displayNameUnits = merchantNameUnits(displayName);
 
   const testChannel = async () => {
     setTesting(true);
@@ -295,6 +357,10 @@ function MerchantApplyModal({ close, config, notify }) {
   };
 
   const submit = async () => {
+    if (displayNameUnits < 2 || displayNameUnits > 16) {
+      setError(displayNameUnits < 0 ? '商户名称仅支持汉字、英文字母和数字' : '商户名称长度需为 2 至 16 个单位');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
@@ -319,7 +385,7 @@ function MerchantApplyModal({ close, config, notify }) {
     <Modal title="申请成为商户" description="选择一个标准模型并通过 hi 检测后提交。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !testReceipt} icon={Send} onClick={submit} variant="primary">{busy ? '提交中' : '提交申请'}</Button></>} wide>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
       <div className="form-grid two-column">
-        <Field label="商户名称"><TextInput maxLength="80" onChange={(event) => setDisplayName(event.target.value)} placeholder="用于市场展示" value={displayName} /></Field>
+        <Field label="商户名称" hint={displayNameUnits < 0 ? '仅支持汉字、英文字母和数字' : `${displayNameUnits}/16 单位，汉字计 2，英文数字计 1`}><TextInput maxLength="16" onChange={(event) => setDisplayName(event.target.value)} placeholder="用于市场展示" value={displayName} /></Field>
         <Field label="网站地址"><TextInput onChange={(event) => setWebsiteURL(event.target.value)} placeholder="https://example.com" value={websiteURL} /></Field>
         <Field label="渠道名称"><TextInput maxLength="100" onChange={(event) => setChannelName(event.target.value)} value={channelName} /></Field>
         <Field label="标准模型"><Select onChange={(event) => { setModelID(event.target.value); setTestReceipt(''); }} value={modelID}>{(config.models || []).map((model) => <option key={model.id} value={model.id}>{model.public_name} · {model.provider}</option>)}</Select></Field>
@@ -389,15 +455,17 @@ function ChannelModal({ close, config, notify }) {
 
 function WithdrawalModal({ close, config, notify }) {
   const [amount, setAmount] = useState('');
-  const [recipientType, setRecipientType] = useState('alipay');
   const [recipientAccount, setRecipientAccount] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const availableQuota = Number(config.balance?.available_quota || 0);
+  const amountYuan = Number(amount);
+  const amountQuota = Number.isInteger(amountYuan) ? amountYuan * 500_000 : 0;
+  const taxQuota = amountQuota * 3 / 100;
+  const netPayoutQuota = amountQuota - taxQuota;
   const submit = async () => {
-    const amountQuota = Math.round(Number(amount) * 500_000);
-    if (!Number.isSafeInteger(amountQuota) || amountQuota <= 0 || amountQuota > availableQuota) {
-      setError('提现金额必须大于 0 且不超过可提现余额');
+    if (!Number.isInteger(amountYuan) || !Number.isSafeInteger(amountQuota) || amountYuan < 50 || amountQuota > availableQuota) {
+      setError('提现金额必须为不低于 50 元且不超过可提现余额的整数');
       return;
     }
     if (recipientAccount.trim().length < 5) {
@@ -409,7 +477,6 @@ function WithdrawalModal({ close, config, notify }) {
     try {
       await apiRequest('/api/merchant/withdrawals', { method: 'POST', body: {
         amount_quota: amountQuota,
-        recipient_type: recipientType,
         recipient_account: recipientAccount.trim(),
       } });
       await config.onSaved?.();
@@ -422,11 +489,11 @@ function WithdrawalModal({ close, config, notify }) {
     }
   };
   return (
-    <Modal title="申请人工提现" description="申请后立即冻结对应余额，由管理员审核并线下打款。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy} icon={Landmark} onClick={submit} variant="primary">{busy ? '提交中' : '提交提现申请'}</Button></>}>
+    <Modal title="申请人工提现" description="提现收取 3% 税费，申请后冻结完整金额，由管理员审核并通过支付宝打款。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy} icon={Landmark} onClick={submit} variant="primary">{busy ? '提交中' : '提交提现申请'}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
-      <Field label="提现金额（人民币）" hint={`当前可提现 ${formatQuota(availableQuota)}`}><div className="prefix-input"><span>¥</span><TextInput min="0.01" onChange={(event) => setAmount(event.target.value)} step="0.01" type="number" value={amount} /></div></Field>
-      <Field label="收款方式"><Select onChange={(event) => setRecipientType(event.target.value)} value={recipientType}><option value="alipay">支付宝</option><option value="bank">银行卡</option><option value="other">其他</option></Select></Field>
-      <Field label="收款账户" hint="账户信息加密保存，仅管理员处理打款时可见"><TextInput maxLength="256" onChange={(event) => setRecipientAccount(event.target.value)} value={recipientAccount} /></Field>
+      <Field label="提现金额（人民币）" hint={`当前可提现 ${formatQuota(availableQuota)}，最低 50 元且只支持整数`}><div className="prefix-input"><span>¥</span><TextInput max={Math.floor(availableQuota / 500_000)} min="50" onChange={(event) => setAmount(event.target.value)} step="1" type="number" value={amount} /></div></Field>
+      <div className="withdrawal-summary"><span>申请金额<strong>{formatQuota(amountQuota)}</strong></span><span>税费（3%）<strong>{formatQuota(taxQuota)}</strong></span><span>预计到账<strong>{formatQuota(netPayoutQuota)}</strong></span></div>
+      <Field label="支付宝账户" hint="账户信息加密保存，仅管理员处理打款时可见"><TextInput maxLength="256" onChange={(event) => setRecipientAccount(event.target.value)} value={recipientAccount} /></Field>
     </Modal>
   );
 }
@@ -465,7 +532,7 @@ function WithdrawalActionModal({ close, config, notify }) {
   return (
     <Modal title={definition.title} description={`${config.item.merchant_name} · ${config.item.withdrawal_no}`} onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy} icon={Check} onClick={submit} variant="primary">{busy ? '处理中' : definition.submit}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
-      {action === 'paid' ? <><Field label="打款流水号"><TextInput maxLength="200" onChange={(event) => setReference(event.target.value)} value={reference} /></Field><Field label="凭证说明"><textarea className="textarea" maxLength="2000" onChange={(event) => setProof(event.target.value)} rows="4" value={proof} /></Field></> : <Field label="审核原因"><textarea className="textarea" maxLength="500" onChange={(event) => setReason(event.target.value)} rows="4" value={reason} /></Field>}
+      {action === 'paid' ? <><InlineNotice>实际支付宝打款 <strong>{formatQuota(config.item.net_payout_quota)}</strong>，税费 {formatQuota(config.item.tax_quota)}</InlineNotice><Field label="打款流水号"><TextInput maxLength="200" onChange={(event) => setReference(event.target.value)} value={reference} /></Field><Field label="凭证说明"><textarea className="textarea" maxLength="2000" onChange={(event) => setProof(event.target.value)} rows="4" value={proof} /></Field></> : <Field label="审核原因"><textarea className="textarea" maxLength="500" onChange={(event) => setReason(event.target.value)} rows="4" value={reason} /></Field>}
     </Modal>
   );
 }
@@ -473,12 +540,17 @@ function WithdrawalActionModal({ close, config, notify }) {
 function KeyModal({ config, close, notify }) {
   const key = config.key;
   const [name, setName] = useState(key?.name || '');
+  const [routingPolicyID, setRoutingPolicyID] = useState(String(key?.routing_policy_id || config.routingPolicies?.[0]?.id || ''));
   const [unlimitedQuota, setUnlimitedQuota] = useState(key?.unlimited_quota ?? true);
   const [remainQuota, setRemainQuota] = useState(String(key?.remain_quota || 0));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   const submit = async () => {
+    if (!routingPolicyID) {
+      setError('请选择绑定路由');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
@@ -494,8 +566,12 @@ function KeyModal({ config, close, notify }) {
           allow_ips: key?.allow_ips || null,
           group: key?.group || config.group || 'default',
           cross_group_retry: Boolean(key?.cross_group_retry),
+          ...(!key && { routing_policy_id: Number(routingPolicyID) }),
         },
       });
+      if (key && Number(routingPolicyID) !== Number(key.routing_policy_id)) {
+        await apiRequest(`/api/keys/${key.id}/routing-policy`, { method: 'PUT', body: { routing_policy_id: Number(routingPolicyID) } });
+      }
       await config.onSaved?.();
       notify(key ? '密钥已更新' : '密钥已创建');
       close();
@@ -507,9 +583,10 @@ function KeyModal({ config, close, notify }) {
   };
 
   return (
-    <Modal title={key ? '编辑 API 密钥' : '创建 API 密钥'} description="密钥由平台统一创建和管理。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !name.trim()} icon={KeyRound} onClick={submit} variant="primary">{busy ? '保存中' : '保存密钥'}</Button></>}>
+    <Modal title={key ? '编辑 API 密钥' : '创建 API 密钥'} description="每把密钥必须绑定一条路由，路由修改后立即生效。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !name.trim() || !routingPolicyID} icon={KeyRound} onClick={submit} variant="primary">{busy ? '保存中' : '保存密钥'}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
       <Field label="密钥名称"><TextInput maxLength="50" onChange={(event) => setName(event.target.value)} value={name} /></Field>
+      <Field label="绑定路由"><Select aria-label="绑定路由" onChange={(event) => setRoutingPolicyID(event.target.value)} value={routingPolicyID}><option value="">请选择路由</option>{(config.routingPolicies || []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></Field>
       <label className="toggle-line"><input checked={unlimitedQuota} onChange={(event) => setUnlimitedQuota(event.target.checked)} type="checkbox" /><span><strong>不限额</strong><small>关闭后按下方整数额度限制使用</small></span></label>
       {!unlimitedQuota && <Field label="可用额度"><TextInput min="0" onChange={(event) => setRemainQuota(event.target.value)} type="number" value={remainQuota} /></Field>}
     </Modal>

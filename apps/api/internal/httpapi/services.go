@@ -55,6 +55,7 @@ type Services struct {
 	Routing        RoutingRepository
 	OfferSync      OfferSynchronizer
 	Health         HealthCycleRunner
+	RouteMetrics   HealthCycleRunner
 	Payments       PaymentRepository
 	PaymentCredit  HealthCycleRunner
 	Settlement     SettlementRepository

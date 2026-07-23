@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/lwy183178053/modelroute-platform/apps/api/internal/platformauth"
 )
@@ -609,12 +610,37 @@ type merchantSubmissionRequest struct {
 	merchantChannelRequest
 }
 
-func (s *server) buildApplicationCommand(userID int, request merchantSubmissionRequest) (CreateMerchantApplication, error) {
-	displayName := strings.TrimSpace(request.DisplayName)
-	description := strings.TrimSpace(request.BusinessDescription)
-	if len(displayName) < 2 || len(displayName) > 80 {
-		return CreateMerchantApplication{}, errors.New("商户名称需为 2 至 80 字")
+type merchantDisplayName struct {
+	Value string
+	Key   string
+	Units int
+}
+
+func validateMerchantDisplayName(value string) (merchantDisplayName, error) {
+	value = strings.TrimSpace(value)
+	result := merchantDisplayName{Value: value, Key: strings.ToLower(value)}
+	for _, character := range value {
+		switch {
+		case unicode.Is(unicode.Han, character):
+			result.Units += 2
+		case character >= 'A' && character <= 'Z', character >= 'a' && character <= 'z', character >= '0' && character <= '9':
+			result.Units++
+		default:
+			return merchantDisplayName{}, errors.New("商户名称只能包含汉字、英文字母和数字")
+		}
 	}
+	if result.Units < 2 || result.Units > 16 {
+		return merchantDisplayName{}, errors.New("商户名称长度需为 2 至 16 单位，汉字计 2 单位，英文和数字计 1 单位")
+	}
+	return result, nil
+}
+
+func (s *server) buildApplicationCommand(userID int, request merchantSubmissionRequest) (CreateMerchantApplication, error) {
+	displayName, err := validateMerchantDisplayName(request.DisplayName)
+	if err != nil {
+		return CreateMerchantApplication{}, err
+	}
+	description := strings.TrimSpace(request.BusinessDescription)
 	if len(description) < 10 || len(description) > 2000 {
 		return CreateMerchantApplication{}, errors.New("业务说明需为 10 至 2000 字")
 	}
@@ -626,7 +652,7 @@ func (s *server) buildApplicationCommand(userID int, request merchantSubmissionR
 	if err != nil {
 		return CreateMerchantApplication{}, err
 	}
-	return CreateMerchantApplication{UserID: userID, DisplayName: displayName, WebsiteURL: website, BusinessDescription: description, Channel: channel}, nil
+	return CreateMerchantApplication{UserID: userID, DisplayName: displayName.Value, DisplayNameKey: displayName.Key, WebsiteURL: website, BusinessDescription: description, Channel: channel}, nil
 }
 
 func (s *server) buildChannelSubmission(name string, canonicalModelID int64, baseURL string, apiKey string, testReceipt string) (ChannelSubmission, error) {
@@ -721,6 +747,8 @@ func (s *server) writeMerchantStoreError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrMerchantNotFound):
 		writeAPIError(w, http.StatusNotFound, "merchant_not_found", "商户记录不存在")
+	case errors.Is(err, ErrMerchantNameConflict):
+		writeAPIError(w, http.StatusConflict, "merchant_name_conflict", "商户名称已被使用，请更换后重试")
 	case errors.Is(err, ErrMerchantConflict), errors.Is(err, ErrMerchantInvalidState):
 		writeAPIError(w, http.StatusConflict, "merchant_state_conflict", "记录状态已变化，请刷新后重试")
 	default:

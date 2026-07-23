@@ -13,7 +13,7 @@ import (
 	"github.com/lwy183178053/modelroute-platform/apps/api/internal/platformauth"
 )
 
-func TestAPIKeyLifecycleUsesAuthenticatedNewAPIEndpoints(t *testing.T) {
+func TestAPIKeyUpdateStatusAndDeleteUseAuthenticatedCoreEndpoints(t *testing.T) {
 	var calls []string
 	services, store, _ := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("New-Api-User") != "7" || r.Header.Get("Cookie") != "session=user" {
@@ -22,16 +22,6 @@ func TestAPIKeyLifecycleUsesAuthenticatedNewAPIEndpoints(t *testing.T) {
 		calls = append(calls, r.Method+" "+r.URL.RequestURI())
 		data := any(nil)
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/token/":
-			data = map[string]any{"page": 1, "page_size": 20, "total": 1, "items": []any{map[string]any{"id": 9, "name": "主密钥", "key": "abcd**********wxyz"}}}
-		case r.Method == http.MethodPost && r.URL.Path == "/api/token/":
-			var body map[string]any
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatalf("解析创建密钥请求失败：%v", err)
-			}
-			if body["name"] != "主密钥" || body["unlimited_quota"] != true {
-				t.Fatalf("创建密钥参数=%v", body)
-			}
 		case r.Method == http.MethodPut && r.URL.Path == "/api/token/" && r.URL.Query().Get("status_only") == "true":
 			var body map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["id"] != float64(9) || body["status"] != float64(2) {
@@ -43,8 +33,6 @@ func TestAPIKeyLifecycleUsesAuthenticatedNewAPIEndpoints(t *testing.T) {
 				t.Fatalf("更新密钥参数=%v，错误=%v", body, err)
 			}
 			data = map[string]any{"id": 9, "name": "新名称"}
-		case r.Method == http.MethodPost && r.URL.Path == "/api/token/9/key":
-			data = map[string]any{"key": "sk-full-secret"}
 		case r.Method == http.MethodDelete && r.URL.Path == "/api/token/9":
 		default:
 			t.Fatalf("未知上游请求：%s %s", r.Method, r.URL.RequestURI())
@@ -64,8 +52,6 @@ func TestAPIKeyLifecycleUsesAuthenticatedNewAPIEndpoints(t *testing.T) {
 		body   string
 		origin bool
 	}{
-		{method: http.MethodGet, path: "/api/keys?p=1&page_size=20"},
-		{method: http.MethodPost, path: "/api/keys", body: `{"name":"主密钥","expired_time":-1,"unlimited_quota":true}`, origin: true},
 		{method: http.MethodPut, path: "/api/keys/9", body: `{"name":"新名称","expired_time":-1,"unlimited_quota":true}`, origin: true},
 		{method: http.MethodPost, path: "/api/keys/9/status", body: `{"enabled":false}`, origin: true},
 		{method: http.MethodDelete, path: "/api/keys/9", origin: true},
@@ -86,8 +72,6 @@ func TestAPIKeyLifecycleUsesAuthenticatedNewAPIEndpoints(t *testing.T) {
 		}
 	}
 	want := []string{
-		"GET /api/token/?p=1&page_size=20",
-		"POST /api/token/",
 		"PUT /api/token/",
 		"PUT /api/token/?status_only=true",
 		"DELETE /api/token/9",

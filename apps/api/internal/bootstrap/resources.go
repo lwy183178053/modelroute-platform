@@ -99,6 +99,7 @@ func buildHTTPServices(database *sql.DB, redisClient *redis.Client, cfg config.C
 		ChannelTests:  httpapi.NewNewAPIChannelDetector(adminNewAPI),
 		Routing:       routing,
 		OfferSync:     httpapi.NewPriceSynchronizer(routing, adminNewAPI),
+		RouteMetrics:  routing,
 		Payments:      payments,
 		Settlement:    settlement,
 		UsageRecords:  settlement,

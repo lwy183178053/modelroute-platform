@@ -26,6 +26,30 @@ func TestSplitSettlementQuotaKeepsIntegerIdentity(t *testing.T) {
 	}
 }
 
+func TestWithdrawalBreakdownRequiresWholeYuanAndMinimumAmount(t *testing.T) {
+	tests := []struct {
+		name    string
+		amount  int64
+		wantTax int64
+		wantNet int64
+		wantOK  bool
+	}{
+		{name: "四十九元", amount: 49 * quotaPerCNY, wantOK: false},
+		{name: "五十元", amount: 50 * quotaPerCNY, wantTax: 750_000, wantNet: 24_250_000, wantOK: true},
+		{name: "五十一元", amount: 51 * quotaPerCNY, wantTax: 765_000, wantNet: 24_735_000, wantOK: true},
+		{name: "一百元", amount: 100 * quotaPerCNY, wantTax: 1_500_000, wantNet: 48_500_000, wantOK: true},
+		{name: "五十点五元", amount: 50*quotaPerCNY + quotaPerCNY/2, wantOK: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tax, net, ok := withdrawalBreakdown(test.amount)
+			if tax != test.wantTax || net != test.wantNet || ok != test.wantOK {
+				t.Fatalf("withdrawalBreakdown(%d)=(%d,%d,%t)，期望=(%d,%d,%t)", test.amount, tax, net, ok, test.wantTax, test.wantNet, test.wantOK)
+			}
+		})
+	}
+}
+
 func TestRefundSplitUsesOriginalCumulativeAllocation(t *testing.T) {
 	merchant, platform, err := refundSplitDelta(101, 91, 10, 0, 34)
 	if err != nil || merchant != 31 || platform != 3 {

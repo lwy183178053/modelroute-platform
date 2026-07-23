@@ -35,7 +35,7 @@ func TestSQLSettlementStoreFreezesWithdrawalsAtomicallyAndReleasesOrPays(t *test
 	now := time.Now().UTC().Truncate(time.Second)
 	if _, err := store.ApplySettlementLog(ctx, SettlementLog{
 		ID: 2001, UserID: 17, CreatedAt: now.Unix(), Type: 2, ModelName: "mkt-ov-withdrawal",
-		Quota: 1000, ChannelID: 41, Other: json.RawMessage(`{}`),
+		Quota: 100 * quotaPerCNY, ChannelID: 41, Other: json.RawMessage(`{}`),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestSQLSettlementStoreFreezesWithdrawalsAtomicallyAndReleasesOrPays(t *test
 		go func(index int) {
 			defer wait.Done()
 			withdrawal, createErr := store.CreateMerchantWithdrawal(ctx, CreateMerchantWithdrawalCommand{
-				WithdrawalNo: "MW-CONCURRENT-" + string(rune('A'+index)), UserID: 17, AmountQuota: 600,
+				WithdrawalNo: "MW-CONCURRENT-" + string(rune('A'+index)), UserID: 17, AmountQuota: 50 * quotaPerCNY,
 				RecipientType: "alipay", EncryptedRecipientAccount: []byte("encrypted-account"),
 				RecipientAccountMasked: "138****2621", CreatedAt: now,
 			})
@@ -74,7 +74,14 @@ func TestSQLSettlementStoreFreezesWithdrawalsAtomicallyAndReleasesOrPays(t *test
 	if successes.Load() != 1 || accepted.ID == 0 {
 		t.Fatalf("成功冻结次数=%d，申请=%+v", successes.Load(), accepted)
 	}
-	assertSettlementBalance(t, database, merchantID, 300, 600, 900, 0, 0)
+	if accepted.TaxQuota != 750_000 || accepted.NetPayoutQuota != 24_250_000 || accepted.RecipientType != "alipay" {
+		t.Fatalf("提现税费或支付宝类型错误：%+v", accepted)
+	}
+	adminPending, pendingTotal, err := store.ListMerchantWithdrawals(ctx, 1, 20, "pending")
+	if err != nil || pendingTotal != 1 || len(adminPending) != 1 || adminPending[0].ID != accepted.ID {
+		t.Fatalf("管理员待审核列表未读取到新申请：total=%d items=%+v err=%v", pendingTotal, adminPending, err)
+	}
+	assertSettlementBalance(t, database, merchantID, 40*quotaPerCNY, 50*quotaPerCNY, 90*quotaPerCNY, 0, 0)
 
 	approved, err := store.ApproveMerchantWithdrawal(ctx, accepted.ID, 1, "资料与账本核对通过", now.Add(time.Minute))
 	if err != nil || approved.Status != "approved" {
@@ -87,14 +94,14 @@ func TestSQLSettlementStoreFreezesWithdrawalsAtomicallyAndReleasesOrPays(t *test
 	if err != nil || rejected.Status != "rejected" {
 		t.Fatalf("驳回申请=%+v err=%v", rejected, err)
 	}
-	assertSettlementBalance(t, database, merchantID, 900, 0, 900, 0, 0)
+	assertSettlementBalance(t, database, merchantID, 90*quotaPerCNY, 0, 90*quotaPerCNY, 0, 0)
 	if _, err := store.RejectMerchantWithdrawal(ctx, accepted.ID, 1, "重复驳回", now.Add(2*time.Minute)); !errors.Is(err, ErrSettlementConflict) {
 		t.Fatalf("重复驳回错误=%v", err)
 	}
 
 	second, err := store.CreateMerchantWithdrawal(ctx, CreateMerchantWithdrawalCommand{
-		WithdrawalNo: "MW-PAID", UserID: 17, AmountQuota: 500, RecipientType: "bank",
-		EncryptedRecipientAccount: []byte("encrypted-bank"), RecipientAccountMasked: "6217 **** 1098", CreatedAt: now.Add(3 * time.Minute),
+		WithdrawalNo: "MW-PAID", UserID: 17, AmountQuota: 50 * quotaPerCNY, RecipientType: "alipay",
+		EncryptedRecipientAccount: []byte("encrypted-alipay"), RecipientAccountMasked: "138****2621", CreatedAt: now.Add(3 * time.Minute),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -102,11 +109,11 @@ func TestSQLSettlementStoreFreezesWithdrawalsAtomicallyAndReleasesOrPays(t *test
 	if _, err := store.ApproveMerchantWithdrawal(ctx, second.ID, 1, "已核对", now.Add(4*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	paid, err := store.PayMerchantWithdrawal(ctx, second.ID, 1, "BANK-20260722-01", "银行回单编号 20260722-01", now.Add(5*time.Minute))
-	if err != nil || paid.Status != "paid" || paid.PayoutReference != "BANK-20260722-01" {
+	paid, err := store.PayMerchantWithdrawal(ctx, second.ID, 1, "ALIPAY-20260722-01", "支付宝转账凭证 20260722-01", now.Add(5*time.Minute))
+	if err != nil || paid.Status != "paid" || paid.PayoutReference != "ALIPAY-20260722-01" {
 		t.Fatalf("确认打款=%+v err=%v", paid, err)
 	}
-	assertSettlementBalance(t, database, merchantID, 400, 0, 900, 0, 500)
+	assertSettlementBalance(t, database, merchantID, 40*quotaPerCNY, 0, 90*quotaPerCNY, 0, 50*quotaPerCNY)
 	if _, err := store.PayMerchantWithdrawal(ctx, second.ID, 1, "duplicate", "重复", now.Add(6*time.Minute)); !errors.Is(err, ErrSettlementConflict) {
 		t.Fatalf("重复确认打款错误=%v", err)
 	}
@@ -475,8 +482,8 @@ VALUES ($1, 1, 0, 1000000, 1000000)
 	var applicationID, merchantID, testID, reviewID, channelID int64
 	if err := database.QueryRow(`
 INSERT INTO merchant_applications
-    (newapi_user_id, display_name, website_url, business_description, status)
-VALUES (17, '结算测试商户', 'https://merchant.test', '结算测试', 'approved') RETURNING id
+    (newapi_user_id, display_name, display_name_key, website_url, business_description, status)
+VALUES (17, '结算测试商户', '结算测试商户', 'https://merchant.test', '结算测试', 'approved') RETURNING id
 `).Scan(&applicationID); err != nil {
 		t.Fatal(err)
 	}

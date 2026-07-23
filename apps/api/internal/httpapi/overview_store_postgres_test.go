@@ -26,7 +26,8 @@ func TestSQLAdminOverviewStoreUsesSettledIntegerLedgerData(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := database.ExecContext(ctx, `
-TRUNCATE merchant_applications, canonical_models, token_bindings,
+TRUNCATE route_metric_snapshots, route_metric_buckets, merchant_name_reservations,
+         merchant_applications, canonical_models, token_bindings,
          settlement_sync_state, payment_setting_versions
 RESTART IDENTITY CASCADE
 `); err != nil {
@@ -71,15 +72,15 @@ VALUES ($1, 1, 0, 600000, 4000000, 500000)
 	var pendingApplicationID, approvedApplicationID, merchantID, pendingTestID, approvedTestID, approvedReviewID, channelID int64
 	if err := database.QueryRowContext(ctx, `
 INSERT INTO merchant_applications
-    (newapi_user_id, display_name, website_url, business_description, status)
-VALUES (7, '待审商户', 'https://pending.example', '待审核商户业务说明', 'pending') RETURNING id
+    (newapi_user_id, display_name, display_name_key, website_url, business_description, status)
+VALUES (7, '待审商户', '待审商户', 'https://pending.example', '待审核商户业务说明', 'pending') RETURNING id
 `).Scan(&pendingApplicationID); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.QueryRowContext(ctx, `
 INSERT INTO merchant_applications
-    (newapi_user_id, display_name, website_url, business_description, status)
-VALUES (8, '已审商户', 'https://approved.example', '已审核商户业务说明', 'approved') RETURNING id
+    (newapi_user_id, display_name, display_name_key, website_url, business_description, status)
+VALUES (8, '已审商户', '已审商户', 'https://approved.example', '已审核商户业务说明', 'approved') RETURNING id
 `).Scan(&approvedApplicationID); err != nil {
 		t.Fatal(err)
 	}
@@ -165,24 +166,37 @@ VALUES ($1, 'cooling', $2, $2)
 `, channelID, now); err != nil {
 		t.Fatal(err)
 	}
+	var routingPolicyID int64
+	if err := database.QueryRowContext(ctx, `
+INSERT INTO routing_policies
+    (newapi_user_id, name, mode, priority, minimum_multiplier_bps, maximum_multiplier_bps)
+VALUES (7, '运营测试路由', 'smart', 'success', 0, 50000)
+RETURNING id
+`).Scan(&routingPolicyID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := database.ExecContext(ctx, `
-INSERT INTO token_bindings (newapi_token_id, newapi_user_id, token_fingerprint)
-VALUES (9, 7, $1)
-`, "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"); err != nil {
+INSERT INTO token_bindings (newapi_token_id, newapi_user_id, token_fingerprint, routing_policy_id)
+VALUES (9, 7, $1, $2)
+`, "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", routingPolicyID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.ExecContext(ctx, `
 INSERT INTO routing_decisions
-    (request_id, token_binding_id, canonical_model_id, mode, priority, result, upstream_status_code, created_at)
-SELECT 'req-ok', id, $1, 'smart', 'stability', 'completed', 200, $2 FROM token_bindings WHERE newapi_token_id = 9
-`, modelID, now.Add(-time.Minute)); err != nil {
+    (request_id, token_binding_id, routing_policy_id, canonical_model_id, mode, priority,
+     algorithm_version, candidate_count, selected_metrics, result, upstream_status_code, created_at)
+SELECT 'req-ok', id, $1, $2, 'smart', 'success', 'weighted-v1', 1, '{}'::jsonb,
+       'completed', 200, $3 FROM token_bindings WHERE newapi_token_id = 9
+`, routingPolicyID, modelID, now.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.ExecContext(ctx, `
 INSERT INTO routing_decisions
-    (request_id, token_binding_id, canonical_model_id, mode, priority, result, upstream_status_code, created_at)
-SELECT 'req-error', id, $1, 'smart', 'stability', 'completed', 500, $2 FROM token_bindings WHERE newapi_token_id = 9
-`, modelID, now.Add(-time.Minute)); err != nil {
+    (request_id, token_binding_id, routing_policy_id, canonical_model_id, mode, priority,
+     algorithm_version, candidate_count, selected_metrics, result, upstream_status_code, created_at)
+SELECT 'req-error', id, $1, $2, 'smart', 'success', 'weighted-v1', 1, '{}'::jsonb,
+       'completed', 500, $3 FROM token_bindings WHERE newapi_token_id = 9
+`, routingPolicyID, modelID, now.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -194,14 +208,14 @@ VALUES (1, 'https://pay.example', 'pid', 'encrypted', $1, '["alipay"]'::jsonb, 1
 `, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.ExecContext(ctx, `INSERT INTO merchant_balances (merchant_profile_id, available_quota) VALUES ($1, 1000)`, merchantID); err != nil {
+	if _, err := database.ExecContext(ctx, `INSERT INTO merchant_balances (merchant_profile_id, available_quota) VALUES ($1, 50000000)`, merchantID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.ExecContext(ctx, `
 INSERT INTO merchant_withdrawals
     (withdrawal_no, merchant_profile_id, amount_quota, available_before_quota,
      recipient_type, encrypted_recipient_account, recipient_account_masked)
-VALUES ('MW-OVERVIEW', $1, 100, 1000, 'alipay', 'encrypted', '138****2621')
+VALUES ('MW-OVERVIEW', $1, 25000000, 50000000, 'alipay', 'encrypted', '138****2621')
 `, merchantID); err != nil {
 		t.Fatal(err)
 	}

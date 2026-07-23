@@ -93,7 +93,7 @@ export function UsageLogTable({ data, loading, error, view = 'user', title = '�
   const pageInfo = data?.logs || {};
   const isAdmin = view === 'admin';
   const isMerchant = view === 'merchant';
-  const columnCount = isAdmin ? 11 : 9;
+  const columnCount = isAdmin ? 9 : isMerchant ? 7 : 8;
   return (
     <Section
       title={title}
@@ -103,7 +103,7 @@ export function UsageLogTable({ data, loading, error, view = 'user', title = '�
       {filters}
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}
       <div className="table-wrap"><table className="data-table usage-log-table"><thead><tr>
-        <th>ID</th><th>时间</th>{isAdmin && <th>用户 ID</th>}<th>模型</th>{!isMerchant && <th>商户</th>}{(isAdmin || isMerchant) && <th>渠道</th>}{!isAdmin && !isMerchant && <th>密钥</th>}<th>Token</th><th>缓存 Token</th><th>{isMerchant ? '自动入账' : '消费金额'}</th><th>请求编号</th>
+        <th>ID</th><th>时间</th>{isAdmin && <th>用户 ID</th>}<th>模型</th>{!isMerchant && <th>商户</th>}{(isAdmin || isMerchant) && <th>渠道</th>}{!isAdmin && !isMerchant && <th>密钥</th>}<th>Token</th><th>缓存 Token</th><th>{isMerchant ? '自动入账' : '消费金额'}</th>
       </tr></thead><tbody>
         {logs.map((log) => <tr key={log.id || log.request_id}>
           <td><code>{log.id || '-'}</code></td>
@@ -116,7 +116,6 @@ export function UsageLogTable({ data, loading, error, view = 'user', title = '�
           <td>{tokenDetail(log)}</td>
           <td>{numberFormatter.format(Number(log.cache_tokens || 0))}</td>
           <td>{formatQuota(isMerchant ? log.merchant_income_quota : log.quota)}</td>
-          <td><code>{log.request_id || '-'}</code></td>
         </tr>)}
         {!loading && logs.length === 0 && <tr><td className="table-message" colSpan={columnCount}>{error || '暂无调用记录'}</td></tr>}
         {loading && <tr><td className="table-message" colSpan={columnCount}>正在读取调用记录</td></tr>}

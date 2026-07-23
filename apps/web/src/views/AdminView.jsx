@@ -141,7 +141,7 @@ export default function AdminView({ section, setSection, openModal, notify }) {
       <PageHeader eyebrow="平台管理" title="运营管理" description="统一处理用户、商户、渠道、模型、支付和提现业务。" />
       <div className="admin-layout">
         <aside className="admin-sidebar" aria-label="管理员功能">
-          {sections.map(({ id, label, icon: Icon, count }) => <button className={section === id ? 'active' : ''} key={id} onClick={() => setSection(id)} type="button"><Icon size={17} /><span>{label}</span>{count > 0 && <b>{count}</b>}</button>)}
+          {sections.map(({ id, label, icon: Icon, count }) => <button className={section === id ? 'active' : ''} key={id} onClick={() => { setSection(id); if (id === 'withdrawals') loadOverview(); }} type="button"><Icon size={17} /><span>{label}</span>{count > 0 && <b>{count}</b>}</button>)}
         </aside>
         <div className="admin-content">
           {section === 'overview' && <AdminOverview data={overview} error={overviewError} loading={overviewLoading} reload={loadOverview} setSection={setSection} />}
@@ -152,7 +152,7 @@ export default function AdminView({ section, setSection, openModal, notify }) {
           {section === 'channels' && <AdminChannels notify={notify} />}
           {section === 'payment' && <AdminPayment notify={notify} openModal={openModal} />}
           {section === 'redemptions' && <AdminRedemptions notify={notify} />}
-          {section === 'withdrawals' && <AdminWithdrawals notify={notify} openModal={openModal} />}
+          {section === 'withdrawals' && <AdminWithdrawals notify={notify} onSummaryRefresh={loadOverview} openModal={openModal} />}
           {section === 'announcements' && <AdminAnnouncements notify={notify} />}
           {section === 'settings' && <AdminSettings notify={notify} />}
         </div>

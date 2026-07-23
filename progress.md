@@ -2462,3 +2462,134 @@
 - `docs/结算与人工提现.md`：明确成功调用自动入账、失败自动退回和无人工结算页面。
 - `progress.md`：追加本轮实现、测试、文件清单和回滚点。
 - 回滚点：执行 `git revert <本轮提交哈希>` 可回退统一调用记录、渠道审核、上架模型、界面简化、文档和截图；本轮未上传服务器。
+
+## 2026-07-23 - Task: 完成独立路由、缓存指标与支付宝提现收尾
+
+### What was done
+
+- 将路由策略改为可被多把 API 密钥复用的独立资源，创建密钥前必须先创建并绑定路由；支持智能路由、固定商户和均衡、价格、成功率、响应速度、缓存命中率五种加权优先方式。
+- 路由采用先商户、后渠道的两级加权抽取，候选权重范围固定为 `1..4`；首字节前失败时对剩余渠道无放回重试，避免多渠道商户天然获得额外首选流量。
+- 智能路由增加可选最低缓存命中率，文本模型样本不足或低于阈值时退出候选，达到阈值即可参与；图片模型忽略该条件。
+- 增加最近 7 天缓存指标小时桶、滚动快照和 Worker 每分钟刷新，市场、商户上架模型、渠道详情及路由候选统一使用同一指标口径。
+- 完成商户名称格式、长度和唯一性校验，并在商户中心显示商户名称；修复账户设置中商户申请模型目录引用失效的问题。
+- 用户、商户和管理员调用记录继续保留服务端请求编号，但三个前端主表均隐藏该列。
+- 提现固定为支付宝，最低 `¥50` 且只接受人民币整数；申请冻结完整金额，数据库以整数生成 3% 税费和实际到账金额，驳回完整释放，确认打款后扣除完整冻结金额。
+- 商户提现页增加余额门槛、差额提示、税费试算和申请后刷新；管理员提现页增加状态筛选、刷新、`20/50/200` 分页及实际支付宝打款提示。
+- 刷新桌面与 390px 移动端验收截图。本轮仅更新本地仓库和本地预览，不发布服务器。
+
+### Testing
+
+- `go test ./... -count=1`：Go 全量测试通过。
+- `go vet ./...`、`staticcheck ./...`、`go build ./...`：静态检查与构建通过。
+- 设置 `MODELROUTE_TEST_DATABASE_URL` 后执行 `go test ./internal/httpapi -count=1`：临时 PostgreSQL 集成测试通过，覆盖 `49/50/51` 元边界、整数校验、`¥100 -> ¥3 -> ¥97`、并发冻结、管理员即时可见、驳回释放和确认打款。
+- 设置 `MODELROUTE_TEST_DATABASE_URL` 后执行 `go test ./internal/modelseed -count=1`：真实数据库模型种子测试通过。
+- `npm.cmd run test:ui`：前端 UI 烟雾测试通过，包含小数提现不发送请求、独立路由、缓存阈值、固定商户分页、隐藏请求编号和管理员提现操作。
+- `npm.cmd run capture`、`npm.cmd run build`：桌面与 390px 移动端截图刷新成功，前端生产构建通过，页面根节点无横向溢出。
+- 人工检查 `route-modal`、`withdrawal-modal` 和 `admin-withdrawals` 桌面/移动截图：弹窗滚动、固定底部操作、税费明细及表格容器布局正常。
+- `docker compose config --quiet`：Compose 配置解析通过；未加载本地生产环境文件时仅输出环境变量缺省提示。
+- `git diff --check`：补丁空白与冲突标记检查通过。
+- 工作区敏感值扫描：未发现对话中提供的上游密钥、支付密钥、完整商户号或服务器密码进入代码、文档及日志；仓库原有部署文档和重置脚本中的服务器地址保持原样，本轮未新增或扩散。
+
+### Notes
+
+- `apps/api/cmd/worker/main.go`：接入最近 7 天路由指标刷新任务。
+- `apps/api/cmd/worker/main_test.go`：验证 Worker 指标刷新调度。
+- `apps/api/internal/bootstrap/resources.go`：初始化路由指标所需资源。
+- `apps/api/internal/bootstrap/resources_test.go`：同步启动资源测试。
+- `apps/api/internal/httpapi/account_handlers.go`：实现独立路由绑定的密钥创建、查询、重绑和失败补偿。
+- `apps/api/internal/httpapi/account_test.go`：覆盖无路由创建、路由归属、重绑和补偿清理。
+- `apps/api/internal/httpapi/merchant_handlers.go`：为商户申请和上架模型返回名称及缓存指标信息。
+- `apps/api/internal/httpapi/merchant_handlers_test.go`：覆盖商户名称与缓存指标响应。
+- `apps/api/internal/httpapi/merchant_store.go`：实现商户名称唯一校验和上架模型缓存快照查询。
+- `apps/api/internal/httpapi/merchant_store_test.go`：覆盖名称占用、释放及缓存字段扫描。
+- `apps/api/internal/httpapi/merchant_types.go`：补充商户名称和缓存指标响应字段。
+- `apps/api/internal/httpapi/overview_store_postgres_test.go`：同步 PostgreSQL 运营数据测试基线。
+- `apps/api/internal/httpapi/routing_domain.go`：实现两级加权抽取、五种优先方式和最低缓存阈值过滤。
+- `apps/api/internal/httpapi/routing_domain_test.go`：覆盖权重上限、两级抽取、阈值边界、图片豁免和无放回顺序。
+- `apps/api/internal/httpapi/routing_handlers.go`：提供独立路由增删改查、商户搜索和密钥路由绑定接口。
+- `apps/api/internal/httpapi/routing_handlers_test.go`：覆盖路由参数、权限、固定商户和缓存阈值接口。
+- `apps/api/internal/httpapi/routing_proxy.go`：将独立路由策略和缓存阈值接入模型请求选择。
+- `apps/api/internal/httpapi/routing_proxy_test.go`：验证代理使用绑定路由并保留首字节重试边界。
+- `apps/api/internal/httpapi/routing_store.go`：实现独立路由、密钥绑定、路由商户分页、缓存快照和加权候选数据访问。
+- `apps/api/internal/httpapi/routing_store_postgres_test.go`：覆盖真实数据库路由归属、绑定和候选读取。
+- `apps/api/internal/httpapi/routing_store_test.go`：覆盖路由仓储 SQL、缓存阈值和跨用户操作。
+- `apps/api/internal/httpapi/server.go`：注册独立路由、密钥重绑和路由商户接口。
+- `apps/api/internal/httpapi/services.go`：为服务集合补充路由指标依赖。
+- `apps/api/internal/httpapi/settlement_domain.go`：定义人民币提现整数门槛和 3% 税费整数拆分。
+- `apps/api/internal/httpapi/settlement_domain_test.go`：覆盖 `49/50/51/100` 元及小数提现边界。
+- `apps/api/internal/httpapi/settlement_handlers.go`：固定支付宝请求结构、校验金额和账户，并增加管理员状态筛选。
+- `apps/api/internal/httpapi/settlement_handlers_test.go`：覆盖支付宝加密、旧收款类型拦截、金额错误和管理员审核链路。
+- `apps/api/internal/httpapi/settlement_metrics_test.go`：覆盖七天缓存小时桶与滚动快照汇总。
+- `apps/api/internal/httpapi/settlement_store.go`：写入成功调用的缓存指标桶并提供刷新入口。
+- `apps/api/internal/httpapi/settlement_store_postgres_test.go`：覆盖并发提现冻结、管理员即时可见、驳回释放和打款扣除。
+- `apps/api/internal/httpapi/settlement_types.go`：为提现记录增加税费和实际到账字段。
+- `apps/api/internal/httpapi/settlement_withdrawals.go`：实现支付宝整数提现事务、分页筛选及税费字段扫描。
+- `apps/api/internal/migrations/migrate_test.go`：校验商户名称、独立路由、缓存指标和提现约束迁移。
+- `apps/api/internal/migrations/sql/000001_v2_baseline.sql`：将开发基线提现收紧为支付宝、最低 50 元和人民币整数，并生成税费字段。
+- `apps/api/internal/migrations/sql/000004_merchant_names.sql`：增加商户名称规范化和唯一占用结构。
+- `apps/api/internal/migrations/sql/000005_independent_routes.sql`：建立独立路由、固定商户和密钥绑定结构。
+- `apps/api/internal/migrations/sql/000006_route_metrics.sql`：建立缓存指标小时桶和最近 7 天快照结构。
+- `apps/web/artifacts/admin-settings-desktop.png`：刷新管理员设置桌面验收图。
+- `apps/web/artifacts/admin-settings-mobile.png`：刷新管理员设置移动端验收图。
+- `apps/web/artifacts/admin-usage-desktop.png`：刷新隐藏请求编号后的管理员调用记录桌面图。
+- `apps/web/artifacts/admin-usage-mobile.png`：刷新隐藏请求编号后的管理员调用记录移动端图。
+- `apps/web/artifacts/admin-withdrawals-desktop.png`：刷新税费、筛选和分页后的管理员提现桌面图。
+- `apps/web/artifacts/admin-withdrawals-mobile.png`：刷新税费、筛选和分页后的管理员提现移动端图。
+- `apps/web/artifacts/console-desktop.png`：刷新独立路由侧栏后的控制台桌面图。
+- `apps/web/artifacts/console-mobile.png`：刷新独立路由侧栏后的控制台移动端图。
+- `apps/web/artifacts/console-keys-desktop.png`：新增密钥与独立路由绑定桌面验收图。
+- `apps/web/artifacts/console-keys-mobile.png`：新增密钥与独立路由绑定移动端验收图。
+- `apps/web/artifacts/console-settings-desktop.png`：刷新商户申请修复后的账户设置桌面图。
+- `apps/web/artifacts/console-settings-mobile.png`：刷新商户申请修复后的账户设置移动端图。
+- `apps/web/artifacts/console-usage-desktop.png`：刷新隐藏请求编号后的用户调用记录桌面图。
+- `apps/web/artifacts/console-usage-mobile.png`：刷新隐藏请求编号后的用户调用记录移动端图。
+- `apps/web/artifacts/market-desktop.png`：刷新缓存命中率后的模型市场桌面图。
+- `apps/web/artifacts/market-mobile.png`：刷新缓存命中率后的模型市场移动端图。
+- `apps/web/artifacts/merchant-channel-health-desktop.png`：刷新渠道缓存指标桌面图。
+- `apps/web/artifacts/merchant-channel-health-mobile.png`：刷新渠道缓存指标移动端图。
+- `apps/web/artifacts/merchant-desktop.png`：刷新商户名称标签后的商户中心桌面图。
+- `apps/web/artifacts/merchant-mobile.png`：刷新商户名称标签后的商户中心移动端图。
+- `apps/web/artifacts/merchant-offers-desktop.png`：刷新上架模型缓存命中率桌面图。
+- `apps/web/artifacts/merchant-offers-mobile.png`：刷新上架模型缓存命中率移动端图。
+- `apps/web/artifacts/merchant-usage-desktop.png`：刷新隐藏请求编号后的商户调用记录桌面图。
+- `apps/web/artifacts/merchant-usage-mobile.png`：刷新隐藏请求编号后的商户调用记录移动端图。
+- `apps/web/artifacts/route-modal-desktop.png`：新增最低缓存阈值和固定商户选择桌面验收图。
+- `apps/web/artifacts/route-modal-mobile.png`：新增最低缓存阈值和固定商户选择移动端验收图。
+- `apps/web/artifacts/withdrawal-modal-desktop.png`：刷新支付宝、3% 税费和整数金额桌面验收图。
+- `apps/web/artifacts/withdrawal-modal-mobile.png`：刷新支付宝、3% 税费和整数金额移动端验收图。
+- `apps/web/scripts/capture.mjs`：更新路由、缓存、提现和隐藏请求编号截图场景。
+- `apps/web/scripts/ui-smoke.mjs`：覆盖独立路由、缓存阈值、提现整数边界和管理员审核 UI。
+- `apps/web/src/Modals.jsx`：重做路由、密钥和提现弹窗，并修复小数提现前端校验。
+- `apps/web/src/styles.css`：补充路由选择器、缓存阈值、提现明细和移动端布局样式。
+- `apps/web/src/views/AdminView.jsx`：进入管理后台及提现动作后刷新待办统计。
+- `apps/web/src/views/ConsoleView.jsx`：拆分路由管理与 API 密钥页面并修复商户申请模型目录引用。
+- `apps/web/src/views/MarketView.jsx`：增加最近 7 天缓存命中率列。
+- `apps/web/src/views/MerchantView.jsx`：显示商户名称、上架模型缓存指标及提现门槛和明细。
+- `apps/web/src/views/UsagePanels.jsx`：隐藏用户、商户和管理员调用记录的请求编号列。
+- `apps/web/src/views/admin/AdminWithdrawals.jsx`：增加提现状态筛选、刷新、分页、税费和实际打款列。
+- `docs/V2数据基线.md`：记录独立路由、缓存快照和支付宝整数提现基线。
+- `docs/模型报价路由与健康.md`：同步两级加权路由、最低缓存阈值和七天缓存指标。
+- `docs/结算与人工提现.md`：同步 50 元门槛、支付宝、3% 税费及冻结释放规则。
+- `docs/统一调用记录.md`：明确请求编号仅在服务端保留，三个前端主表隐藏。
+- `docs/账号与管理员接口.md`：同步独立路由、密钥绑定和管理员提现分页。
+- `progress.md`：追加本轮实现、验证、逐文件清单和回滚点。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可整体回退独立路由、缓存指标、商户名称、支付宝提现、前端界面、文档和截图；本轮未上传服务器。
+
+## 2026-07-23 - Task: 刷新本地交互预览夹具
+
+### What was done
+
+- 将 `57723` 本地预览的模拟接口同步为独立路由、路由商户分页、密钥绑定、缓存指标和支付宝提现当前结构。
+- 将本地商户可提现余额调整到可操作范围，使商户提现与管理员审核界面可直接试用；该夹具位于 Git 忽略目录，不包含真实密钥。
+
+### Testing
+
+- `Invoke-WebRequest http://127.0.0.1:57723/`：返回 `200` 且页面包含 `ModelRoute`。
+- Playwright 实际点击验证：路由列表、固定商户选择、密钥绑定、商户 `¥100 / ¥3 / ¥97` 提现明细和管理员提现列表均正常显示，业务接口无 `4xx/5xx`。
+- 端口检查：仅一个 Vite 进程监听 `127.0.0.1:57723`。
+
+### Notes
+
+- `data/ui-preview/vite.config.mjs`：同步当前前端所需的本地模拟数据与接口；该运行夹具被 `.gitignore` 排除，不进入提交。
+- `progress.md`：追加本地预览验证与运行边界记录。
+- 回滚方式：停止 `57723` 预览进程并删除被忽略的 `data/ui-preview/vite.config.mjs`；该操作不影响 Git 跟踪代码和已完成提交。

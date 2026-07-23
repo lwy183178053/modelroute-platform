@@ -58,6 +58,15 @@ func TestMerchantChannelResponsesHideInternalLegacyFields(t *testing.T) {
 	}
 }
 
+func TestMerchantNameConflictReturnsClearMessage(t *testing.T) {
+	response := httptest.NewRecorder()
+	new(server).writeMerchantStoreError(response, ErrMerchantNameConflict)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"code":"merchant_name_conflict"`) ||
+		!strings.Contains(response.Body.String(), "商户名称已被使用") {
+		t.Fatalf("重名响应=%d %s", response.Code, response.Body.String())
+	}
+}
+
 type filteredMerchantRepositoryStub struct {
 	*merchantRepositoryStub
 	listChannelsFiltered func(context.Context, int, int, string, string, int) ([]MerchantChannel, int, error)
@@ -457,6 +466,35 @@ func TestAdministratorMerchantEndpointRequiresPersistedMerchantIdentity(t *testi
 func TestMerchantConflictErrorIsStable(t *testing.T) {
 	if !errors.Is(ErrMerchantConflict, ErrMerchantConflict) {
 		t.Fatal("商户冲突错误必须可比较")
+	}
+}
+
+func TestValidateMerchantDisplayNameUsesWeightedLengthAndAllowedCharacters(t *testing.T) {
+	valid := []string{"云", "AB", "北辰云智科技平台", "ModelRoute2026", "云API2026"}
+	for _, name := range valid {
+		if _, err := validateMerchantDisplayName(name); err != nil {
+			t.Fatalf("名称 %q 应通过校验：%v", name, err)
+		}
+	}
+	invalid := []string{"A", "北辰云智科技平台站", "ABCDEFGHIJKLMNOPQ", "北辰 云智", "北辰_云智", "北辰-云智", "北辰🙂"}
+	for _, name := range invalid {
+		if _, err := validateMerchantDisplayName(name); err == nil {
+			t.Fatalf("名称 %q 应被拒绝", name)
+		}
+	}
+}
+
+func TestNormalizeMerchantDisplayNameIgnoresASCIICase(t *testing.T) {
+	left, err := validateMerchantDisplayName("Model2026")
+	if err != nil {
+		t.Fatal(err)
+	}
+	right, err := validateMerchantDisplayName("model2026")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if left.Key != right.Key || left.Units != 9 || right.Units != 9 {
+		t.Fatalf("标准化结果 left=%+v right=%+v", left, right)
 	}
 }
 

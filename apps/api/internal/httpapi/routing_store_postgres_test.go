@@ -26,7 +26,8 @@ func TestSQLRoutingStoreAgainstPostgres(t *testing.T) {
 		t.Fatalf("执行迁移：%v", err)
 	}
 	if _, err := database.ExecContext(ctx, `
-TRUNCATE channel_health_events, performance_rollups, routing_decisions,
+TRUNCATE route_metric_snapshots, route_metric_buckets, merchant_name_reservations,
+         channel_health_events, performance_rollups, routing_decisions,
          routing_policy_merchants, routing_policies, token_bindings,
          channel_health, offer_channel_aliases, offer_versions,
          merchant_channels, merchant_channel_reviews, merchant_channel_tests,
@@ -54,8 +55,8 @@ RESTART IDENTITY CASCADE
 	var applicationID, merchantID, testID, reviewID, channelID int64
 	if err := database.QueryRowContext(ctx, `
 INSERT INTO merchant_applications
-    (newapi_user_id, display_name, website_url, business_description, status)
-VALUES (7, '集成测试商户', 'https://merchant.test', 'PostgreSQL 集成测试', 'approved')
+    (newapi_user_id, display_name, display_name_key, website_url, business_description, status)
+VALUES (7, '集成测试商户', '集成测试商户', 'https://merchant.test', 'PostgreSQL 集成测试', 'approved')
 RETURNING id
 `).Scan(&applicationID); err != nil {
 		t.Fatalf("创建商户申请：%v", err)
@@ -165,11 +166,17 @@ VALUES (9001, 21, $1, 2, $2, 41, 9, 'req-merchant-stats', 1000,
 		t.Fatalf("商户折后价格=%+v，错误=%v", merchantOffers, err)
 	}
 
-	if _, err := store.BindTokenAndDefaultPolicy(ctx, 7, 9, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"); err != nil {
-		t.Fatalf("绑定令牌策略：%v", err)
+	policy, err := store.CreateRoutingPolicy(ctx, 7, RoutingPolicyInput{
+		Name: "主路由", Mode: "smart", Priority: "price", MinimumMultiplierBPS: 7300, MaximumMultiplierBPS: 8000,
+	})
+	if err != nil {
+		t.Fatalf("创建路由：%v", err)
 	}
-	if _, err := store.UpdatePolicy(ctx, 7, 9, RoutingPolicyInput{
-		Mode: "smart", Priority: "price", MinimumMultiplierBPS: 7300, MaximumMultiplierBPS: 8000,
+	if _, err := store.BindTokenToPolicy(ctx, 7, 9, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", policy.ID); err != nil {
+		t.Fatalf("绑定密钥路由：%v", err)
+	}
+	if _, err := store.UpdateRoutingPolicy(ctx, 7, policy.ID, RoutingPolicyInput{
+		Name: "主路由", Mode: "smart", Priority: "price", MinimumMultiplierBPS: 7300, MaximumMultiplierBPS: 8000,
 	}); err != nil {
 		t.Fatalf("保存排除倍率策略：%v", err)
 	}
@@ -177,8 +184,8 @@ VALUES (9001, 21, $1, 2, $2, 41, 9, 'req-merchant-stats', 1000,
 	if err != nil || len(selection.Candidates) != 0 {
 		t.Fatalf("倍率区间应排除候选：候选=%d 错误=%v", len(selection.Candidates), err)
 	}
-	if _, err := store.UpdatePolicy(ctx, 7, 9, RoutingPolicyInput{
-		Mode: "fixed", Priority: "stability", MinimumMultiplierBPS: 0, MaximumMultiplierBPS: 50_000,
+	if _, err := store.UpdateRoutingPolicy(ctx, 7, policy.ID, RoutingPolicyInput{
+		Name: "主路由", Mode: "fixed", Priority: "success", MinimumMultiplierBPS: 0, MaximumMultiplierBPS: 50_000,
 		MerchantIDs: []int64{merchantID},
 	}); err != nil {
 		t.Fatalf("保存固定商户策略：%v", err)
@@ -186,6 +193,15 @@ VALUES (9001, 21, $1, 2, $2, 41, 9, 'req-merchant-stats', 1000,
 	selection, err = store.ResolveRoute(ctx, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "gpt-4o-mini")
 	if err != nil || len(selection.Candidates) != 1 || selection.Candidates[0].OfferID != offer.ID || selection.Candidates[0].OfferChannelAliasID == 0 {
 		t.Fatalf("固定商户候选不正确：%+v，错误=%v", selection.Candidates, err)
+	}
+	if err := store.StartRouteDecision(ctx, RouteDecision{
+		RequestID: "postgres-routing-decision", TokenBindingID: selection.TokenBindingID,
+		PolicyID: selection.PolicyID, CanonicalModelID: selection.CanonicalModelID,
+		OfferChannelAliasID: selection.Candidates[0].OfferChannelAliasID,
+		Mode:                selection.Mode, Priority: selection.Priority, AlgorithmVersion: routeAlgorithmVersion,
+		CandidateCount: len(selection.Candidates), SelectedMetrics: routeDecisionMetrics(selection.Candidates[0]),
+	}); err != nil {
+		t.Fatalf("写入新版路由决策：%v", err)
 	}
 
 	now := time.Now().UTC().Truncate(time.Millisecond)

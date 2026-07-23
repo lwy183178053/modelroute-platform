@@ -288,17 +288,48 @@ func (s *server) deleteMerchantOffer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"model_id": modelID, "status": "deleted"}})
 }
 
+func (s *server) routingPolicies(w http.ResponseWriter, r *http.Request) {
+	_, session, ok := s.requireSession(w, r, roleCommon)
+	if !ok || !s.routingReady(w, false) {
+		return
+	}
+	policies, err := s.services.Routing.ListRoutingPolicies(r.Context(), session.UserID)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "routing_policy_query_failed", "读取路由列表失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": policies})
+}
+
+func (s *server) createRoutingPolicy(w http.ResponseWriter, r *http.Request) {
+	_, session, ok := s.requireSession(w, r, roleCommon)
+	if !ok || !s.requireSameOrigin(w, r) || !s.routingReady(w, false) {
+		return
+	}
+	input, ok := decodeRoutingPolicyInput(w, r)
+	if !ok {
+		return
+	}
+	policy, err := s.services.Routing.CreateRoutingPolicy(r.Context(), session.UserID, input)
+	if err != nil {
+		writeRoutingPolicyError(w, err, "创建路由失败")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"success": true, "data": policy})
+}
+
 func (s *server) routingPolicy(w http.ResponseWriter, r *http.Request) {
 	_, session, ok := s.requireSession(w, r, roleCommon)
 	if !ok || !s.routingReady(w, false) {
 		return
 	}
-	tokenID, ok := pathID(w, r)
+	policyID, ok := pathInt64(w, r, "id", "路由编号无效")
 	if !ok {
 		return
 	}
-	policy, ok := s.bindTokenPolicy(w, r, session.UserID, session.UpstreamCookie, tokenID)
-	if !ok {
+	policy, err := s.services.Routing.RoutingPolicy(r.Context(), session.UserID, policyID)
+	if err != nil {
+		writeRoutingPolicyError(w, err, "读取路由失败")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": policy})
@@ -309,28 +340,75 @@ func (s *server) updateRoutingPolicy(w http.ResponseWriter, r *http.Request) {
 	if !ok || !s.requireSameOrigin(w, r) || !s.routingReady(w, false) {
 		return
 	}
-	tokenID, ok := pathID(w, r)
+	policyID, ok := pathInt64(w, r, "id", "路由编号无效")
 	if !ok {
 		return
 	}
-	var input RoutingPolicyInput
-	if err := decodeJSON(r, &input); err != nil || validateRoutingPolicy(input) != nil {
-		message := "路由策略参数无效"
-		if err := validateRoutingPolicy(input); err != nil {
-			message = err.Error()
-		}
-		writeAPIError(w, http.StatusBadRequest, "invalid_routing_policy", message)
+	input, ok := decodeRoutingPolicyInput(w, r)
+	if !ok {
 		return
 	}
-	if _, ok := s.bindTokenPolicy(w, r, session.UserID, session.UpstreamCookie, tokenID); !ok {
-		return
-	}
-	policy, err := s.services.Routing.UpdatePolicy(r.Context(), session.UserID, tokenID, input)
+	policy, err := s.services.Routing.UpdateRoutingPolicy(r.Context(), session.UserID, policyID, input)
 	if err != nil {
-		writeAPIError(w, http.StatusConflict, "routing_policy_update_failed", "路由策略或固定商户状态已变化")
+		writeRoutingPolicyError(w, err, "修改路由失败")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": policy})
+}
+
+func (s *server) deleteRoutingPolicy(w http.ResponseWriter, r *http.Request) {
+	_, session, ok := s.requireSession(w, r, roleCommon)
+	if !ok || !s.requireSameOrigin(w, r) || !s.routingReady(w, false) {
+		return
+	}
+	policyID, ok := pathInt64(w, r, "id", "路由编号无效")
+	if !ok {
+		return
+	}
+	if err := s.services.Routing.DeleteRoutingPolicy(r.Context(), session.UserID, policyID); err != nil {
+		writeRoutingPolicyError(w, err, "删除路由失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": nil})
+}
+
+func (s *server) routingMerchants(w http.ResponseWriter, r *http.Request) {
+	_, _, ok := s.requireSession(w, r, roleCommon)
+	if !ok || !s.routingReady(w, false) {
+		return
+	}
+	page, pageSize := pagination(r)
+	result, err := s.services.Routing.ListRoutingMerchants(r.Context(), strings.TrimSpace(r.URL.Query().Get("keyword")), page, pageSize)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "routing_merchants_query_failed", "读取可选商户失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": result})
+}
+
+func decodeRoutingPolicyInput(w http.ResponseWriter, r *http.Request) (RoutingPolicyInput, bool) {
+	var input RoutingPolicyInput
+	if err := decodeJSON(r, &input); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_routing_policy", "路由参数格式无效")
+		return RoutingPolicyInput{}, false
+	}
+	input.Name = strings.TrimSpace(input.Name)
+	if err := validateRoutingPolicy(input); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_routing_policy", err.Error())
+		return RoutingPolicyInput{}, false
+	}
+	return input, true
+}
+
+func writeRoutingPolicyError(w http.ResponseWriter, err error, fallback string) {
+	switch {
+	case errors.Is(err, ErrRoutingNotFound):
+		writeAPIError(w, http.StatusNotFound, "routing_policy_not_found", "路由不存在")
+	case errors.Is(err, ErrRoutingInvalidState):
+		writeAPIError(w, http.StatusConflict, "routing_policy_conflict", "路由已绑定密钥或固定商户状态已变化")
+	default:
+		writeAPIError(w, http.StatusInternalServerError, "routing_policy_store_error", fallback)
+	}
 }
 
 func (s *server) marketOffers(w http.ResponseWriter, r *http.Request) {
@@ -384,43 +462,49 @@ func (s *server) adminResetChannelHealth(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"channel_id": channelID, "health_state": "pending"}})
 }
 
-func (s *server) bindTokenPolicy(w http.ResponseWriter, r *http.Request, userID int, cookie string, tokenID int) (RoutingPolicy, bool) {
+func (s *server) bindTokenToPolicy(r *http.Request, userID int, cookie string, tokenID int, policyID int64) (TokenRoutingBinding, error) {
 	if s.services.Credentials == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "routing_unavailable", "令牌指纹服务尚未就绪")
-		return RoutingPolicy{}, false
+		return TokenRoutingBinding{}, errors.New("密钥指纹服务尚未就绪")
 	}
 	data, err := s.services.NewAPI.Do(r.Context(), http.MethodPost, "/api/token/"+strconv.Itoa(tokenID)+"/key", nil, &newapi.Auth{Cookie: cookie, UserID: userID})
 	if err != nil {
-		writeUpstreamError(w, err, http.StatusNotFound)
-		return RoutingPolicy{}, false
+		return TokenRoutingBinding{}, err
 	}
 	var revealed struct {
 		Key string `json:"key"`
 	}
 	if err := json.Unmarshal(data, &revealed); err != nil || strings.TrimSpace(revealed.Key) == "" {
-		writeAPIError(w, http.StatusBadGateway, "token_reveal_failed", "核心服务未返回有效密钥")
-		return RoutingPolicy{}, false
+		return TokenRoutingBinding{}, errors.New("核心服务未返回有效密钥")
 	}
-	policy, err := s.services.Routing.BindTokenAndDefaultPolicy(r.Context(), userID, tokenID, s.services.Credentials.Fingerprint([]byte(strings.TrimSpace(revealed.Key))))
-	if err != nil {
-		writeAPIError(w, http.StatusConflict, "token_bind_failed", "密钥路由绑定冲突")
-		return RoutingPolicy{}, false
-	}
-	return policy, true
+	return s.services.Routing.BindTokenToPolicy(
+		r.Context(), userID, tokenID,
+		s.services.Credentials.Fingerprint([]byte(strings.TrimSpace(revealed.Key))), policyID,
+	)
 }
 
 func validateRoutingPolicy(input RoutingPolicyInput) error {
+	if name := strings.TrimSpace(input.Name); name == "" || len([]rune(name)) > 50 {
+		return errors.New("路由名称需为 1 至 50 个字符")
+	}
 	if input.Mode != "smart" && input.Mode != "fixed" {
 		return errors.New("路由模式必须是智能路由或固定路由")
 	}
-	if input.Priority != "price" && input.Priority != "stability" {
-		return errors.New("优先方式必须是价格优先或稳定性优先")
+	if input.Priority != "balanced" && input.Priority != "price" && input.Priority != "success" && input.Priority != "latency" && input.Priority != "cache" {
+		return errors.New("优先方式必须是均衡、价格、成功率、响应速度或缓存命中率优先")
 	}
 	if input.MinimumMultiplierBPS < 0 || input.MaximumMultiplierBPS > 50_000 || input.MinimumMultiplierBPS > input.MaximumMultiplierBPS {
 		return errors.New("倍率区间必须在 0 到 50000 基点之间")
 	}
 	if input.Mode == "fixed" && len(uniqueInt64(input.MerchantIDs)) == 0 {
 		return errors.New("固定路由至少选择一个商户")
+	}
+	if input.MinimumCacheHitPPM != nil {
+		if input.Mode != "smart" {
+			return errors.New("最低缓存命中率只适用于智能路由")
+		}
+		if *input.MinimumCacheHitPPM < 0 || *input.MinimumCacheHitPPM > 1_000_000 {
+			return errors.New("最低缓存命中率必须在 0% 到 100% 之间")
+		}
 	}
 	return nil
 }

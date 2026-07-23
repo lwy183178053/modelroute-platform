@@ -26,6 +26,12 @@ function formatMultiplier(value) {
   return bps === 0 ? '免费' : `${(bps / 10_000).toFixed(2)}x`;
 }
 
+function formatCacheHit(offer) {
+  if (offer.protocol === 'image_generation') return '-';
+  if (!offer.cache_weight_ready) return '样本不足';
+  return `${(Number(offer.cache_hit_ppm || 0) / 10_000).toFixed(2)}%`;
+}
+
 function offerInputPrice(offer) {
   if (offer.protocol === 'image_generation') {
     return Math.min(...(offer.image_prices || []).map((item) => Number(item.price_micros)), Number.MAX_SAFE_INTEGER);
@@ -129,7 +135,7 @@ export default function MarketView({ navigate }) {
 
         <div className="table-wrap market-table-wrap">
           <table className="data-table market-table">
-            <thead><tr><th>ID</th><th>排名</th><th>模型与商户</th><th>协议</th><th>状态</th><th>可用率</th><th>P95 首字</th><th>调用次数</th><th>Token 用量</th><th>最后调用</th><th>倍率</th><th>可用渠道</th></tr></thead>
+            <thead><tr><th>ID</th><th>排名</th><th>模型与商户</th><th>协议</th><th>状态</th><th>可用率</th><th>P95 首字</th><th>缓存命中率</th><th>调用次数</th><th>Token 用量</th><th>最后调用</th><th>倍率</th><th>可用渠道</th></tr></thead>
             <tbody>
               {visibleOffers.map((offer, index) => {
                 const model = modelMap.get(offer.model);
@@ -141,6 +147,7 @@ export default function MarketView({ navigate }) {
                   <td><Status>{healthNames[offer.health_state] || offer.health_state}</Status></td>
                   <td><strong className="success-text">{formatAvailability(offer.availability_ppm)}</strong></td>
                   <td>{formatLatency(offer.ttft_p95_ms)}</td>
+                  <td>{formatCacheHit(offer)}</td>
                   <td>{formatCompactCount(offer.call_count)}</td>
                   <td>{formatCompactCount(offer.token_usage)}</td>
                   <td>{formatLastCalled(offer.last_called_at)}</td>

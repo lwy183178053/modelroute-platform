@@ -2,12 +2,230 @@ package httpapi
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"regexp"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+func TestCreateRoutingPolicyStoresIndependentResourceAndFixedMerchants(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	createdAt := time.Date(2026, 7, 23, 9, 0, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO routing_policies")).
+		WithArgs(7, "固定主路由", "fixed", "balanced", 2_000, 15_000, nil).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at"}).AddRow(91, createdAt, createdAt))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO routing_policy_merchants")).
+		WithArgs(int64(91), int64(31)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO routing_policy_merchants")).
+		WithArgs(int64(91), int64(32)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	policy, err := NewSQLRoutingStore(database).CreateRoutingPolicy(context.Background(), 7, RoutingPolicyInput{
+		Name: " 固定主路由 ", Mode: "fixed", Priority: "balanced",
+		MinimumMultiplierBPS: 2_000, MaximumMultiplierBPS: 15_000,
+		MerchantIDs: []int64{31, 32, 31},
+	})
+	if err != nil || policy.ID != 91 || policy.Name != "固定主路由" || policy.UserID != 7 || len(policy.MerchantIDs) != 2 {
+		t.Fatalf("创建路由=%+v err=%v", policy, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBindAndRebindTokenToOwnedRoutingPolicy(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewSQLRoutingStore(database)
+
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO token_bindings")).
+		WithArgs(9, 7, "fingerprint", int64(91)).
+		WillReturnRows(sqlmock.NewRows([]string{"newapi_token_id", "routing_policy_id", "name"}).AddRow(9, 91, "主路由"))
+	binding, err := store.BindTokenToPolicy(context.Background(), 7, 9, "fingerprint", 91)
+	if err != nil || binding.TokenID != 9 || binding.PolicyID != 91 || binding.PolicyName != "主路由" {
+		t.Fatalf("绑定结果=%+v err=%v", binding, err)
+	}
+
+	mock.ExpectQuery(regexp.QuoteMeta("UPDATE token_bindings binding")).
+		WithArgs(7, 9, int64(92)).
+		WillReturnRows(sqlmock.NewRows([]string{"newapi_token_id", "routing_policy_id", "name"}).AddRow(9, 92, "备用路由"))
+	binding, err = store.RebindTokenPolicy(context.Background(), 7, 9, 92)
+	if err != nil || binding.PolicyID != 92 || binding.PolicyName != "备用路由" {
+		t.Fatalf("重新绑定结果=%+v err=%v", binding, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeleteRoutingPolicyRejectsBoundKeys(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	mock.ExpectQuery(regexp.QuoteMeta("WITH target AS")).
+		WithArgs(7, int64(91)).
+		WillReturnRows(sqlmock.NewRows([]string{"bound_key_count", "deleted_id"}).AddRow(2, nil))
+
+	err = NewSQLRoutingStore(database).DeleteRoutingPolicy(context.Background(), 7, 91)
+	if !errors.Is(err, ErrRoutingInvalidState) {
+		t.Fatalf("删除已绑定路由错误=%v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRoutingStoreErrorMapsUniquePolicyNameToConflict(t *testing.T) {
+	err := routingStoreError(&pgconn.PgError{Code: "23505", ConstraintName: "routing_policies_user_name_idx"})
+	if !errors.Is(err, ErrRoutingInvalidState) {
+		t.Fatalf("路由名称重复错误=%v", err)
+	}
+}
+
+func TestRoutingPolicyCacheFloorScansNullableValue(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	mock.ExpectQuery(regexp.QuoteMeta("FROM routing_policies policy")).
+		WithArgs(7, int64(91)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "name", "mode", "priority", "minimum_multiplier_bps", "maximum_multiplier_bps", "minimum_cache_hit_ppm", "merchant_ids", "bound_key_count", "updated_at"}).
+			AddRow(91, 7, "缓存路由", "smart", "cache", 0, 50_000, sql.NullInt64{Int64: 650_000, Valid: true}, []byte(`[]`), 1, time.Now()))
+	policy, err := NewSQLRoutingStore(database).RoutingPolicy(context.Background(), 7, 91)
+	if err != nil || policy.MinimumCacheHitPPM == nil || *policy.MinimumCacheHitPPM != 650_000 {
+		t.Fatalf("缓存阈值路由=%+v err=%v", policy, err)
+	}
+}
+
+func TestListAndUpdateIndependentRoutingPolicies(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewSQLRoutingStore(database)
+	now := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta("FROM routing_policies policy")).
+		WithArgs(7).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "name", "mode", "priority", "minimum_multiplier_bps", "maximum_multiplier_bps", "minimum_cache_hit_ppm", "merchant_ids", "bound_key_count", "updated_at"}).
+			AddRow(91, 7, "主路由", "smart", "price", 0, 50_000, nil, []byte(`[]`), 2, now).
+			AddRow(92, 7, "备用路由", "fixed", "success", 5_000, 10_000, nil, []byte(`[31]`), 0, now))
+	items, err := store.ListRoutingPolicies(context.Background(), 7)
+	if err != nil || len(items) != 2 || items[0].BoundKeyCount != 2 || items[1].MerchantIDs[0] != 31 {
+		t.Fatalf("路由列表=%+v err=%v", items, err)
+	}
+
+	cacheFloor := 600_000
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("UPDATE routing_policies")).
+		WithArgs("缓存优先", "smart", "cache", 0, 50_000, &cacheFloor, 7, int64(91)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "bound_key_count", "updated_at"}).AddRow(91, 2, now))
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM routing_policy_merchants")).
+		WithArgs(int64(91)).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+	updated, err := store.UpdateRoutingPolicy(context.Background(), 7, 91, RoutingPolicyInput{
+		Name: "缓存优先", Mode: "smart", Priority: "cache",
+		MinimumMultiplierBPS: 0, MaximumMultiplierBPS: 50_000,
+		MinimumCacheHitPPM: &cacheFloor,
+	})
+	if err != nil || updated.Name != "缓存优先" || updated.BoundKeyCount != 2 || updated.MinimumCacheHitPPM == nil {
+		t.Fatalf("更新路由=%+v err=%v", updated, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestListTokenRoutingBindingsReturnsPlatformRouteIdentity(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	mock.ExpectQuery(regexp.QuoteMeta("FROM token_bindings binding")).
+		WithArgs(7).
+		WillReturnRows(sqlmock.NewRows([]string{"token_id", "policy_id", "policy_name"}).AddRow(9, 91, "主路由"))
+	items, err := NewSQLRoutingStore(database).ListTokenRoutingBindings(context.Background(), 7)
+	if err != nil || len(items) != 1 || items[0].TokenID != 9 || items[0].PolicyName != "主路由" {
+		t.Fatalf("密钥路由摘要=%+v err=%v", items, err)
+	}
+}
+
+func TestResolveRouteFiltersSmartMerchantsBelowCacheFloor(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	fingerprint := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	mock.ExpectQuery(regexp.QuoteMeta("JOIN routing_policies p ON p.id = b.routing_policy_id")).
+		WithArgs(fingerprint, "gpt-5.6").
+		WillReturnRows(sqlmock.NewRows([]string{"binding_id", "policy_id", "model_id", "mode", "priority", "protocol", "minimum_cache_hit_ppm"}).
+			AddRow(81, 91, 61, "smart", "cache", "responses", 600_000))
+	mock.ExpectQuery(regexp.QuoteMeta("WITH merchant_metrics AS")).
+		WithArgs(int64(91), int64(61)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"offer_id", "alias_id", "merchant_id", "channel_id", "upstream_channel_id", "model_id", "internal_alias",
+			"public_name", "protocol", "multiplier_bps", "health_state", "availability_ppm", "average_ttft_ms",
+			"request_count", "cache_hit_ppm", "prompt_tokens", "cache_weight_ready", "merchant_cache_hit_ppm", "merchant_cache_weight_ready",
+		}).
+			AddRow(41, 81, 31, 51, 71, 61, "mkt-o41-c51", "gpt-5.6", "responses", 8000, "healthy", 990000, 800, 100, 900000, 999999, false, 900000, false).
+			AddRow(42, 82, 32, 52, 72, 61, "mkt-o42-c52", "gpt-5.6", "responses", 8500, "healthy", 980000, 900, 100, 700000, 2000000, true, 700000, true))
+
+	selection, err := NewSQLRoutingStore(database).ResolveRoute(context.Background(), fingerprint, "gpt-5.6")
+	if err != nil || len(selection.Candidates) != 1 || selection.Candidates[0].MerchantID != 32 {
+		t.Fatalf("缓存阈值候选=%+v err=%v", selection.Candidates, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStartRouteDecisionPersistsWeightedRoutingContext(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO routing_decisions")).
+		WithArgs(
+			"request-1", int64(81), int64(91), int64(61), int64(101),
+			"smart", "cache", "weighted-v1", 2,
+			sqlmock.AnyArg(),
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	err = NewSQLRoutingStore(database).StartRouteDecision(context.Background(), RouteDecision{
+		RequestID: "request-1", TokenBindingID: 81, PolicyID: 91,
+		CanonicalModelID: 61, OfferChannelAliasID: 101,
+		Mode: "smart", Priority: "cache", AlgorithmVersion: "weighted-v1", CandidateCount: 2,
+		SelectedMetrics: map[string]any{
+			"merchant_id": 31, "multiplier_bps": 8000, "availability_ppm": 990000,
+			"ttft_p95_ms": 420, "cache_hit_ppm": 720000, "cache_weight_ready": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("创建路由决策失败：%v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestCreateCanonicalModelStoresAbsolutePriceAndTiersAtomically(t *testing.T) {
 	database, mock, err := sqlmock.New()
@@ -200,6 +418,9 @@ func TestSaveProbeHardFailureDisablesPlatformChannelInSameTransaction(t *testing
 		WithArgs(int64(51)).WillReturnRows(sqlmock.NewRows([]string{"state", "consecutive_failures", "cooldown_level"}).AddRow("healthy", 0, 0))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO channel_health_events")).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE channel_health")).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO route_metric_buckets")).
+		WithArgs(int64(51), int64(61), sqlmock.AnyArg(), int64(1), int64(0), int64(0), int64(0)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE merchant_channels SET status = 'disabled'")).
 		WithArgs(int64(51)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
@@ -209,6 +430,30 @@ func TestSaveProbeHardFailureDisablesPlatformChannelInSameTransaction(t *testing
 		Candidate: candidate, Outcome: "hard_failure", StatusCode: 401, FirstByteMS: 25,
 	}); err != nil {
 		t.Fatalf("保存硬故障失败：%v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRefreshRouteMetricSnapshotsUsesSevenDayWindowAndEightDayRetention(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	now := time.Date(2026, 7, 23, 10, 42, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM route_metric_snapshots snapshot")).
+		WithArgs(now).WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO route_metric_snapshots")).
+		WithArgs(now).WillReturnResult(sqlmock.NewResult(0, 4))
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM route_metric_buckets")).
+		WithArgs(now).WillReturnResult(sqlmock.NewResult(0, 3))
+	mock.ExpectCommit()
+
+	if err := NewSQLRoutingStore(database).RefreshRouteMetricSnapshots(context.Background(), now); err != nil {
+		t.Fatalf("刷新路由指标失败：%v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

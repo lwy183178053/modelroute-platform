@@ -81,20 +81,26 @@ async function mockAdminAPI(targetPage, state, account = null) {
     }
     if (url.pathname === '/api/offers') {
       return json({ success: true, data: [
-        { offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, call_count: 32400, token_usage: 2600000000, last_called_at: new Date(Date.now() - 10 * 60_000).toISOString(), price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 108000, output_price_micros: 432000, cache_read_price_micros: 54000, cache_write_price_micros: 144000 }], channel_count: 1, health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 },
-        { offer_id: 202, merchant_id: 32, merchant_name: '矩阵算力', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 5800, call_count: 1200, token_usage: 640000, last_called_at: new Date(Date.now() - 2 * 60 * 60_000).toISOString(), price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 87000, output_price_micros: 348000, cache_read_price_micros: 43500, cache_write_price_micros: 116000 }], channel_count: 1, health_state: 'degraded', availability_ppm: 987500, ttft_p95_ms: 1650 },
+        { offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, call_count: 32400, token_usage: 2600000000, last_called_at: new Date(Date.now() - 10 * 60_000).toISOString(), price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 108000, output_price_micros: 432000, cache_read_price_micros: 54000, cache_write_price_micros: 144000 }], channel_count: 1, health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200, cache_hit_ppm: 720000, cache_sample_input_tokens: 2000000, cache_weight_ready: true },
+        { offer_id: 202, merchant_id: 32, merchant_name: '矩阵算力', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 5800, call_count: 1200, token_usage: 640000, last_called_at: new Date(Date.now() - 2 * 60 * 60_000).toISOString(), price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 87000, output_price_micros: 348000, cache_read_price_micros: 43500, cache_write_price_micros: 116000 }], channel_count: 1, health_state: 'degraded', availability_ppm: 987500, ttft_p95_ms: 1650, cache_hit_ppm: 0, cache_sample_input_tokens: 320000, cache_weight_ready: false },
       ] });
     }
     if (url.pathname === '/api/keys' && request.method() === 'GET') {
-      return json({ success: true, data: { page: 1, page_size: 20, total: 1, items: [{ id: 9, name: '真实主密钥', key: 'full-secret-key', status: 1, created_time: 1784690000, accessed_time: 1784692000, expired_time: -1, unlimited_quota: true }] } });
+      return json({ success: true, data: { page: 1, page_size: 20, total: 1, items: [{ id: 9, name: '真实主密钥', key: 'full-secret-key', status: 1, created_time: 1784690000, accessed_time: 1784692000, expired_time: -1, unlimited_quota: true, routing_policy_id: 71, routing_policy_name: '主路由' }] } });
     }
-    if (url.pathname === '/api/routing-policies/9' && request.method() === 'GET') {
-      return json({ success: true, data: { id: 71, newapi_token_id: 9, mode: 'smart', priority: 'stability', minimum_multiplier_bps: 4000, maximum_multiplier_bps: 8000, merchant_ids: [] } });
+    if (url.pathname === '/api/routing-policies' && request.method() === 'GET') {
+      return json({ success: true, data: [{ id: 71, name: '主路由', mode: 'smart', priority: 'cache', minimum_multiplier_bps: 4000, maximum_multiplier_bps: 8000, minimum_cache_hit_ppm: null, merchant_ids: [], bound_key_count: 1, updated_at: '2026-07-23T12:00:00Z' }] });
     }
-    if (url.pathname === '/api/routing-policies/9' && request.method() === 'PUT') {
+    if (url.pathname === '/api/routing-policies/71' && request.method() === 'PUT') {
       state.routeSaveCalls += 1;
       state.routeSaveBody = request.postDataJSON();
-      return json({ success: true, data: { id: 71, newapi_token_id: 9, ...state.routeSaveBody } });
+      return json({ success: true, data: { id: 71, bound_key_count: 1, ...state.routeSaveBody } });
+    }
+    if (url.pathname === '/api/routing-merchants' && request.method() === 'GET') {
+      return json({ success: true, data: { page: Number(url.searchParams.get('p') || 1), page_size: Number(url.searchParams.get('page_size') || 20), total: 2, items: [
+        { id: 31, user_id: 8, name: '北辰云智', model_count: 8, minimum_multiplier_bps: 5800, maximum_multiplier_bps: 7200, availability_ppm: 999800, ttft_p95_ms: 1200, cache_hit_ppm: 720000, cache_sample_input_tokens: 2000000, cache_weight_ready: true },
+        { id: 32, user_id: 9, name: '矩阵算力', model_count: 4, minimum_multiplier_bps: 5000, maximum_multiplier_bps: 8500, availability_ppm: 987500, ttft_p95_ms: 1650, cache_hit_ppm: 0, cache_sample_input_tokens: 320000, cache_weight_ready: false },
+      ] } });
     }
     if (url.pathname === '/api/usage' && request.method() === 'GET') {
       state.userUsageQuery = Object.fromEntries(url.searchParams);
@@ -118,10 +124,10 @@ async function mockAdminAPI(targetPage, state, account = null) {
       return json({ success: true, data: 500000 });
     }
     if (url.pathname === '/api/merchant/offers' && request.method() === 'GET') {
-      return json({ success: true, data: [{ offer_id: 201, model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, call_count: 32400, token_usage: 2600000000, last_called_at: new Date(Date.now() - 10 * 60_000).toISOString(), price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 108000, output_price_micros: 432000, cache_read_price_micros: 54000, cache_write_price_micros: 144000 }], channel_count: 1, channels: [{ merchant_channel_id: 51, channel_name: 'OpenAI 主线路', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }], offer_status: state.offerEnabled === false ? 'inactive' : 'active', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] });
+      return json({ success: true, data: [{ offer_id: 201, model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, call_count: 32400, token_usage: 2600000000, last_called_at: new Date(Date.now() - 10 * 60_000).toISOString(), price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 108000, output_price_micros: 432000, cache_read_price_micros: 54000, cache_write_price_micros: 144000 }], channel_count: 1, cache_hit_ppm: 720000, cache_sample_input_tokens: 2000000, cache_weight_ready: true, channels: [{ merchant_channel_id: 51, channel_name: 'OpenAI 主线路', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200, cache_hit_ppm: 680000, cache_sample_input_tokens: 1200000, cache_weight_ready: true }], offer_status: state.offerEnabled === false ? 'inactive' : 'active', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] });
     }
     if (url.pathname === '/api/merchant/balance' && request.method() === 'GET') {
-      return json({ success: true, data: { merchant_id: 31, available_quota: 9000000, frozen_quota: 2500000, lifetime_earned_quota: 14000000, lifetime_refunded_quota: 500000, lifetime_paid_quota: 2000000 } });
+      return json({ success: true, data: { merchant_id: 31, available_quota: 90000000, frozen_quota: 25000000, lifetime_earned_quota: 140000000, lifetime_refunded_quota: 5000000, lifetime_paid_quota: 20000000 } });
     }
     if (url.pathname === '/api/merchant/usage' && request.method() === 'GET') {
       state.merchantUsageQuery = Object.fromEntries(url.searchParams);
@@ -133,12 +139,14 @@ async function mockAdminAPI(targetPage, state, account = null) {
       } });
     }
     if (url.pathname === '/api/merchant/withdrawals' && request.method() === 'GET') {
-      return json({ success: true, data: { page: 1, page_size: 50, total: 1, items: [{ id: 8, withdrawal_no: 'MW202607220001', merchant_id: 31, amount_quota: 2500000, available_before_quota: 10600000, recipient_type: 'alipay', recipient_account_masked: '138****2621', status: 'pending', created_at: '2026-07-22T14:00:00Z' }] } });
+      const items = [state.createdWithdrawal, { id: 8, withdrawal_no: 'MW202607220001', merchant_id: 31, amount_quota: 25000000, tax_quota: 750000, net_payout_quota: 24250000, available_before_quota: 90000000, recipient_type: 'alipay', recipient_account_masked: '138****2621', status: 'pending', created_at: '2026-07-22T14:00:00Z' }].filter(Boolean);
+      return json({ success: true, data: { page: Number(url.searchParams.get('p') || 1), page_size: Number(url.searchParams.get('page_size') || 20), total: items.length, items } });
     }
     if (url.pathname === '/api/merchant/withdrawals' && request.method() === 'POST') {
       state.withdrawalCreateCalls += 1;
       state.withdrawalCreateBody = request.postDataJSON();
-      return json({ success: true, data: { id: 10, withdrawal_no: 'MW202607220010', merchant_id: 31, amount_quota: state.withdrawalCreateBody.amount_quota, recipient_type: state.withdrawalCreateBody.recipient_type, recipient_account_masked: '138****2621', status: 'pending', created_at: '2026-07-22T16:00:00Z' } }, 201);
+      state.createdWithdrawal = { id: 10, withdrawal_no: 'MW202607220010', merchant_id: 31, merchant_name: 'ModelRoute 官方', amount_quota: state.withdrawalCreateBody.amount_quota, tax_quota: state.withdrawalCreateBody.amount_quota * 3 / 100, net_payout_quota: state.withdrawalCreateBody.amount_quota * 97 / 100, available_before_quota: 90000000, recipient_type: 'alipay', recipient_account_masked: '138****2621', recipient_account: state.withdrawalCreateBody.recipient_account, status: 'pending', created_at: '2026-07-22T16:00:00Z' };
+      return json({ success: true, data: state.createdWithdrawal }, 201);
     }
     if (url.pathname === '/api/merchant/offers/101' && request.method() === 'PUT') {
       state.offerCreateCalls += 1;
@@ -321,10 +329,14 @@ async function mockAdminAPI(targetPage, state, account = null) {
       return json({ success: true, data: null });
     }
     if (url.pathname === '/api/admin/withdrawals' && request.method() === 'GET') {
-      return json({ success: true, data: { page: 1, page_size: 50, total: 2, items: [
-        { id: 8, withdrawal_no: 'MW202607220001', merchant_id: 31, merchant_name: '北辰云智', amount_quota: 2500000, available_before_quota: 10600000, recipient_type: 'alipay', recipient_account_masked: '138****2621', recipient_account: '13800132621', status: 'pending', created_at: '2026-07-22T14:00:00Z' },
-        { id: 9, withdrawal_no: 'MW202607220002', merchant_id: 32, merchant_name: '矩阵算力', amount_quota: 5000000, available_before_quota: 8200000, recipient_type: 'bank', recipient_account_masked: '6217****1098', recipient_account: '6217000012341098', status: 'approved', review_reason: '资料核对通过', created_at: '2026-07-22T13:00:00Z' },
-      ] } });
+      state.adminWithdrawalQuery = Object.fromEntries(url.searchParams);
+      const allItems = [state.createdWithdrawal,
+        { id: 8, withdrawal_no: 'MW202607220001', merchant_id: 31, merchant_name: '北辰云智', amount_quota: 25000000, tax_quota: 750000, net_payout_quota: 24250000, available_before_quota: 90000000, recipient_type: 'alipay', recipient_account_masked: '138****2621', recipient_account: '13800132621', status: 'pending', created_at: '2026-07-22T14:00:00Z' },
+        { id: 9, withdrawal_no: 'MW202607220002', merchant_id: 32, merchant_name: '矩阵算力', amount_quota: 25000000, tax_quota: 750000, net_payout_quota: 24250000, available_before_quota: 82000000, recipient_type: 'alipay', recipient_account_masked: '139****0021', recipient_account: '13900130021', status: 'approved', review_reason: '资料核对通过', created_at: '2026-07-22T13:00:00Z' },
+      ].filter(Boolean);
+      const status = url.searchParams.get('status') || '';
+      const items = status ? allItems.filter((item) => item.status === status) : allItems;
+      return json({ success: true, data: { page: Number(url.searchParams.get('p') || 1), page_size: Number(url.searchParams.get('page_size') || 20), total: items.length, items } });
     }
     if (/^\/api\/admin\/withdrawals\/\d+\/(approve|reject|paid)$/.test(url.pathname) && request.method() === 'POST') {
       state.withdrawalActionCalls += 1;
@@ -358,7 +370,7 @@ try {
     modelCreateCalls: 0, modelCreateBody: null, modelDetectCalls: 0, modelDetectBody: null,
     modelDeleteCalls: 0, pricePublishCalls: 0, pricePublishBody: null,
     healthResetCalls: 0, paymentSettingCalls: 0, paymentSettingBody: null, paymentRetryCalls: 0,
-    withdrawalCreateCalls: 0, withdrawalCreateBody: null, withdrawalActionCalls: 0,
+    withdrawalCreateCalls: 0, withdrawalCreateBody: null, createdWithdrawal: null, adminWithdrawalQuery: null, withdrawalActionCalls: 0,
     withdrawalActionPath: '', withdrawalActionBody: null, userRedemptionCalls: 0, userRedemptionBody: null,
     platformSettingCalls: 0, platformSettingBody: null,
     redemptionCreateCalls: 0, redemptionCreateBody: null, redemptionUpdateCalls: 0, redemptionUpdateBody: null,
@@ -371,7 +383,7 @@ try {
   await page.getByText('平台管理员').waitFor();
   await page.getByText('gpt-4o-mini').first().waitFor();
   await page.getByText('北辰云智').first().waitFor();
-  for (const label of ['调用次数', 'Token 用量', '最后调用']) {
+  for (const label of ['缓存命中率', '调用次数', 'Token 用量', '最后调用']) {
     assert(await page.getByRole('columnheader', { name: label, exact: true }).count() === 1, `模型市场缺少${label}列名`);
   }
   await page.getByText('32.4K', { exact: true }).waitFor();
@@ -416,14 +428,14 @@ try {
 
   await page.getByRole('button', { name: '控制台', exact: true }).click();
   const consoleSidebar = page.getByRole('complementary', { name: '控制台功能' });
-  for (const label of ['账户概览', 'API 密钥与路由', '调用记录', '充值中心', '账户设置']) {
+  for (const label of ['账户概览', '路由管理', 'API 密钥', '调用记录', '充值中心', '账户设置']) {
     assert(await consoleSidebar.getByRole('button', { name: label, exact: true }).count() === 1, `用户控制台侧栏缺少${label}`);
   }
   assert(!(await page.locator('body').innerText()).includes('账户分组'), '用户控制台仍显示外围分组');
   await page.getByRole('main').getByText('¥257.28', { exact: true }).waitFor();
   assert(await page.locator('[aria-label="最近 7 天用量趋势"]').count() === 1, '账户概览未渲染真实用量趋势');
   await consoleSidebar.getByRole('button', { name: '调用记录', exact: true }).click();
-  await page.getByText('req-user-1001').waitFor();
+  assert(!(await page.locator('body').innerText()).includes('req-user-1001'), '用户调用记录仍显示请求编号');
   await page.getByText('1,200', { exact: true }).waitFor();
   await assertPagination(page);
   assert(await page.locator('[aria-label="最近 7 天用量趋势"]').count() === 0, '调用记录页仍重复渲染用量趋势');
@@ -437,20 +449,20 @@ try {
   await page.getByRole('button', { name: '立即兑换' }).click();
   await page.getByText('兑换码充值成功').waitFor();
   assert(adminMockState.userRedemptionCalls === 1 && adminMockState.userRedemptionBody.key === 'MR-USER-CODE', '用户兑换码没有调用真实接口');
-  await consoleSidebar.getByRole('button', { name: 'API 密钥与路由', exact: true }).click();
-  await page.getByText('真实主密钥').first().waitFor();
-  assert(await page.getByRole('checkbox', { name: '启用真实主密钥' }).isChecked(), '有效密钥的启用开关未选中');
-  await page.getByRole('button', { name: '复制' }).first().click();
-  await page.getByText('密钥已复制').waitFor();
-  await clickRowAction(page, '编辑路由策略');
+  await consoleSidebar.getByRole('button', { name: '路由管理', exact: true }).click();
+  await page.getByText('主路由').first().waitFor();
+  await clickActionInRow(page, '主路由', '编辑');
   await page.getByRole('dialog', { name: '编辑路由策略' }).waitFor();
   assert(await page.getByLabel('最低成交倍率').inputValue() === '0.4', '路由弹窗未读取当前最低倍率');
-  await page.getByLabel('固定商户').check();
-  assert(await page.getByText('固定商户范围').isVisible(), '固定路由商户选择未显示');
-  await page.getByRole('checkbox', { name: /北辰云智/ }).check();
+  await page.getByLabel('启用最低缓存命中率').check();
+  await page.getByRole('spinbutton', { name: /最低缓存命中率/ }).fill('60');
   await page.getByRole('button', { name: '保存策略' }).click();
   assert(adminMockState.routeSaveCalls === 1, '保存路由策略没有调用真实接口');
-  assert(adminMockState.routeSaveBody.mode === 'fixed' && adminMockState.routeSaveBody.merchant_ids.includes(31), '固定路由参数不正确');
+  assert(adminMockState.routeSaveBody.minimum_cache_hit_ppm === 600000, '最低缓存命中率没有转换为整数 PPM');
+  await consoleSidebar.getByRole('button', { name: 'API 密钥', exact: true }).click();
+  await page.getByText('真实主密钥').first().waitFor();
+  await page.getByText('主路由').waitFor();
+  assert(await page.getByRole('checkbox', { name: '启用真实主密钥' }).isChecked(), '有效密钥的启用开关未选中');
 
   await page.getByRole('button', { name: '商户中心', exact: true }).click();
   const merchantSidebar = page.getByRole('complementary', { name: '商户功能' });
@@ -458,6 +470,7 @@ try {
     assert(await merchantSidebar.getByRole('button', { name: label, exact: true }).count() === 1, `商户侧栏缺少${label}`);
   }
   assert(!(await page.locator('body').innerText()).includes('管理员账号当前未绑定商户资料'), '管理员仍显示专用商户缺失提示');
+  await page.getByText('ModelRoute 官方', { exact: true }).waitFor();
   await merchantSidebar.getByRole('button', { name: '渠道管理', exact: true }).click();
   await page.getByText('OpenAI 测试渠道').last().waitFor();
   await page.getByText('https://api.lwylink.xyz', { exact: true }).waitFor();
@@ -492,7 +505,7 @@ try {
   await page.getByText('渠道已提交审核').waitFor();
   assert(adminMockState.channelSubmitCalls === 1 && adminMockState.channelSubmitBody.channel_name === '企业多模型线路', '渠道审核没有提交真实表单');
   await merchantSidebar.getByRole('button', { name: '上架模型', exact: true }).click();
-  for (const label of ['调用次数', 'Token 用量', '最后调用']) {
+  for (const label of ['缓存命中率', '调用次数', 'Token 用量', '最后调用']) {
     assert(await page.getByRole('columnheader', { name: label, exact: true }).count() === 1, `上架模型表缺少${label}列名`);
   }
   await page.getByText('0.72x').waitFor();
@@ -503,7 +516,7 @@ try {
   await clickActionInRow(page, 'gpt-4o-mini', '查看渠道状态');
   await page.getByRole('columnheader', { name: '可用率', exact: true }).waitFor();
   await merchantSidebar.getByRole('button', { name: '调用记录', exact: true }).click();
-  await page.getByText('req-merchant-9001').waitFor();
+  assert(!(await page.locator('body').innerText()).includes('req-merchant-9001'), '商户调用记录仍显示请求编号');
   await page.getByText('OpenAI 主线路').waitFor();
   await page.getByLabel('筛选模型').selectOption('gpt-4o-mini');
   await page.waitForTimeout(100);
@@ -512,12 +525,19 @@ try {
   await page.getByText('MW202607220001', { exact: true }).waitFor();
   await page.getByRole('button', { name: '申请提现' }).click();
   const withdrawalDialog = page.getByRole('dialog', { name: '申请人工提现' });
-  await withdrawalDialog.getByLabel('提现金额（人民币）').fill('5');
-  await withdrawalDialog.getByLabel('收款方式').selectOption('alipay');
-  await withdrawalDialog.getByLabel('收款账户').fill('13800132621');
+  await withdrawalDialog.getByLabel('提现金额（人民币）').fill('50.5');
+  await withdrawalDialog.getByRole('button', { name: '提交提现申请' }).click();
+  await withdrawalDialog.getByText('提现金额必须为不低于 50 元且不超过可提现余额的整数').waitFor();
+  assert(adminMockState.withdrawalCreateCalls === 0, '小数提现金额仍提交了请求');
+  await withdrawalDialog.getByLabel('提现金额（人民币）').fill('100');
+  assert(await withdrawalDialog.getByLabel('收款方式').count() === 0, '提现弹窗仍提供非支付宝收款方式');
+  await withdrawalDialog.getByText('¥3.00', { exact: true }).waitFor();
+  await withdrawalDialog.getByText('¥97.00', { exact: true }).waitFor();
+  await withdrawalDialog.getByLabel('支付宝账户').fill('13800132621');
   await withdrawalDialog.getByRole('button', { name: '提交提现申请' }).click();
   assert(adminMockState.withdrawalCreateCalls === 1, '商户提现没有调用真实接口');
-  assert(adminMockState.withdrawalCreateBody.amount_quota === 2500000, '提现人民币金额没有转换为平台整数额度');
+  assert(adminMockState.withdrawalCreateBody.amount_quota === 50000000 && !('recipient_type' in adminMockState.withdrawalCreateBody), '提现人民币整数金额或支付宝请求结构不正确');
+  await page.getByText('MW202607220010', { exact: true }).waitFor();
   await merchantSidebar.getByRole('button', { name: '上架模型', exact: true }).click();
   await page.getByRole('button', { name: '设置模型价格' }).click();
   const quoteDialog = page.getByRole('dialog', { name: '设置模型价格' });
@@ -553,7 +573,7 @@ try {
   await page.getByText('公告草稿已保存').waitFor();
   assert(adminMockState.announcementCreateCalls === 1 && adminMockState.announcementCreateBody.audiences.includes('user'), '公告创建没有提交受众');
   await page.getByRole('button', { name: '渠道调用日志' }).click();
-  await page.getByText('req-admin-9001').waitFor();
+  assert(!(await page.locator('body').innerText()).includes('req-admin-9001'), '管理员调用记录仍显示请求编号');
   await page.getByText('北辰云智', { exact: true }).waitFor();
   await assertPagination(page);
   await page.getByLabel('筛选商户').selectOption('8');
@@ -677,16 +697,21 @@ try {
   await page.getByText('入账任务已重新排队').waitFor();
   assert(adminMockState.paymentRetryCalls === 1, '失败入账没有调用重试接口');
   await page.getByRole('button', { name: '提现审核' }).click();
-  await page.getByText('MW202607220001').waitFor();
-  await clickRowAction(page, '通过');
+  await page.getByText('MW202607220010').waitFor();
+  await page.getByLabel('筛选提现状态').selectOption('pending');
+  await assertPagination(page);
+  await clickActionInRow(page, 'MW202607220010', '通过');
   const approveDialog = page.getByRole('dialog', { name: '通过提现申请' });
   await approveDialog.getByLabel('审核原因').fill('账本与收款信息核对通过');
   await approveDialog.getByRole('button', { name: '确认通过' }).click();
-  assert(adminMockState.withdrawalActionCalls === 1 && adminMockState.withdrawalActionPath.endsWith('/8/approve'), '提现审核通过没有调用真实接口');
-  await clickRowAction(page, '确认打款', 1);
+  assert(adminMockState.withdrawalActionCalls === 1 && adminMockState.withdrawalActionPath.endsWith('/10/approve'), '提现审核通过没有调用真实接口');
+  await page.getByLabel('筛选提现状态').selectOption('');
+  await page.getByText('MW202607220002', { exact: true }).waitFor();
+  await clickActionInRow(page, 'MW202607220002', '确认打款');
   const paidDialog = page.getByRole('dialog', { name: '确认线下打款' });
-  await paidDialog.getByLabel('打款流水号').fill('BANK-009');
-  await paidDialog.getByLabel('凭证说明').fill('银行回单 009');
+  await paidDialog.getByText('¥48.50', { exact: true }).waitFor();
+  await paidDialog.getByLabel('打款流水号').fill('ALIPAY-009');
+  await paidDialog.getByLabel('凭证说明').fill('支付宝转账凭证 009');
   await paidDialog.getByRole('button', { name: '确认已打款' }).click();
   assert(adminMockState.withdrawalActionCalls === 2 && adminMockState.withdrawalActionPath.endsWith('/9/paid'), '确认线下打款没有调用真实接口');
   const merchantPage = await browser.newPage({ viewport: { width: 390, height: 844 } });

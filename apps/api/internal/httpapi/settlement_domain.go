@@ -12,6 +12,9 @@ const (
 	settlementOverlap       = 5 * time.Minute
 	settlementSafetyDelay   = 5 * time.Second
 	settlementFirstLookback = 24 * time.Hour
+	quotaPerCNY             = int64(500_000)
+	minimumWithdrawalQuota  = 50 * quotaPerCNY
+	withdrawalTaxBPS        = int64(300)
 )
 
 type SettlementLog struct {
@@ -46,6 +49,14 @@ func splitSettlementQuota(quota int64) (merchant int64, platform int64) {
 	}
 	platform = quota / 10
 	return quota - platform, platform
+}
+
+func withdrawalBreakdown(amountQuota int64) (taxQuota int64, netPayoutQuota int64, ok bool) {
+	if amountQuota < minimumWithdrawalQuota || amountQuota%quotaPerCNY != 0 {
+		return 0, 0, false
+	}
+	taxQuota = amountQuota * withdrawalTaxBPS / 10_000
+	return taxQuota, amountQuota - taxQuota, true
 }
 
 func refundSplitDelta(gross, merchantTotal, platformTotal, refundedGross, refundGross int64) (int64, int64, error) {

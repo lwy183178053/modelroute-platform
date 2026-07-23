@@ -20,7 +20,8 @@ import { UsageLogTable, UsageTrend, useUsage } from './UsagePanels';
 
 const consoleSections = [
   { id: 'overview', label: '账户概览', icon: LayoutDashboard },
-  { id: 'keys', label: 'API 密钥与路由', icon: KeyRound },
+  { id: 'routes', label: '路由管理', icon: Route },
+  { id: 'keys', label: 'API 密钥', icon: KeyRound },
   { id: 'usage', label: '调用记录', icon: FileText },
   { id: 'recharge', label: '充值中心', icon: CreditCard },
   { id: 'settings', label: '账户设置', icon: Settings2 },
@@ -35,23 +36,12 @@ function formatMultiplier(value) {
   return `${(Number(value || 0) / 10_000).toFixed(2)}x`;
 }
 
-function merchantOptions(offers) {
-  const merchants = new Map();
-  for (const offer of offers) {
-    const current = merchants.get(offer.merchant_id);
-    if (!current) {
-      merchants.set(offer.merchant_id, {
-        id: offer.merchant_id,
-        name: offer.merchant_name,
-        availability_ppm: offer.availability_ppm,
-        minimum_multiplier_bps: offer.multiplier_bps,
-      });
-      continue;
-    }
-    current.availability_ppm = Math.max(current.availability_ppm, offer.availability_ppm);
-    current.minimum_multiplier_bps = Math.min(current.minimum_multiplier_bps, offer.multiplier_bps);
-  }
-  return [...merchants.values()].sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
+function priorityName(value) {
+  return { balanced: '均衡分配', price: '价格优先', success: '成功率优先', latency: '响应速度优先', cache: '缓存命中率优先' }[value] || value;
+}
+
+function cacheFloorName(value) {
+  return value == null ? '未启用' : `${(Number(value) / 10_000).toFixed(2)}%`;
 }
 
 export default function ConsoleView({ account, openModal, notify, navigate, onAccountRefresh }) {
@@ -59,7 +49,7 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
   const [keys, setKeys] = useState([]);
   const [keyLoading, setKeyLoading] = useState(true);
   const [keyError, setKeyError] = useState('');
-  const [merchants, setMerchants] = useState([]);
+  const [routingPolicies, setRoutingPolicies] = useState([]);
   const [models, setModels] = useState([]);
   const [merchantApplication, setMerchantApplication] = useState(undefined);
   const [paymentOrders, setPaymentOrders] = useState([]);
@@ -86,19 +76,12 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
     setKeyLoading(true);
     setKeyError('');
     try {
-      const [data, offerData, modelData] = await Promise.all([
+      const [data, policyData] = await Promise.all([
         apiRequest('/api/keys?p=1&page_size=50'),
-        apiRequest('/api/offers'),
-        apiRequest('/api/models'),
+        apiRequest('/api/routing-policies'),
       ]);
-      const items = data?.items || [];
-      const policies = await Promise.allSettled(items.map((key) => apiRequest(`/api/routing-policies/${key.id}`)));
-      setKeys(items.map((key, index) => ({
-        ...key,
-        routing_policy: policies[index]?.status === 'fulfilled' ? policies[index].value : null,
-      })));
-      setMerchants(merchantOptions(offerData || []));
-      setModels(modelData || []);
+      setKeys(data?.items || []);
+      setRoutingPolicies(policyData || []);
     } catch (error) {
       setKeyError(error.message || '读取密钥失败');
     } finally {
@@ -111,6 +94,14 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
       setMerchantApplication(await apiRequest('/api/merchant/application'));
     } catch {
       setMerchantApplication(null);
+    }
+  }, []);
+
+  const loadModels = useCallback(async () => {
+    try {
+      setModels(await apiRequest('/api/models') || []);
+    } catch {
+      setModels([]);
     }
   }, []);
 
@@ -127,6 +118,7 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
 
   useEffect(() => { loadKeys(); }, [loadKeys]);
   useEffect(() => { loadMerchantApplication(); }, [loadMerchantApplication]);
+  useEffect(() => { loadModels(); }, [loadModels]);
   useEffect(() => { loadPaymentOrders(); }, [loadPaymentOrders]);
 
   const redeem = async (event) => {
@@ -176,6 +168,17 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
     }
   };
 
+  const deleteRoute = async (policy) => {
+    if (!window.confirm(`确认删除路由“${policy.name}”吗？`)) return;
+    try {
+      await apiRequest(`/api/routing-policies/${policy.id}`, { method: 'DELETE' });
+      notify('路由已删除');
+      await loadKeys();
+    } catch (error) {
+      notify(error.message || '删除路由失败');
+    }
+  };
+
   const currentSection = consoleSections.find((item) => item.id === section) || consoleSections[0];
   const accountTypeName = { user: '普通用户', merchant: '商户', admin: '管理员' }[account.account_type]
     || (Number(account.role) >= 10 ? '管理员' : account.is_merchant ? '商户' : '普通用户');
@@ -206,23 +209,26 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
             <UsageTrend data={usage.data} error={usage.error} loading={usage.loading} />
           </>}
 
-          {section === 'keys' && <Section title="API 密钥与路由" description="每个 API 密钥独立设置路由策略" actions={<Button icon={KeyRound} variant="primary" onClick={() => openModal({ type: 'key', onSaved: loadKeys })}>创建密钥</Button>}>
+          {section === 'routes' && <Section title="路由管理" description="路由可复用，并根据价格、成功率、速度或缓存指标加权选择商户" actions={<Button icon={Plus} variant="primary" onClick={() => openModal({ type: 'route', onSaved: loadKeys })}>创建路由</Button>}>
             <div className="table-wrap">
               <table className="data-table">
-                <thead><tr><th>ID</th><th>名称 / 密钥</th><th>路由方式</th><th>倍率区间</th><th>优先规则</th><th>固定商户</th><th>状态</th><th>操作</th></tr></thead>
-                <tbody>{keys.map((key) => <tr key={key.id}>
-                  <td><code>{key.id}</code></td><td><strong>{key.name}</strong><CopyValue onCopy={() => copyKey(key)}>{displayKey(key.key)}</CopyValue></td>
-                  <td><span className="route-kind"><Route size={15} /> {key.routing_policy?.mode === 'fixed' ? '固定商户' : key.routing_policy ? '智能路由' : '未绑定'}</span></td>
-                  <td>{key.routing_policy ? `${formatMultiplier(key.routing_policy.minimum_multiplier_bps)} - ${formatMultiplier(key.routing_policy.maximum_multiplier_bps)}` : '-'}</td>
-                  <td>{key.routing_policy?.priority === 'price' ? '价格优先' : key.routing_policy ? '稳定性优先' : '-'}</td>
-                  <td>{key.routing_policy?.mode === 'fixed' ? `${key.routing_policy.merchant_ids?.length || 0} 家` : '全部合格商户'}</td>
-                  <td><div className="status-control"><Status>{Number(key.status) === 1 ? '正常' : '停用'}</Status><label className="compact-switch" title={Number(key.status) === 1 ? '停用密钥' : '启用密钥'}><input aria-label={`启用${key.name}`} checked={Number(key.status) === 1} onChange={(event) => setKeyStatus(key, event.target.checked)} type="checkbox" /><span /></label></div></td>
-                  <td><ActionMenu items={[{ label: '编辑', onClick: () => openModal({ type: 'key', key, onSaved: loadKeys }) }, { label: '编辑路由策略', onClick: () => openModal({ type: 'route', key, policy: key.routing_policy, merchants, onSaved: loadKeys }) }, { label: '删除', danger: true, onClick: () => deleteKey(key) }]} /></td>
+                <thead><tr><th>ID</th><th>名称</th><th>模式</th><th>优先方式</th><th>倍率区间</th><th>最低缓存</th><th>固定商户</th><th>绑定密钥</th><th>操作</th></tr></thead>
+                <tbody>{routingPolicies.map((policy) => <tr key={policy.id}>
+                  <td><code>{policy.id}</code></td><td><strong>{policy.name}</strong></td><td>{policy.mode === 'fixed' ? '固定路由' : '智能路由'}</td><td>{priorityName(policy.priority)}</td><td>{formatMultiplier(policy.minimum_multiplier_bps)} - {formatMultiplier(policy.maximum_multiplier_bps)}</td><td>{policy.mode === 'smart' ? cacheFloorName(policy.minimum_cache_hit_ppm) : '-'}</td><td>{policy.mode === 'fixed' ? `${policy.merchant_ids?.length || 0} 家` : '全部合格商户'}</td><td>{policy.bound_key_count || 0} 把</td><td><ActionMenu items={[{ label: '编辑', onClick: () => openModal({ type: 'route', policy, onSaved: loadKeys }) }, { label: '删除', danger: true, disabled: Number(policy.bound_key_count || 0) > 0, onClick: () => deleteRoute(policy) }]} /></td>
                 </tr>)}
-                {!keyLoading && keys.length === 0 && <tr><td className="table-message" colSpan="8">{keyError || '尚未创建 API 密钥'}</td></tr>}
-                {keyLoading && <tr><td className="table-message" colSpan="8">正在读取 API 密钥</td></tr>}</tbody>
+                {!keyLoading && routingPolicies.length === 0 && <tr><td className="table-message" colSpan="9">{keyError || '尚未创建路由'}</td></tr>}
+                {keyLoading && <tr><td className="table-message" colSpan="9">正在读取路由</td></tr>}</tbody>
               </table>
             </div>
+          </Section>}
+
+          {section === 'keys' && <Section title="API 密钥" description="创建密钥前需要先创建路由" actions={<Button disabled={!routingPolicies.length} icon={KeyRound} variant="primary" onClick={() => openModal({ type: 'key', routingPolicies, onSaved: loadKeys })}>创建密钥</Button>}>
+            {!routingPolicies.length && !keyLoading && <InlineNotice tone="warning">请先在“路由管理”中创建一条路由。</InlineNotice>}
+            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>名称 / 密钥</th><th>绑定路由</th><th>额度</th><th>状态</th><th>操作</th></tr></thead><tbody>
+              {keys.map((key) => <tr key={key.id}><td><code>{key.id}</code></td><td><strong>{key.name}</strong><CopyValue onCopy={() => copyKey(key)}>{displayKey(key.key)}</CopyValue></td><td><span className="route-kind"><Route size={15} /> {key.routing_policy_name || '未绑定'}</span></td><td>{key.unlimited_quota ? '不限额' : formatQuota(key.remain_quota)}</td><td><div className="status-control"><Status>{Number(key.status) === 1 ? '正常' : '停用'}</Status><label className="compact-switch" title={Number(key.status) === 1 ? '停用密钥' : '启用密钥'}><input aria-label={`启用${key.name}`} checked={Number(key.status) === 1} onChange={(event) => setKeyStatus(key, event.target.checked)} type="checkbox" /><span /></label></div></td><td><ActionMenu items={[{ label: '编辑', onClick: () => openModal({ type: 'key', key, routingPolicies, onSaved: loadKeys }) }, { label: '删除', danger: true, onClick: () => deleteKey(key) }]} /></td></tr>)}
+              {!keyLoading && keys.length === 0 && <tr><td className="table-message" colSpan="6">{keyError || '尚未创建 API 密钥'}</td></tr>}
+              {keyLoading && <tr><td className="table-message" colSpan="6">正在读取 API 密钥</td></tr>}
+            </tbody></table></div>
           </Section>}
 
           {section === 'usage' && <UsageLogTable
@@ -268,7 +274,7 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
                 <div className="account-workspace"><span>当前工作区</span><strong>{account.is_merchant || Number(account.role) >= 10 ? '商户工作区' : '用户工作台'}</strong><small>{accountTypeName} · 可用功能按账号身份显示</small></div>
                 <div className="account-actions">
                   {(account.is_merchant || Number(account.role) >= 10) && <Button icon={ArrowUpRight} onClick={() => navigate('merchant')} variant="primary">进入商户中心</Button>}
-                  {!account.is_merchant && Number(account.role) < 10 && (!merchantApplication || merchantApplication.status === 'rejected') && <Button icon={ArrowUpRight} onClick={() => openModal({ type: 'merchantApply', models, onSaved: loadMerchantApplication })}>{merchantApplication?.status === 'rejected' ? '重新提交商户申请' : '申请成为商户'}</Button>}
+                  {!account.is_merchant && Number(account.role) < 10 && (!merchantApplication || merchantApplication.status === 'rejected') && <Button icon={ArrowUpRight} onClick={() => openModal({ type: 'merchantApply', models: models.filter((model) => model.status === 'active'), onSaved: loadMerchantApplication })}>{merchantApplication?.status === 'rejected' ? '重新提交商户申请' : '申请成为商户'}</Button>}
                 </div>
               </div>
               <div className="account-details">

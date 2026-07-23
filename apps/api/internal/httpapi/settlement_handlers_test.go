@@ -28,8 +28,10 @@ func (s *settlementRepositoryStub) MerchantWithdrawals(context.Context, int, int
 
 func (s *settlementRepositoryStub) CreateMerchantWithdrawal(_ context.Context, command CreateMerchantWithdrawalCommand) (MerchantWithdrawal, error) {
 	s.created = command
+	taxQuota, netPayoutQuota, _ := withdrawalBreakdown(command.AmountQuota)
 	return MerchantWithdrawal{
 		ID: 8, WithdrawalNo: command.WithdrawalNo, MerchantID: 31, AmountQuota: command.AmountQuota,
+		TaxQuota: taxQuota, NetPayoutQuota: netPayoutQuota,
 		RecipientType: command.RecipientType, RecipientAccountMasked: command.RecipientAccountMasked,
 		Status: "pending", CreatedAt: command.CreatedAt,
 	}, nil
@@ -56,7 +58,7 @@ func (s *settlementRepositoryStub) PayMerchantWithdrawal(_ context.Context, id i
 
 func TestMerchantWithdrawalEncryptsRecipientAndReturnsOnlyMask(t *testing.T) {
 	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	repository := &settlementRepositoryStub{balance: MerchantBalance{MerchantID: 31, AvailableQuota: 900}}
+	repository := &settlementRepositoryStub{balance: MerchantBalance{MerchantID: 31, AvailableQuota: 100 * quotaPerCNY}}
 	services.Merchants = &merchantRepositoryStub{identity: func(context.Context, int) (MerchantIdentity, error) {
 		return MerchantIdentity{MerchantID: 31, UserID: 7, Status: "active", IsMerchant: true}, nil
 	}}
@@ -65,7 +67,7 @@ func TestMerchantWithdrawalEncryptsRecipientAndReturnsOnlyMask(t *testing.T) {
 	token := createPlatformSession(t, services, 7, 1)
 	handler := NewServerWithServices("test", Dependencies{}, services)
 	account := "13800132621"
-	request := httptest.NewRequest(http.MethodPost, "/api/merchant/withdrawals", strings.NewReader(`{"amount_quota":500,"recipient_type":"alipay","recipient_account":"`+account+`"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/merchant/withdrawals", strings.NewReader(`{"amount_quota":25000000,"recipient_account":"`+account+`"}`))
 	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()
@@ -80,18 +82,59 @@ func TestMerchantWithdrawalEncryptsRecipientAndReturnsOnlyMask(t *testing.T) {
 	if repository.created.RecipientAccountMasked != "138****2621" || strings.Contains(response.Body.String(), account) {
 		t.Fatalf("账户掩码=%q 响应=%s", repository.created.RecipientAccountMasked, response.Body.String())
 	}
+	if repository.created.RecipientType != "alipay" {
+		t.Fatalf("提现收款方式=%q，期望固定为 alipay", repository.created.RecipientType)
+	}
+	if !strings.Contains(response.Body.String(), `"tax_quota":750000`) || !strings.Contains(response.Body.String(), `"net_payout_quota":24250000`) {
+		t.Fatalf("提现响应缺少税费或实际到账金额：%s", response.Body.String())
+	}
+}
+
+func TestMerchantWithdrawalRejectsInvalidAmountsAndLegacyRecipientType(t *testing.T) {
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	services.Merchants = &merchantRepositoryStub{identity: func(context.Context, int) (MerchantIdentity, error) {
+		return MerchantIdentity{MerchantID: 31, UserID: 7, Status: "active", IsMerchant: true}, nil
+	}}
+	services.Credentials = testCredentialBox(t)
+	services.Settlement = &settlementRepositoryStub{}
+	token := createPlatformSession(t, services, 7, 1)
+	handler := NewServerWithServices("test", Dependencies{}, services)
+
+	tests := []struct {
+		name string
+		body string
+		code string
+	}{
+		{name: "四十九元", body: `{"amount_quota":24500000,"recipient_account":"13800132621"}`, code: "invalid_withdrawal_amount"},
+		{name: "五十点五元", body: `{"amount_quota":25250000,"recipient_account":"13800132621"}`, code: "invalid_withdrawal_amount"},
+		{name: "旧银行卡类型", body: `{"amount_quota":25000000,"recipient_type":"bank","recipient_account":"13800132621"}`, code: "invalid_withdrawal"},
+		{name: "支付宝账户过短", body: `{"amount_quota":25000000,"recipient_account":"1234"}`, code: "invalid_alipay_account"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/api/merchant/withdrawals", strings.NewReader(test.body))
+			request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
+			request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"`+test.code+`"`) {
+				t.Fatalf("响应=%d %s，期望错误=%s", response.Code, response.Body.String(), test.code)
+			}
+		})
+	}
 }
 
 func TestAdminWithdrawalListDecryptsRecipientAndSupportsActions(t *testing.T) {
 	box := testCredentialBox(t)
-	encrypted, err := box.Encrypt([]byte("6217000012341098"))
+	encrypted, err := box.Encrypt([]byte("13800132621"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	repository := &settlementRepositoryStub{withdrawals: []MerchantWithdrawal{{
-		ID: 9, WithdrawalNo: "MW-9", MerchantID: 31, MerchantName: "北辰云智", AmountQuota: 500,
-		RecipientType: "bank", EncryptedRecipientAccount: encrypted, RecipientAccountMasked: "6217 **** 1098", Status: "approved",
+		ID: 9, WithdrawalNo: "MW-9", MerchantID: 31, MerchantName: "北辰云智", AmountQuota: 50 * quotaPerCNY,
+		TaxQuota: 750_000, NetPayoutQuota: 24_250_000, RecipientType: "alipay",
+		EncryptedRecipientAccount: encrypted, RecipientAccountMasked: "138****2621", Status: "approved",
 	}}}
 	services.Credentials = box
 	services.Settlement = repository
@@ -102,7 +145,7 @@ func TestAdminWithdrawalListDecryptsRecipientAndSupportsActions(t *testing.T) {
 	listRequest.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	listResponse := httptest.NewRecorder()
 	handler.ServeHTTP(listResponse, listRequest)
-	if listResponse.Code != http.StatusOK || !strings.Contains(listResponse.Body.String(), `"recipient_account":"6217000012341098"`) {
+	if listResponse.Code != http.StatusOK || !strings.Contains(listResponse.Body.String(), `"recipient_account":"13800132621"`) || !strings.Contains(listResponse.Body.String(), `"net_payout_quota":24250000`) {
 		t.Fatalf("管理员提现列表=%d %s", listResponse.Code, listResponse.Body.String())
 	}
 
@@ -113,7 +156,7 @@ func TestAdminWithdrawalListDecryptsRecipientAndSupportsActions(t *testing.T) {
 	}{
 		{path: "/api/admin/withdrawals/9/approve", body: `{"reason":"账本与收款信息核对通过"}`, want: "approve:账本与收款信息核对通过"},
 		{path: "/api/admin/withdrawals/9/reject", body: `{"reason":"收款信息需要重新提交"}`, want: "reject:收款信息需要重新提交"},
-		{path: "/api/admin/withdrawals/9/paid", body: `{"payout_reference":"BANK-009","payout_proof":"银行回单 009"}`, want: "paid:BANK-009:银行回单 009"},
+		{path: "/api/admin/withdrawals/9/paid", body: `{"payout_reference":"ALIPAY-009","payout_proof":"支付宝转账凭证 009"}`, want: "paid:ALIPAY-009:支付宝转账凭证 009"},
 	}
 	for _, action := range actions {
 		request := httptest.NewRequest(http.MethodPost, action.path, strings.NewReader(action.body))

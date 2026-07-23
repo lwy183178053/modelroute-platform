@@ -65,9 +65,14 @@ WHERE newapi_user_id = $1
 }
 
 func (s *SQLMerchantStore) EnsurePlatformMerchant(ctx context.Context, userID int, publicOrigin string) (MerchantIdentity, error) {
+	tx, err := s.database.BeginTx(ctx, nil)
+	if err != nil {
+		return MerchantIdentity{}, fmt.Errorf("开始平台商户事务：%w", err)
+	}
+	defer tx.Rollback()
 	var identity MerchantIdentity
 	var createdAt time.Time
-	err := s.database.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 INSERT INTO merchant_profiles
     (newapi_user_id, approved_application_id, display_name, website_url, status,
      approved_by_newapi_user_id, is_platform_owned)
@@ -94,6 +99,26 @@ RETURNING id, newapi_user_id, display_name, status, is_platform_owned, created_a
 	if err != nil {
 		return MerchantIdentity{}, merchantStoreError(err)
 	}
+	result, err := tx.ExecContext(ctx, `
+INSERT INTO merchant_name_reservations
+    (display_name_key, display_name, newapi_user_id, merchant_profile_id, status)
+VALUES ($1, $2, $3, $4, 'active')
+ON CONFLICT (display_name_key) DO UPDATE
+SET display_name = EXCLUDED.display_name,
+    merchant_profile_id = EXCLUDED.merchant_profile_id,
+    status = 'active',
+    updated_at = now()
+WHERE merchant_name_reservations.newapi_user_id = EXCLUDED.newapi_user_id
+`, strings.ToLower(identity.DisplayName), identity.DisplayName, identity.UserID, identity.MerchantID)
+	if err != nil {
+		return MerchantIdentity{}, merchantStoreError(err)
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return MerchantIdentity{}, ErrMerchantConflict
+	}
+	if err := tx.Commit(); err != nil {
+		return MerchantIdentity{}, fmt.Errorf("提交平台商户事务：%w", err)
+	}
 	identity.IsMerchant = true
 	return identity, nil
 }
@@ -115,11 +140,18 @@ func (s *SQLMerchantStore) CreateApplication(ctx context.Context, command Create
 	}
 	err = tx.QueryRowContext(ctx, `
 INSERT INTO merchant_applications
-    (newapi_user_id, display_name, website_url, business_description)
-VALUES ($1, $2, $3, $4)
+    (newapi_user_id, display_name, display_name_key, website_url, business_description)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING id, created_at
-`, command.UserID, command.DisplayName, command.WebsiteURL, command.BusinessDescription).Scan(&application.ID, &application.CreatedAt)
+`, command.UserID, command.DisplayName, command.DisplayNameKey, command.WebsiteURL, command.BusinessDescription).Scan(&application.ID, &application.CreatedAt)
 	if err != nil {
+		return MerchantApplication{}, merchantStoreError(err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO merchant_name_reservations
+    (display_name_key, display_name, newapi_user_id, application_id, status)
+VALUES ($1, $2, $3, $4, 'pending')
+`, command.DisplayNameKey, command.DisplayName, command.UserID, application.ID); err != nil {
 		return MerchantApplication{}, merchantStoreError(err)
 	}
 
@@ -767,6 +799,17 @@ WHERE id = $2 AND status = 'approving'
 		if affected, _ := result.RowsAffected(); affected != 1 {
 			return MerchantApproval{}, ErrMerchantInvalidState
 		}
+		result, err = tx.ExecContext(ctx, `
+UPDATE merchant_name_reservations
+SET merchant_profile_id = $1, status = 'active', updated_at = now()
+WHERE application_id = $2 AND status = 'pending'
+`, merchantID, review.ApplicationID)
+		if err != nil {
+			return MerchantApproval{}, fmt.Errorf("激活商户名称：%w", err)
+		}
+		if affected, _ := result.RowsAffected(); affected != 1 {
+			return MerchantApproval{}, ErrMerchantInvalidState
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return MerchantApproval{}, fmt.Errorf("提交商户审批事务：%w", err)
@@ -828,6 +871,16 @@ WHERE id = $3 AND status IN ('pending', 'verified')
 `, reason, adminID, applicationID.Int64)
 		if err != nil {
 			return fmt.Errorf("驳回商户申请：%w", err)
+		}
+		if affected, _ := result.RowsAffected(); affected != 1 {
+			return ErrMerchantInvalidState
+		}
+		result, err = tx.ExecContext(ctx, `
+DELETE FROM merchant_name_reservations
+WHERE application_id = $1 AND status = 'pending'
+`, applicationID.Int64)
+		if err != nil {
+			return fmt.Errorf("释放商户名称：%w", err)
 		}
 		if affected, _ := result.RowsAffected(); affected != 1 {
 			return ErrMerchantInvalidState
@@ -1116,8 +1169,13 @@ func merchantStoreError(err error) error {
 		return ErrMerchantNotFound
 	}
 	var postgresError *pgconn.PgError
-	if errors.As(err, &postgresError) && (postgresError.Code == "23505" || postgresError.Code == "23503") {
-		return ErrMerchantConflict
+	if errors.As(err, &postgresError) {
+		if postgresError.Code == "23505" && postgresError.ConstraintName == "merchant_name_reservations_pkey" {
+			return ErrMerchantNameConflict
+		}
+		if postgresError.Code == "23505" || postgresError.Code == "23503" {
+			return ErrMerchantConflict
+		}
 	}
 	return err
 }

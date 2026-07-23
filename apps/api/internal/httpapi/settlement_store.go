@@ -194,6 +194,9 @@ WHERE mc.newapi_channel_id = $1 AND aliases.internal_alias = $2
 }
 
 func settleConsumption(ctx context.Context, tx *sql.Tx, sourceID, merchantID, offerID, aliasID int64, item SettlementLog) (string, error) {
+	if err := recordSettlementRouteMetric(ctx, tx, aliasID, item); err != nil {
+		return "", err
+	}
 	merchantQuota, platformQuota := splitSettlementQuota(item.Quota)
 	available, frozen, err := updateMerchantBalance(ctx, tx, merchantID, merchantQuota, 0, merchantQuota, 0, 0)
 	if err != nil {
@@ -220,6 +223,29 @@ VALUES ($1, $2, 'earning', $3, 0, $4, $5, '模型调用结算')
 		return "", err
 	}
 	return "settled", nil
+}
+
+func recordSettlementRouteMetric(ctx context.Context, tx *sql.Tx, aliasID int64, item SettlementLog) error {
+	if item.PromptTokens <= 0 && item.CacheTokens <= 0 {
+		return nil
+	}
+	bucketStart := time.Unix(item.CreatedAt, 0).UTC().Truncate(time.Hour)
+	_, err := tx.ExecContext(ctx, `
+INSERT INTO route_metric_buckets
+    (merchant_channel_id, canonical_model_id, bucket_start, prompt_tokens, cache_tokens)
+SELECT alias.merchant_channel_id, offer.canonical_model_id, $2, $3, $4
+FROM offer_channel_aliases alias
+JOIN offer_versions offer ON offer.id = alias.offer_version_id
+WHERE alias.id = $1
+ON CONFLICT (merchant_channel_id, canonical_model_id, bucket_start) DO UPDATE
+SET prompt_tokens = route_metric_buckets.prompt_tokens + EXCLUDED.prompt_tokens,
+    cache_tokens = route_metric_buckets.cache_tokens + EXCLUDED.cache_tokens,
+    updated_at = now()
+`, aliasID, bucketStart, item.PromptTokens, item.CacheTokens)
+	if err != nil {
+		return fmt.Errorf("记录消费缓存指标：%w", err)
+	}
+	return nil
 }
 
 type refundCandidate struct {

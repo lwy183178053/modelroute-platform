@@ -3,7 +3,6 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
-	"slices"
 	"testing"
 	"time"
 )
@@ -58,21 +57,79 @@ func TestCooldownCapsAtTwoHoursAndHealthyRequestsDoNotScheduleProbe(t *testing.T
 	}
 }
 
-func TestSortCandidatesImplementsPriceAndStabilityPriority(t *testing.T) {
-	base := []RouteCandidate{
-		{OfferID: 1, MultiplierBPS: 4_000, HealthState: "healthy", AvailabilityPPM: 990_000, TTFTP95MS: 500},
-		{OfferID: 2, MultiplierBPS: 3_000, HealthState: "degraded", AvailabilityPPM: 999_000, TTFTP95MS: 100},
-		{OfferID: 3, MultiplierBPS: 4_000, HealthState: "healthy", AvailabilityPPM: 995_000, TTFTP95MS: 300},
+type fixedRouteRandom struct{ values []float64 }
+
+func (r *fixedRouteRandom) Float64() float64 {
+	value := r.values[0]
+	r.values = append(r.values[1:], value)
+	return value
+}
+
+func TestMerchantRouteWeightsAreBoundedAtFourToOne(t *testing.T) {
+	candidates := []RouteCandidate{
+		{MerchantID: 1, MerchantChannelID: 11, MultiplierBPS: 1_000, AvailabilityPPM: 1_000_000, TTFTP95MS: 100, MetricRequestCount: 100, CacheHitPPM: 1_000_000, CacheSampleInputTokens: 1_000_000, CacheWeightReady: true},
+		{MerchantID: 2, MerchantChannelID: 21, MultiplierBPS: 5_000, AvailabilityPPM: 0, TTFTP95MS: 5_000, MetricRequestCount: 100, CacheHitPPM: 0, CacheSampleInputTokens: 1_000_000, CacheWeightReady: true},
 	}
-	price := append([]RouteCandidate(nil), base...)
-	sortCandidates(price, "price")
-	if got := []int64{price[0].OfferID, price[1].OfferID, price[2].OfferID}; !slices.Equal(got, []int64{2, 3, 1}) {
-		t.Fatalf("价格优先顺序 = %v", got)
+	weights := merchantCandidateWeights(candidates, "cache")
+	if weights[1] != 4 || weights[2] != 1 {
+		t.Fatalf("商户权重=%v", weights)
 	}
-	stability := append([]RouteCandidate(nil), base...)
-	sortCandidates(stability, "stability")
-	if got := []int64{stability[0].OfferID, stability[1].OfferID, stability[2].OfferID}; !slices.Equal(got, []int64{3, 1, 2}) {
-		t.Fatalf("稳定性优先顺序 = %v", got)
+}
+
+func TestWeightedCandidateOrderStartsFromMerchantNotChannelCount(t *testing.T) {
+	candidates := []RouteCandidate{{MerchantID: 2, MerchantChannelID: 21, OfferChannelAliasID: 21, MultiplierBPS: 1_000}}
+	for index := int64(1); index <= 10; index++ {
+		candidates = append(candidates, RouteCandidate{MerchantID: 1, MerchantChannelID: index, OfferChannelAliasID: index, MultiplierBPS: 1_000})
+	}
+	ordered := weightedCandidateOrder(candidates, "balanced", &fixedRouteRandom{values: []float64{0.75, 0}})
+	if len(ordered) != 11 || ordered[0].MerchantID != 2 {
+		t.Fatalf("首选候选=%+v，总数=%d", ordered[0], len(ordered))
+	}
+	seen := map[int64]bool{}
+	for _, candidate := range ordered {
+		if seen[candidate.OfferChannelAliasID] {
+			t.Fatalf("候选重复=%d", candidate.OfferChannelAliasID)
+		}
+		seen[candidate.OfferChannelAliasID] = true
+	}
+}
+
+func TestCachePriorityTreatsLowSampleAsNeutral(t *testing.T) {
+	candidates := []RouteCandidate{
+		{MerchantID: 1, MerchantChannelID: 11, MultiplierBPS: 1_000, CacheHitPPM: 1_000_000, CacheSampleInputTokens: 999_999},
+		{MerchantID: 2, MerchantChannelID: 21, MultiplierBPS: 1_000, CacheHitPPM: 0, CacheSampleInputTokens: 999_999},
+	}
+	weights := merchantCandidateWeights(candidates, "cache")
+	if weights[1] != weights[2] {
+		t.Fatalf("低样本缓存影响了权重=%v", weights)
+	}
+}
+
+func TestSmartCacheFloorRequiresReadyMerchantMetric(t *testing.T) {
+	floor := 600_000
+	selection := RouteSelection{Mode: "smart", MinimumCacheHitPPM: &floor}
+	for _, test := range []struct {
+		name      string
+		candidate RouteCandidate
+		want      bool
+	}{
+		{name: "样本不足", candidate: RouteCandidate{MerchantCacheHitPPM: 900_000, MerchantCacheWeightReady: false}, want: false},
+		{name: "低于阈值", candidate: RouteCandidate{MerchantCacheHitPPM: 599_999, MerchantCacheWeightReady: true}, want: false},
+		{name: "达到阈值", candidate: RouteCandidate{MerchantCacheHitPPM: 600_000, MerchantCacheWeightReady: true}, want: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := routeCandidateMeetsCacheFloor(selection, test.candidate); got != test.want {
+				t.Fatalf("过滤结果=%v want=%v", got, test.want)
+			}
+		})
+	}
+	selection.Mode = "fixed"
+	if !routeCandidateMeetsCacheFloor(selection, RouteCandidate{}) {
+		t.Fatal("固定路由不应应用缓存命中率阈值")
+	}
+	selection.Mode = "smart"
+	if !routeCandidateMeetsCacheFloor(selection, RouteCandidate{Protocol: "image_generation"}) {
+		t.Fatal("图片模型不应应用缓存命中率阈值")
 	}
 }
 

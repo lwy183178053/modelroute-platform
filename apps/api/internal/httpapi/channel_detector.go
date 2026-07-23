@@ -49,10 +49,7 @@ func (d *NewAPIChannelDetector) testAdapter(ctx context.Context, request Channel
 	if err != nil {
 		return 0, err
 	}
-	baseURL := request.BaseURL
-	if adapter.channelType == 1 {
-		baseURL = strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1")
-	}
+	baseURL := newAPIChannelBaseURL(adapter.channelType, request.BaseURL)
 	if _, err := d.admin.Do(ctx, http.MethodPost, "/api/channel/", map[string]any{
 		"mode": "single",
 		"channel": map[string]any{

@@ -48,3 +48,22 @@ func TestExtractUpstreamModelNamesSupportsNewAPIShapes(t *testing.T) {
 		t.Fatalf("上游模型解析结果=%v", got)
 	}
 }
+
+func TestNewAPIChannelBaseURLRemovesProviderVersionSuffix(t *testing.T) {
+	tests := []struct {
+		channelType int
+		baseURL     string
+		want        string
+	}{
+		{channelType: 1, baseURL: "https://api.example.com/v1", want: "https://api.example.com"},
+		{channelType: 14, baseURL: "https://api.anthropic.com/v1", want: "https://api.anthropic.com"},
+		{channelType: 24, baseURL: "https://generativelanguage.googleapis.com/v1beta", want: "https://generativelanguage.googleapis.com"},
+		{channelType: 1, baseURL: "https://gateway.example.com/openai/v1", want: "https://gateway.example.com/openai"},
+		{channelType: 1, baseURL: "https://api.example.com", want: "https://api.example.com"},
+	}
+	for _, test := range tests {
+		if got := newAPIChannelBaseURL(test.channelType, test.baseURL); got != test.want {
+			t.Errorf("渠道类型 %d 的 New API 基础地址=%q，期望=%q", test.channelType, got, test.want)
+		}
+	}
+}

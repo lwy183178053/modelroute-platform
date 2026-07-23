@@ -1677,3 +1677,30 @@
 - `docs/部署运行手册.md`：更新直接覆盖命令、两份迁移和 20 个模型验收步骤。
 - `progress.md`：追加本轮直接覆盖策略、验证证据和文件清单。
 - 回滚点：本阶段前的代码基线为 `382c3ad`；执行 `git revert <本阶段提交>` 可回退本轮脚本、文档和文案。103 尚未执行本轮直接重置。
+
+## 2026-07-23 - Task: 修复带版本后缀的渠道模型同步
+
+### What was done
+
+- 生产专项验收复现商户填写 `.../v1` 后模型同步返回 `502`，确认固定 New API 会再次拼接 `/v1/models`，实际请求形成重复版本路径。
+- 平台保留商户提交的基础地址，仅在调用 New API 时按上游类型去掉末尾 `/v1` 或 `/v1beta`；模型同步、管理员 `hi` 检查和正式渠道创建统一使用该规则。
+- 保持 New API `v1.0.0-rc.21` 源码和容器镜像不变。
+
+### Testing
+
+- 先新增三类上游版本后缀测试并确认因规范化函数不存在而编译失败；实现后该测试与渠道适配器回退测试通过。
+- 在 103 使用公开只读模型目录验证假设：带 `/v1` 时稳定返回 `502`，去掉重复后缀后经 New API 成功同步 342 条模型。
+- 执行 `go test -count=1 ./...`、`go vet ./...` 和 `go build ./...`，全部通过。
+- 执行 `python -m unittest discover -s deploy/tests -p 'test_*.py' -v`，27 个部署测试全部通过；`git diff --check` 通过。
+
+### Notes
+
+- `apps/api/internal/httpapi/channel_models.go`：新增按渠道类型转换 New API 基础地址的规则。
+- `apps/api/internal/httpapi/channel_models_handlers.go`：模型同步调用使用 New API 专用基础地址。
+- `apps/api/internal/httpapi/channel_detector.go`：临时 `hi` 检测统一使用版本后缀转换。
+- `apps/api/internal/httpapi/merchant_handlers.go`：正式渠道创建统一使用版本后缀转换。
+- `apps/api/internal/httpapi/channel_models_test.go`：覆盖 OpenAI 兼容、Anthropic 和 Gemini 的版本后缀边界。
+- `docs/商户与渠道审核接口.md`：记录商户地址保存值与 New API 调用值的边界。
+- `docs/多模型渠道运营升级.md`：补充三类上游版本后缀处理规则。
+- `progress.md`：追加生产复现、根因、修复和测试证据。
+- 回滚点：本阶段前的发布基线为 `138eee3`；执行 `git revert <本阶段提交>` 可回退本轮修复。103 当前仍运行 `138eee35b89e`，修复提交发布后再更新生产落点。

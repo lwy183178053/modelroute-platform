@@ -465,10 +465,7 @@ func (s *server) createAndTestNewAPIChannel(r *http.Request, session platformaut
 	if !ok || review.Model == "" {
 		return 0, errors.New("渠道内部适配器无效")
 	}
-	baseURL := review.BaseURL
-	if channelType == 1 {
-		baseURL = strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1")
-	}
+	baseURL := newAPIChannelBaseURL(channelType, review.BaseURL)
 	models := []string{review.Model}
 	if repository, ok := s.services.Merchants.(MultiModelMerchantRepository); ok {
 		if bindings, modelErr := repository.ReviewModels(r.Context(), review.ID); modelErr == nil {

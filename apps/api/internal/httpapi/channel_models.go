@@ -62,3 +62,15 @@ func channelTypeForName(name string) (int, bool) {
 		return 0, false
 	}
 }
+
+func newAPIChannelBaseURL(channelType int, baseURL string) string {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	suffix := ""
+	switch channelType {
+	case 1, 14:
+		suffix = "/v1"
+	case 24:
+		suffix = "/v1beta"
+	}
+	return strings.TrimSuffix(baseURL, suffix)
+}

@@ -55,7 +55,7 @@ func (s *server) fetchAndMatchChannelModels(r *http.Request, session platformaut
 		return nil, 0, errors.New("API 密钥长度无效")
 	}
 	requestBody := map[string]any{
-		"type": channelType, "channel_type": channelType, "base_url": normalizedURL, "key": credential, "api_key": credential,
+		"type": channelType, "channel_type": channelType, "base_url": newAPIChannelBaseURL(channelType, normalizedURL), "key": credential, "api_key": credential,
 	}
 	var data json.RawMessage
 	if s.services.AdminNewAPI != nil {

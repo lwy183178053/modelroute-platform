@@ -51,7 +51,7 @@ func TestBuildHTTPServicesUsesSessionAndOriginConfig(t *testing.T) {
 		NewAPIAdminUsername:  "modelroute",
 		NewAPIAdminPassword:  "server-only-secret",
 	}
-	services, err := buildHTTPServices(database, redisClient, cfg)
+	services, err := buildHTTPServices(database, redisClient, cfg, 750_000)
 	if err != nil {
 		t.Fatalf("构建 HTTP 依赖失败：%v", err)
 	}
@@ -60,6 +60,9 @@ func TestBuildHTTPServicesUsesSessionAndOriginConfig(t *testing.T) {
 	}
 	if services.AdminNewAPI == nil || services.Routing == nil || services.OfferSync == nil || services.Health == nil || services.RouteMetrics == nil || services.Payments == nil || services.PaymentCredit == nil || services.Settlement == nil || services.SettlementSync == nil {
 		t.Fatalf("路由服务依赖未完整注入：%+v", services)
+	}
+	if services.QuotaPerUnit != 750_000 {
+		t.Fatalf("核心额度单位未注入：%d", services.QuotaPerUnit)
 	}
 	if services.Cookie.Name != "modelroute_session" || services.Cookie.PublicOrigin != "https://aggregate.lwylink.xyz" || services.Cookie.MaxAge != 12*time.Hour || !services.Cookie.Secure {
 		t.Fatalf("Cookie 配置不符合预期：%+v", services.Cookie)

@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+const quotaPerCNY int64 = 500_000
+
 func TestSplitSettlementQuotaKeepsIntegerIdentity(t *testing.T) {
 	tests := []struct {
 		quota    int64
@@ -42,11 +44,21 @@ func TestWithdrawalBreakdownRequiresWholeYuanAndMinimumAmount(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			tax, net, ok := withdrawalBreakdown(test.amount)
+			tax, net, ok := withdrawalBreakdown(test.amount, quotaPerCNY)
 			if tax != test.wantTax || net != test.wantNet || ok != test.wantOK {
 				t.Fatalf("withdrawalBreakdown(%d)=(%d,%d,%t)，期望=(%d,%d,%t)", test.amount, tax, net, ok, test.wantTax, test.wantNet, test.wantOK)
 			}
 		})
+	}
+}
+
+func TestWithdrawalBreakdownUsesRuntimeCoreQuotaUnit(t *testing.T) {
+	tax, net, ok := withdrawalBreakdown(50*750_000, 750_000)
+	if !ok || tax != 1_125_000 || net != 36_375_000 {
+		t.Fatalf("非默认额度单位提现拆分 tax=%d net=%d ok=%t", tax, net, ok)
+	}
+	if _, _, ok := withdrawalBreakdown(50*750_000+1, 750_000); ok {
+		t.Fatal("应拒绝非人民币整数金额")
 	}
 }
 

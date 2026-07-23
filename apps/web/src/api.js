@@ -36,11 +36,26 @@ export async function apiRequest(path, { method = 'GET', body, signal } = {}) {
   return payload?.data;
 }
 
+let quotaPerUnit = 0;
+
+export function configureQuotaPerUnit(value) {
+  const unit = Number(value);
+  if (!Number.isSafeInteger(unit) || unit <= 0 || unit % 100 !== 0) {
+    throw new Error('核心额度单位配置无效');
+  }
+  quotaPerUnit = unit;
+}
+
+export function getQuotaPerUnit() {
+  if (!quotaPerUnit) throw new Error('核心额度单位尚未加载');
+  return quotaPerUnit;
+}
+
 export function formatQuota(value) {
   const quota = Number(value || 0);
   return new Intl.NumberFormat('zh-CN', {
     style: 'currency', currency: 'CNY', minimumFractionDigits: 2, maximumFractionDigits: 2,
-  }).format(quota / 500_000);
+  }).format(quota / getQuotaPerUnit());
 }
 
 export function formatPriceMicros(value) {

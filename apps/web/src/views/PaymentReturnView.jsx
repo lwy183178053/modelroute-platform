@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, CreditCard, RefreshCw, WalletCards } from 'lucide-react';
-import { apiRequest } from '../api';
+import { apiRequest, formatQuota } from '../api';
 import { Button, InlineNotice, Metric, PageHeader, Section, Status } from '../ui';
 
 const paymentNames = { pending: '待支付', paid: '已支付', closed: '已关闭' };
@@ -37,7 +37,7 @@ export default function PaymentReturnView({ navigate }) {
     {order && <>
       <div className="metrics-grid">
         <Metric label="人民币金额" value={`¥${(Number(order.amount_cny_cents || 0) / 100).toFixed(2)}`} hint="订单创建时锁定" icon={CreditCard} />
-        <Metric label="入账额度" value={`¥${(Number(order.newapi_quota || 0) / 500_000).toFixed(2)}`} hint="支付成功后入账" icon={WalletCards} tone="blue" />
+        <Metric label="入账额度" value={formatQuota(order.newapi_quota)} hint="支付成功后入账" icon={WalletCards} tone="blue" />
       </div>
       <Section title="订单状态" description={`平台订单号 ${order.order_no}`} actions={<Button icon={RefreshCw} onClick={load}>刷新状态</Button>}>
         <div className="account-rows">

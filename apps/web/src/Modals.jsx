@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Check, CreditCard, KeyRound, Landmark, LockKeyhole, Plus, RotateCcw, Send, ShieldCheck, Store } from 'lucide-react';
 import AuthModal from './AuthModal';
-import { apiRequest, formatPriceMicros, formatQuota } from './api';
+import { apiRequest, formatPriceMicros, formatQuota, getQuotaPerUnit } from './api';
 import { Button, Field, InlineNotice, Modal, Pagination, Select, Status, TextInput } from './ui';
 
 function Footer({ cancel, submit, submitText, icon = Check }) {
@@ -460,7 +460,8 @@ function WithdrawalModal({ close, config, notify }) {
   const [error, setError] = useState('');
   const availableQuota = Number(config.balance?.available_quota || 0);
   const amountYuan = Number(amount);
-  const amountQuota = Number.isInteger(amountYuan) ? amountYuan * 500_000 : 0;
+  const quotaPerUnit = getQuotaPerUnit();
+  const amountQuota = Number.isInteger(amountYuan) ? amountYuan * quotaPerUnit : 0;
   const taxQuota = amountQuota * 3 / 100;
   const netPayoutQuota = amountQuota - taxQuota;
   const submit = async () => {
@@ -491,7 +492,7 @@ function WithdrawalModal({ close, config, notify }) {
   return (
     <Modal title="申请人工提现" description="提现收取 3% 税费，申请后冻结完整金额，由管理员审核并通过支付宝打款。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy} icon={Landmark} onClick={submit} variant="primary">{busy ? '提交中' : '提交提现申请'}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
-      <Field label="提现金额（人民币）" hint={`当前可提现 ${formatQuota(availableQuota)}，最低 50 元且只支持整数`}><div className="prefix-input"><span>¥</span><TextInput max={Math.floor(availableQuota / 500_000)} min="50" onChange={(event) => setAmount(event.target.value)} step="1" type="number" value={amount} /></div></Field>
+      <Field label="提现金额（人民币）" hint={`当前可提现 ${formatQuota(availableQuota)}，最低 50 元且只支持整数`}><div className="prefix-input"><span>¥</span><TextInput max={Math.floor(availableQuota / quotaPerUnit)} min="50" onChange={(event) => setAmount(event.target.value)} step="1" type="number" value={amount} /></div></Field>
       <div className="withdrawal-summary"><span>申请金额<strong>{formatQuota(amountQuota)}</strong></span><span>税费（3%）<strong>{formatQuota(taxQuota)}</strong></span><span>预计到账<strong>{formatQuota(netPayoutQuota)}</strong></span></div>
       <Field label="支付宝账户" hint="账户信息加密保存，仅管理员处理打款时可见"><TextInput maxLength="256" onChange={(event) => setRecipientAccount(event.target.value)} value={recipientAccount} /></Field>
     </Modal>
@@ -602,12 +603,13 @@ function AdminUserModal({ config, close, notify }) {
   const [error, setError] = useState('');
 
   const submit = async () => {
+    const quotaValue = Math.round(Number(value) * getQuotaPerUnit());
     setBusy(true);
     setError('');
     try {
       await apiRequest(`/api/admin/users/${config.user.id}/${quotaMode ? 'quota' : 'password'}`, {
         method: 'POST',
-        body: quotaMode ? { mode, value: Number(value) } : { password },
+        body: quotaMode ? { mode, value: quotaValue } : { password },
       });
       await config.onSaved?.();
       notify(quotaMode ? '用户额度已调整' : '用户密码已重置');
@@ -622,7 +624,7 @@ function AdminUserModal({ config, close, notify }) {
   return (
     <Modal title={quotaMode ? '调整用户额度' : '重置用户密码'} description={`${config.user.display_name || config.user.username} · 用户 ID ${config.user.id}`} onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || (quotaMode ? value === '' : password.length < 8)} icon={quotaMode ? CreditCard : LockKeyhole} onClick={submit} variant="primary">{busy ? '处理中' : '确认提交'}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
-      {quotaMode ? <div className="form-grid two-column"><Field label="调整方式"><Select onChange={(event) => setMode(event.target.value)} value={mode}><option value="add">增加</option><option value="subtract">扣减</option><option value="override">设为</option></Select></Field><Field label="整数额度"><TextInput min="0" onChange={(event) => setValue(event.target.value)} type="number" value={value} /></Field></div> : <Field label="新密码" hint="长度为 8 到 20 位"><TextInput maxLength="20" minLength="8" onChange={(event) => setPassword(event.target.value)} type="password" value={password} /></Field>}
+      {quotaMode ? <div className="form-grid two-column"><Field label="调整方式"><Select onChange={(event) => setMode(event.target.value)} value={mode}><option value="add">增加</option><option value="subtract">扣减</option><option value="override">设为</option></Select></Field><Field label="调整金额（人民币）"><TextInput min="0" onChange={(event) => setValue(event.target.value)} step="0.01" type="number" value={value} /></Field></div> : <Field label="新密码" hint="长度为 8 到 20 位"><TextInput maxLength="20" minLength="8" onChange={(event) => setPassword(event.target.value)} type="password" value={password} /></Field>}
     </Modal>
   );
 }

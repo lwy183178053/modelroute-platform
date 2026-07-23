@@ -50,7 +50,7 @@ func TestSQLSettlementStoreFreezesWithdrawalsAtomicallyAndReleasesOrPays(t *test
 		go func(index int) {
 			defer wait.Done()
 			withdrawal, createErr := store.CreateMerchantWithdrawal(ctx, CreateMerchantWithdrawalCommand{
-				WithdrawalNo: "MW-CONCURRENT-" + string(rune('A'+index)), UserID: 17, AmountQuota: 50 * quotaPerCNY,
+				WithdrawalNo: "MW-CONCURRENT-" + string(rune('A'+index)), UserID: 17, AmountQuota: 50 * quotaPerCNY, QuotaPerUnit: quotaPerCNY,
 				RecipientType: "alipay", EncryptedRecipientAccount: []byte("encrypted-account"),
 				RecipientAccountMasked: "138****2621", CreatedAt: now,
 			})
@@ -100,7 +100,7 @@ func TestSQLSettlementStoreFreezesWithdrawalsAtomicallyAndReleasesOrPays(t *test
 	}
 
 	second, err := store.CreateMerchantWithdrawal(ctx, CreateMerchantWithdrawalCommand{
-		WithdrawalNo: "MW-PAID", UserID: 17, AmountQuota: 50 * quotaPerCNY, RecipientType: "alipay",
+		WithdrawalNo: "MW-PAID", UserID: 17, AmountQuota: 50 * quotaPerCNY, QuotaPerUnit: quotaPerCNY, RecipientType: "alipay",
 		EncryptedRecipientAccount: []byte("encrypted-alipay"), RecipientAccountMasked: "138****2621", CreatedAt: now.Add(3 * time.Minute),
 	})
 	if err != nil {

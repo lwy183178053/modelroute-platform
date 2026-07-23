@@ -68,6 +68,7 @@ type CreateMerchantWithdrawalCommand struct {
 	WithdrawalNo              string
 	UserID                    int
 	AmountQuota               int64
+	QuotaPerUnit              int64
 	RecipientType             string
 	EncryptedRecipientAccount []byte
 	RecipientAccountMasked    string

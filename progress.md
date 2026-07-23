@@ -2593,3 +2593,63 @@
 - `data/ui-preview/vite.config.mjs`：同步当前前端所需的本地模拟数据与接口；该运行夹具被 `.gitignore` 排除，不进入提交。
 - `progress.md`：追加本地预览验证与运行边界记录。
 - 回滚方式：停止 `57723` 预览进程并删除被忽略的 `data/ui-preview/vite.config.mjs`；该操作不影响 Git 跟踪代码和已完成提交。
+
+## 2026-07-24 - Task: 动态读取核心额度单位并统一人民币口径
+
+### What was done
+
+- 平台启动时从核心状态读取实际 `quota_per_unit`，以“核心页面余额 1.00 对应平台 ¥1”作为唯一对外口径，移除充值、提现、兑换码和页面展示中写死的 `500000`。
+- 充值订单继续使用人民币分和核心整数额度记账；提现门槛、人民币整数校验、3% 税费及实际到账金额统一使用启动时锁定的额度单位计算。
+- 浏览器从平台版本接口获取额度单位并集中格式化金额，支付返回页、商户余额、管理员额度调整和兑换码额度均复用同一换算逻辑。
+- V2 开发迁移取消数据库中写死的提现整数倍约束，金额合法性由持有运行时额度单位的事务入口校验。
+
+### Testing
+
+- `go test ./...`：通过，全部 Go 包测试无失败。
+- `go vet ./...`：通过，无静态检查问题。
+- `go build ./...`：通过，API、Worker 和模型种子命令均可构建。
+- `npm.cmd run test:quota`：通过，前端运行时额度单位换算专项测试通过。
+- `npm.cmd run test:ui`：通过，前端构建及 UI 冒烟测试通过。
+- `npm.cmd run build`：通过，生产前端构建成功。
+- `docker compose config --quiet`：通过；未注入本地生产环境变量时仅输出变量缺失提示。
+
+### Notes
+
+- `apps/api/internal/bootstrap/resources.go`：启动资源初始化时读取并注入核心额度单位。
+- `apps/api/internal/bootstrap/resources_test.go`：覆盖额度单位初始化及配置传递。
+- `apps/api/internal/httpapi/auth_test.go`：测试服务夹具注入有效额度单位。
+- `apps/api/internal/httpapi/payment_domain.go`：充值额度按运行时单位和人民币分进行整数换算。
+- `apps/api/internal/httpapi/payment_domain_test.go`：覆盖非默认单位、溢出及不可精确表示人民币分的单位。
+- `apps/api/internal/httpapi/payment_handlers.go`：创建充值订单时使用服务启动锁定的额度单位。
+- `apps/api/internal/httpapi/quota_unit.go`：新增核心状态额度单位读取与合法性校验。
+- `apps/api/internal/httpapi/quota_unit_test.go`：覆盖状态读取、非默认单位和非法单位。
+- `apps/api/internal/httpapi/server.go`：版本接口向浏览器发布当前额度单位。
+- `apps/api/internal/httpapi/server_test.go`：覆盖版本接口额度单位响应。
+- `apps/api/internal/httpapi/services.go`：服务依赖保存启动时锁定的额度单位。
+- `apps/api/internal/httpapi/settlement_domain.go`：提现金额、门槛和税费拆分使用运行时单位。
+- `apps/api/internal/httpapi/settlement_domain_test.go`：覆盖默认与非默认额度单位的提现边界。
+- `apps/api/internal/httpapi/settlement_handlers.go`：商户提现入口传递当前额度单位。
+- `apps/api/internal/httpapi/settlement_handlers_test.go`：更新提现处理测试夹具。
+- `apps/api/internal/httpapi/settlement_store_postgres_test.go`：更新 PostgreSQL 提现事务测试输入。
+- `apps/api/internal/httpapi/settlement_types.go`：提现事务命令携带额度单位。
+- `apps/api/internal/httpapi/settlement_withdrawals.go`：事务层按当前单位校验整数提现。
+- `apps/api/internal/migrations/migrate_test.go`：覆盖动态单位迁移约束。
+- `apps/api/internal/migrations/sql/000007_dynamic_quota_unit.sql`：移除写死额度整数倍的数据库约束并保留正数约束。
+- `apps/web/package.json`：增加前端额度单位专项测试命令。
+- `apps/web/scripts/capture.mjs`：截图夹具返回非默认额度单位以验证动态展示。
+- `apps/web/scripts/quota-unit-test.mjs`：新增前端动态换算专项测试。
+- `apps/web/scripts/ui-smoke.mjs`：UI 冒烟夹具和金额断言改用运行时单位。
+- `apps/web/src/Modals.jsx`：额度调整、充值和提现弹窗统一按运行时单位转换。
+- `apps/web/src/api.js`：集中加载、保存、读取和格式化运行时额度单位。
+- `apps/web/src/main.jsx`：应用启动阶段先初始化额度单位。
+- `apps/web/src/styles.css`：增加额度单位初始化失败提示样式。
+- `apps/web/src/views/MerchantView.jsx`：商户余额及提现输入使用动态单位。
+- `apps/web/src/views/PaymentReturnView.jsx`：支付返回页使用统一额度格式化。
+- `apps/web/src/views/admin/AdminRedemptions.jsx`：兑换码人民币额度使用动态单位换算。
+- `docs/V2数据基线.md`：同步动态额度单位的数据口径。
+- `docs/易支付充值.md`：同步充值金额与核心整数额度换算规则。
+- `docs/模型报价路由与健康.md`：补充路由文档中的当前额度展示口径。
+- `docs/结算与人工提现.md`：同步提现门槛、税费与动态单位规则。
+- `docs/账号与管理员接口.md`：同步用户余额和管理员额度调整口径。
+- `progress.md`：追加本轮实现、验证、文件清单和回滚点。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可整体回退动态额度单位改造；本轮未发布服务器。

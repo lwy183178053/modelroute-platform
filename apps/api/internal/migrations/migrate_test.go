@@ -10,8 +10,8 @@ func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Files() 返回错误：%v", err)
 	}
-	if len(files) != 6 {
-		t.Fatalf("V2 七天缓存指标必须包含六份连续迁移，实际 = %d", len(files))
+	if len(files) != 7 {
+		t.Fatalf("V2 动态额度单位必须包含七份连续迁移，实际 = %d", len(files))
 	}
 	file := files[0]
 	if file.Version != 1 || file.Name != "000001_v2_baseline.sql" {
@@ -111,6 +111,14 @@ func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
 	} {
 		if !strings.Contains(files[5].SQL, fragment) {
 			t.Fatalf("缓存指标迁移缺少 %q", fragment)
+		}
+	}
+	for _, fragment := range []string{
+		"DROP CONSTRAINT IF EXISTS merchant_withdrawals_amount_quota_check",
+		"CHECK (amount_quota > 0)",
+	} {
+		if !strings.Contains(files[6].SQL, fragment) {
+			t.Fatalf("动态额度单位迁移缺少 %q", fragment)
 		}
 	}
 }

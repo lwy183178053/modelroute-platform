@@ -312,7 +312,7 @@ func (s *server) createPaymentOrder(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_payment_order", "充值金额或支付方式不在允许范围")
 		return
 	}
-	quota, err := paymentQuota(request.AmountCNYCents)
+	quota, err := paymentQuota(request.AmountCNYCents, s.services.QuotaPerUnit)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_payment_order", "充值金额超出范围")
 		return

@@ -54,7 +54,13 @@ func Open(ctx context.Context, cfg config.Config) (*Resources, error) {
 		return nil, fmt.Errorf("连接 Redis：%w", err)
 	}
 
-	services, err := buildHTTPServices(database, redisClient, cfg)
+	quotaPerUnit, err := httpapi.ReadCoreQuotaPerUnit(ctx, newapi.NewClient(cfg.NewAPIBaseURL, cfg.NewAPIRequestTimeout))
+	if err != nil {
+		redisClient.Close()
+		database.Close()
+		return nil, err
+	}
+	services, err := buildHTTPServices(database, redisClient, cfg, quotaPerUnit)
 	if err != nil {
 		redisClient.Close()
 		database.Close()
@@ -79,7 +85,7 @@ func Open(ctx context.Context, cfg config.Config) (*Resources, error) {
 	}, nil
 }
 
-func buildHTTPServices(database *sql.DB, redisClient *redis.Client, cfg config.Config) (httpapi.Services, error) {
+func buildHTTPServices(database *sql.DB, redisClient *redis.Client, cfg config.Config, quotaPerUnit int64) (httpapi.Services, error) {
 	credentials, err := secretbox.New(cfg.EncryptionKey)
 	if err != nil {
 		return httpapi.Services{}, fmt.Errorf("初始化商户凭据加密：%w", err)
@@ -106,6 +112,7 @@ func buildHTTPServices(database *sql.DB, redisClient *redis.Client, cfg config.C
 		UsageAliases:  routing,
 		Overview:      httpapi.NewSQLAdminOverviewStore(database),
 		Announcements: httpapi.NewSQLAnnouncementStore(database),
+		QuotaPerUnit:  quotaPerUnit,
 		Cookie: httpapi.CookieConfig{
 			Name:         cfg.SessionCookieName,
 			Secure:       cfg.SessionCookieSecure,

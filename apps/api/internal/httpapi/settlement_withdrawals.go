@@ -129,7 +129,7 @@ ORDER BY w.id DESC LIMIT $3 OFFSET $4
 }
 
 func (s *SQLSettlementStore) CreateMerchantWithdrawal(ctx context.Context, command CreateMerchantWithdrawalCommand) (MerchantWithdrawal, error) {
-	if _, _, ok := withdrawalBreakdown(command.AmountQuota); command.UserID <= 0 || command.WithdrawalNo == "" || !ok || command.RecipientType != "alipay" || len(command.EncryptedRecipientAccount) == 0 || command.RecipientAccountMasked == "" {
+	if _, _, ok := withdrawalBreakdown(command.AmountQuota, command.QuotaPerUnit); command.UserID <= 0 || command.WithdrawalNo == "" || !ok || command.RecipientType != "alipay" || len(command.EncryptedRecipientAccount) == 0 || command.RecipientAccountMasked == "" {
 		return MerchantWithdrawal{}, ErrSettlementConflict
 	}
 	tx, err := s.database.BeginTx(ctx, nil)

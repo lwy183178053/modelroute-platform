@@ -5,6 +5,7 @@ const executablePath =
   process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const baseUrl = process.env.UI_BASE_URL || 'http://127.0.0.1:4173';
+const testQuotaPerUnit = 750_000;
 const previewServer = await startLocalPreview();
 
 function assert(condition, message) {
@@ -58,8 +59,11 @@ async function mockAdminAPI(targetPage, state, account = null) {
       contentType: 'application/json',
       body: JSON.stringify(data),
     });
+    if (url.pathname === '/api/version') {
+      return json({ success: true, data: { version: 'test', quota_per_unit: testQuotaPerUnit } });
+    }
     if (url.pathname === '/api/me') {
-      return json({ success: true, data: account || { id: 1, username: 'modelroute', display_name: '平台管理员', role: 100, status: 1, group: 'default', quota: 128642000, used_quota: 4268000, account_type: 'admin', is_merchant: true, merchant_name: 'ModelRoute 官方', merchant_status: 'active' } });
+      return json({ success: true, data: account || { id: 1, username: 'modelroute', display_name: '平台管理员', role: 100, status: 1, group: 'default', quota: Math.round(257.28 * testQuotaPerUnit), used_quota: 4268000, account_type: 'admin', is_merchant: true, merchant_name: 'ModelRoute 官方', merchant_status: 'active' } });
     }
     if (url.pathname === '/api/announcements' && request.method() === 'GET') {
       return json({ success: true, data: { unread_count: state.announcementReadCalls ? 0 : 1, items: [{ id: 9, title: '商户提现安排', body: '本周五统一处理人工提现。', audiences: ['admin'], pinned: true, status: 'published', is_read: state.announcementReadCalls > 0, publish_at: '2026-07-22T08:00:00Z' }] } });
@@ -199,7 +203,7 @@ async function mockAdminAPI(targetPage, state, account = null) {
       return json({ success: true, data: {
         generated_at: '2026-07-22T16:00:00Z', sync_delay_seconds: 16,
         summary: {
-          today_gross_quota: 9000000, today_merchant_quota: 8100000, today_platform_quota: 900000,
+          today_gross_quota: 18 * testQuotaPerUnit, today_merchant_quota: 16.2 * testQuotaPerUnit, today_platform_quota: 1.8 * testQuotaPerUnit,
           today_request_count: 128, today_successful_requests: 126,
           pending_merchant_applications: 1, pending_channel_reviews: 1, pending_withdrawals: 2,
           total_channels: 2, active_channels: 1, cooling_channels: 1,
@@ -332,7 +336,7 @@ async function mockAdminAPI(targetPage, state, account = null) {
       state.adminWithdrawalQuery = Object.fromEntries(url.searchParams);
       const allItems = [state.createdWithdrawal,
         { id: 8, withdrawal_no: 'MW202607220001', merchant_id: 31, merchant_name: '北辰云智', amount_quota: 25000000, tax_quota: 750000, net_payout_quota: 24250000, available_before_quota: 90000000, recipient_type: 'alipay', recipient_account_masked: '138****2621', recipient_account: '13800132621', status: 'pending', created_at: '2026-07-22T14:00:00Z' },
-        { id: 9, withdrawal_no: 'MW202607220002', merchant_id: 32, merchant_name: '矩阵算力', amount_quota: 25000000, tax_quota: 750000, net_payout_quota: 24250000, available_before_quota: 82000000, recipient_type: 'alipay', recipient_account_masked: '139****0021', recipient_account: '13900130021', status: 'approved', review_reason: '资料核对通过', created_at: '2026-07-22T13:00:00Z' },
+      { id: 9, withdrawal_no: 'MW202607220002', merchant_id: 32, merchant_name: '矩阵算力', amount_quota: 50 * testQuotaPerUnit, tax_quota: 1.5 * testQuotaPerUnit, net_payout_quota: 48.5 * testQuotaPerUnit, available_before_quota: 82000000, recipient_type: 'alipay', recipient_account_masked: '139****0021', recipient_account: '13900130021', status: 'approved', review_reason: '资料核对通过', created_at: '2026-07-22T13:00:00Z' },
       ].filter(Boolean);
       const status = url.searchParams.get('status') || '';
       const items = status ? allItems.filter((item) => item.status === status) : allItems;
@@ -536,7 +540,7 @@ try {
   await withdrawalDialog.getByLabel('支付宝账户').fill('13800132621');
   await withdrawalDialog.getByRole('button', { name: '提交提现申请' }).click();
   assert(adminMockState.withdrawalCreateCalls === 1, '商户提现没有调用真实接口');
-  assert(adminMockState.withdrawalCreateBody.amount_quota === 50000000 && !('recipient_type' in adminMockState.withdrawalCreateBody), '提现人民币整数金额或支付宝请求结构不正确');
+  assert(adminMockState.withdrawalCreateBody.amount_quota === 100 * testQuotaPerUnit && !('recipient_type' in adminMockState.withdrawalCreateBody), '提现人民币整数金额或支付宝请求结构不正确');
   await page.getByText('MW202607220010', { exact: true }).waitFor();
   await merchantSidebar.getByRole('button', { name: '上架模型', exact: true }).click();
   await page.getByRole('button', { name: '设置模型价格' }).click();
@@ -658,7 +662,7 @@ try {
   await redemptionDialog.getByLabel('生成数量').fill('2');
   await redemptionDialog.getByRole('button', { name: '创建兑换码' }).click();
   await page.getByText('兑换码已创建').waitFor();
-  assert(adminMockState.redemptionCreateCalls === 1 && adminMockState.redemptionCreateBody.quota === 1000000 && adminMockState.redemptionCreateBody.count === 2, '兑换码额度或数量没有按整数规则提交');
+  assert(adminMockState.redemptionCreateCalls === 1 && adminMockState.redemptionCreateBody.quota === 2 * testQuotaPerUnit && adminMockState.redemptionCreateBody.count === 2, '兑换码额度或数量没有按人民币规则提交');
   await clickRowAction(page, '停用');
   await page.getByText('兑换码已停用').waitFor();
   assert(adminMockState.redemptionStatusCalls === 1 && adminMockState.redemptionStatusBody.enabled === false, '兑换码启停没有调用真实接口');
@@ -668,7 +672,7 @@ try {
   await editRedemptionDialog.getByLabel('单码额度（人民币）').fill('1.4');
   await editRedemptionDialog.getByRole('button', { name: '保存兑换码' }).click();
   await page.getByText('兑换码已更新').waitFor();
-  assert(adminMockState.redemptionUpdateCalls === 1 && adminMockState.redemptionUpdateBody.quota === 700000 && !('count' in adminMockState.redemptionUpdateBody), '编辑兑换码参数不符合整数额度规则');
+  assert(adminMockState.redemptionUpdateCalls === 1 && adminMockState.redemptionUpdateBody.quota === 1.4 * testQuotaPerUnit && !('count' in adminMockState.redemptionUpdateBody), '编辑兑换码参数不符合人民币额度规则');
   page.once('dialog', (dialog) => dialog.accept());
   await clickRowAction(page, '删除');
   await page.getByText('兑换码已删除').waitFor();
@@ -704,6 +708,7 @@ try {
   const approveDialog = page.getByRole('dialog', { name: '通过提现申请' });
   await approveDialog.getByLabel('审核原因').fill('账本与收款信息核对通过');
   await approveDialog.getByRole('button', { name: '确认通过' }).click();
+  await approveDialog.waitFor({ state: 'hidden' });
   assert(adminMockState.withdrawalActionCalls === 1 && adminMockState.withdrawalActionPath.endsWith('/10/approve'), '提现审核通过没有调用真实接口');
   await page.getByLabel('筛选提现状态').selectOption('');
   await page.getByText('MW202607220002', { exact: true }).waitFor();
@@ -742,7 +747,8 @@ try {
     const request = route.request();
     const url = new URL(request.url());
     const fulfill = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(data) });
-    if (url.pathname === '/api/me' && anonymousLoggedIn) return fulfill({ success: true, data: { id: 7, username: 'alice', display_name: 'Alice', role: 1, status: 1, group: 'default', quota: 500000, used_quota: 120000, is_merchant: false, merchant_status: 'none' } });
+    if (url.pathname === '/api/version') return fulfill({ success: true, data: { version: 'test', quota_per_unit: testQuotaPerUnit } });
+    if (url.pathname === '/api/me' && anonymousLoggedIn) return fulfill({ success: true, data: { id: 7, username: 'alice', display_name: 'Alice', role: 1, status: 1, group: 'default', quota: testQuotaPerUnit, used_quota: 120000, is_merchant: false, merchant_status: 'none' } });
     if (url.pathname === '/api/me') return fulfill({ success: false, error: { code: 'authentication_required', message: '请先登录' } }, 401);
     if (url.pathname === '/api/models') return fulfill({ success: true, data: [{ id: 101, public_name: 'gpt-4o-mini', provider: 'OpenAI', protocol: 'chat_completions', status: 'active', price: { version: 2, price_kind: 'text', tiers: [{ minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 150000, output_price_micros: 600000 }] } }] });
     if (url.pathname === '/api/offers') return fulfill({ success: true, data: [{ offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, call_count: 32400, token_usage: 2600000000, last_called_at: new Date(Date.now() - 10 * 60_000).toISOString(), price_tiers: [{ minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 108000, output_price_micros: 432000 }], channel_count: 1, health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] });
@@ -756,7 +762,7 @@ try {
     if (url.pathname === '/api/payment-orders' && request.method() === 'POST') {
       paymentOrderCalls += 1;
       paymentOrderBody = request.postDataJSON();
-      return fulfill({ success: true, data: { order: { id: 31, order_no: 'MR-USER-1', amount_cny_cents: 10000, newapi_quota: 50000000, payment_status: 'pending', credit_status: 'pending' }, payment_url: `${baseUrl}/payment-target` } }, 201);
+      return fulfill({ success: true, data: { order: { id: 31, order_no: 'MR-USER-1', amount_cny_cents: 10000, newapi_quota: 100 * testQuotaPerUnit, payment_status: 'pending', credit_status: 'pending' }, payment_url: `${baseUrl}/payment-target` } }, 201);
     }
     if (url.pathname === '/api/merchant/channel-tests' && request.method() === 'POST') return fulfill({ success: true, data: { id: 92, canonical_model_id: 101, adapter_type: 'openai_compatible', capabilities: ['chat_completions'], latency_ms: 305, test_receipt: 'receipt-for-merchant-apply-12345', expires_at: '2026-07-22T16:15:00Z' } }, 201);
     if (url.pathname === '/api/merchant/application' && request.method() === 'GET') return fulfill({ success: true, data: merchantApplication });
@@ -814,10 +820,11 @@ try {
     const url = new URL(request.url());
     returnMethods.push(`${request.method()} ${url.pathname}`);
     const fulfill = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(data) });
-    if (url.pathname === '/api/me') return fulfill({ success: true, data: { id: 7, username: 'alice', display_name: 'Alice', role: 1, status: 1, quota: 500000 } });
+    if (url.pathname === '/api/version') return fulfill({ success: true, data: { version: 'test', quota_per_unit: testQuotaPerUnit } });
+    if (url.pathname === '/api/me') return fulfill({ success: true, data: { id: 7, username: 'alice', display_name: 'Alice', role: 1, status: 1, quota: testQuotaPerUnit } });
     if (url.pathname === '/api/models') return fulfill({ success: true, data: [] });
     if (url.pathname === '/api/offers') return fulfill({ success: true, data: [] });
-    if (url.pathname === '/api/payment-orders/MR-RETURN') return fulfill({ success: true, data: { id: 31, order_no: 'MR-RETURN', user_id: 7, amount_cny_cents: 10000, newapi_quota: 50000000, payment_status: 'paid', credit_status: 'pending', paid_at: '2026-07-22T10:00:00Z' } });
+    if (url.pathname === '/api/payment-orders/MR-RETURN') return fulfill({ success: true, data: { id: 31, order_no: 'MR-RETURN', user_id: 7, amount_cny_cents: 10000, newapi_quota: 100 * testQuotaPerUnit, payment_status: 'paid', credit_status: 'pending', paid_at: '2026-07-22T10:00:00Z' } });
     return fulfill({ success: false, error: { code: 'not_mocked', message: url.pathname } }, 404);
   });
   await returnPage.goto(`${baseUrl}/payments/return?out_trade_no=MR-RETURN`, { waitUntil: 'networkidle' });
@@ -832,6 +839,7 @@ try {
     const request = route.request();
     const url = new URL(request.url());
     const fulfill = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(data) });
+    if (url.pathname === '/api/version') return fulfill({ success: true, data: { version: 'test', quota_per_unit: testQuotaPerUnit } });
     if (url.pathname === '/api/me') return fulfill({ success: false, error: { code: 'authentication_required', message: '请先登录' } }, 401);
     if (url.pathname === '/api/auth/password-reset/confirm' && request.method() === 'POST') return fulfill({ success: true, data: 'TempPass1234' });
     return fulfill({ success: false, error: { code: 'not_mocked', message: url.pathname } }, 404);

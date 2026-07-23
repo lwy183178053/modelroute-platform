@@ -3,7 +3,7 @@ import {
   BadgeDollarSign, CloudCog, HeartPulse, Landmark, LayoutDashboard,
   Plus, ServerCog, WalletCards, Waypoints, FileText,
 } from 'lucide-react';
-import { apiRequest, formatCompactCount, formatLastCalled, formatQuota } from '../api';
+import { apiRequest, formatCompactCount, formatLastCalled, formatQuota, getQuotaPerUnit } from '../api';
 import { ActionMenu, Button, InlineNotice, Metric, PageHeader, Pagination, Section, Select, Status } from '../ui';
 import { UsageLogTable, useUsage } from './UsagePanels';
 
@@ -61,6 +61,7 @@ function channelLifecycleRows(reviews, channels) {
 }
 
 export default function MerchantView({ account, openModal }) {
+  const minimumWithdrawalQuota = 50 * getQuotaPerUnit();
   const [section, setSection] = useState('overview');
   const [channels, setChannels] = useState([]);
   const [reviews, setReviews] = useState([]);
@@ -204,8 +205,8 @@ export default function MerchantView({ account, openModal }) {
 
           {section === 'usage' && <UsageLogTable view="merchant" data={usage.data} error={usage.error} filters={<div className="filter-toolbar"><Select aria-label="筛选模型" onChange={(event) => { setUsageModel(event.target.value); setUsagePage(1); }} value={usageModel}><option value="all">全部模型</option>{(usage.data?.filters?.models || []).map((model) => <option key={model} value={model}>{model}</option>)}</Select></div>} loading={usage.loading} onRefresh={usage.load} page={usagePage} pageSize={usagePageSize} total={usage.data?.logs?.total} onPageChange={setUsagePage} onPageSizeChange={(nextPageSize) => { setUsagePageSize(nextPageSize); setUsagePage(1); }} />}
 
-          {section === 'withdrawals' && <Section title="提现记录" actions={canSubmit && <Button disabled={Number(balance?.available_quota || 0) < 25_000_000} icon={Landmark} variant="primary" onClick={() => openModal({ type: 'withdraw', balance, onSaved: load })}>申请提现</Button>}>
-            {Number(balance?.available_quota || 0) < 25_000_000 && <InlineNotice tone="warning">可提现余额满 ¥50.00 后开放申请，还差 {formatQuota(25_000_000 - Number(balance?.available_quota || 0))}。</InlineNotice>}
+          {section === 'withdrawals' && <Section title="提现记录" actions={canSubmit && <Button disabled={Number(balance?.available_quota || 0) < minimumWithdrawalQuota} icon={Landmark} variant="primary" onClick={() => openModal({ type: 'withdraw', balance, onSaved: load })}>申请提现</Button>}>
+            {Number(balance?.available_quota || 0) < minimumWithdrawalQuota && <InlineNotice tone="warning">可提现余额满 ¥50.00 后开放申请，还差 {formatQuota(minimumWithdrawalQuota - Number(balance?.available_quota || 0))}。</InlineNotice>}
             <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>申请号</th><th>申请金额</th><th>税费（3%）</th><th>实际到账</th><th>支付宝账户</th><th>状态</th><th>申请时间</th></tr></thead><tbody>
               {withdrawals.map((item) => <tr key={item.id}><td><code>{item.id}</code></td><td><code>{item.withdrawal_no}</code></td><td><strong>{formatQuota(item.amount_quota)}</strong></td><td>{formatQuota(item.tax_quota)}</td><td><strong>{formatQuota(item.net_payout_quota)}</strong></td><td><code>{item.recipient_account_masked}</code></td><td><Status>{withdrawalStatusNames[item.status] || item.status}</Status></td><td>{formatDate(item.created_at)}</td></tr>)}
               {!loading && withdrawals.length === 0 && <tr><td className="table-message" colSpan="8">暂无提现申请</td></tr>}

@@ -64,6 +64,7 @@ type Services struct {
 	UsageAliases   UsageAliasResolver
 	Overview       AdminOverviewReader
 	Announcements  AnnouncementRepository
+	QuotaPerUnit   int64
 	Cookie         CookieConfig
 }
 

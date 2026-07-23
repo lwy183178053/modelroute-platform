@@ -48,6 +48,7 @@ async function captureSet(viewport, suffix) {
     const request = route.request();
     const url = new URL(request.url());
     const fulfill = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(data) });
+    if (url.pathname === '/api/version') return fulfill({ success: true, data: { version: 'capture', quota_per_unit: 750000 } });
     if (url.pathname === '/api/me') return fulfill({ success: true, data: { id: 1, username: 'modelroute', display_name: '平台管理员', role: 100, status: 1, quota: 128642000, used_quota: 4268000, request_count: 2846, is_merchant: true, merchant_id: 31, merchant_status: 'active' } });
     if (url.pathname === '/api/announcements') return fulfill({ success: true, data: { unread_count: 1, items: [{ id: 9, title: '商户提现安排', body: '本周五统一处理人工提现，请核对收款信息。', audiences: ['admin'], pinned: true, status: 'published', is_read: false, publish_at: '2026-07-22T08:00:00Z' }] } });
     if (url.pathname === '/api/admin/announcements') return fulfill({ success: true, data: [{ id: 9, title: '商户提现安排', body: '本周五统一处理人工提现，请核对收款信息。', audiences: ['admin'], pinned: true, status: 'published', publish_at: '2026-07-22T08:00:00Z', created_at: '2026-07-22T07:00:00Z' }] });

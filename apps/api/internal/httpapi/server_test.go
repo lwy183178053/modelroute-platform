@@ -54,6 +54,16 @@ func TestLiveDoesNotRequireDependencies(t *testing.T) {
 	}
 }
 
+func TestVersionPublishesRuntimeCoreQuotaUnit(t *testing.T) {
+	handler := NewServerWithServices("test-version", Dependencies{}, Services{QuotaPerUnit: 750_000})
+	request := httptest.NewRequest(http.MethodGet, "/api/version", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"quota_per_unit":750000`) {
+		t.Fatalf("版本响应=%d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestReadyReportsFailedDependency(t *testing.T) {
 	handler := NewServer("test-version", Dependencies{
 		Database: stubDependency{},

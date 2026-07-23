@@ -224,7 +224,10 @@ func (s *server) readinessFailure(ctx context.Context) string {
 func (s *server) versionInfo(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success": true,
-		"data":    map[string]string{"version": s.version},
+		"data": map[string]any{
+			"version":        s.version,
+			"quota_per_unit": s.services.QuotaPerUnit,
+		},
 	})
 }
 

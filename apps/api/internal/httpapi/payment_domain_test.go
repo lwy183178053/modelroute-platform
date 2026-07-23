@@ -17,7 +17,7 @@ func TestPaymentAmountUsesIntegerArithmetic(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			quota, err := paymentQuota(test.cnyCents)
+			quota, err := paymentQuota(test.cnyCents, 500_000)
 			if err != nil {
 				t.Fatalf("计算支付金额失败：%v", err)
 			}
@@ -30,9 +30,25 @@ func TestPaymentAmountUsesIntegerArithmetic(t *testing.T) {
 
 func TestPaymentAmountRejectsInvalidOrOverflowingValues(t *testing.T) {
 	for _, input := range []int64{0, -1, 1 << 62} {
-		if _, err := paymentQuota(input); err == nil {
+		if _, err := paymentQuota(input, 500_000); err == nil {
 			t.Fatalf("应拒绝 amount_cny_cents=%d", input)
 		}
+	}
+}
+
+func TestPaymentAmountUsesRuntimeCoreQuotaUnit(t *testing.T) {
+	quota, err := paymentQuota(123, 750_000)
+	if err != nil {
+		t.Fatalf("计算非默认额度单位失败：%v", err)
+	}
+	if quota != 922_500 {
+		t.Fatalf("人民币 123 分换算额度=%d，期望 922500", quota)
+	}
+}
+
+func TestPaymentAmountRejectsQuotaUnitThatCannotRepresentCents(t *testing.T) {
+	if _, err := paymentQuota(100, 500_001); err == nil {
+		t.Fatal("应拒绝不能精确表示人民币分的额度单位")
 	}
 }
 

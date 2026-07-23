@@ -26,8 +26,9 @@ func newHTTPTestServices(t *testing.T, upstream http.Handler) (Services, *platfo
 	t.Cleanup(upstreamServer.Close)
 	store := platformauth.NewStore(redisClient, time.Hour)
 	return Services{
-		Sessions: store,
-		NewAPI:   newapi.NewClient(upstreamServer.URL, time.Second),
+		Sessions:     store,
+		NewAPI:       newapi.NewClient(upstreamServer.URL, time.Second),
+		QuotaPerUnit: 500_000,
 		Cookie: CookieConfig{
 			Name:         "modelroute_session",
 			Secure:       true,

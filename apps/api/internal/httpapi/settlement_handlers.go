@@ -53,7 +53,7 @@ func (s *server) createMerchantWithdrawal(w http.ResponseWriter, r *http.Request
 		return
 	}
 	request.RecipientAccount = strings.TrimSpace(request.RecipientAccount)
-	if _, _, ok := withdrawalBreakdown(request.AmountQuota); !ok {
+	if _, _, ok := withdrawalBreakdown(request.AmountQuota, s.services.QuotaPerUnit); !ok {
 		writeAPIError(w, http.StatusBadRequest, "invalid_withdrawal_amount", "提现金额必须为不低于 50 元的整数")
 		return
 	}
@@ -76,6 +76,7 @@ func (s *server) createMerchantWithdrawal(w http.ResponseWriter, r *http.Request
 	}
 	withdrawal, err := s.services.Settlement.CreateMerchantWithdrawal(r.Context(), CreateMerchantWithdrawalCommand{
 		WithdrawalNo: withdrawalNo, UserID: session.UserID, AmountQuota: request.AmountQuota,
+		QuotaPerUnit:  s.services.QuotaPerUnit,
 		RecipientType: "alipay", EncryptedRecipientAccount: encrypted,
 		RecipientAccountMasked: maskRecipientAccount(request.RecipientAccount), CreatedAt: now,
 	})

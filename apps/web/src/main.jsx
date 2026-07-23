@@ -12,7 +12,7 @@ import {
   Waypoints,
   X,
 } from 'lucide-react';
-import { apiRequest, formatQuota } from './api';
+import { apiRequest, configureQuotaPerUnit, formatQuota } from './api';
 import AdminView from './views/AdminView';
 import ConsoleView from './views/ConsoleView';
 import MarketView from './views/MarketView';
@@ -212,4 +212,15 @@ function App() {
   );
 }
 
-createRoot(document.getElementById('root')).render(<App />);
+async function start() {
+  const root = createRoot(document.getElementById('root'));
+  try {
+    const versionInfo = await apiRequest('/api/version');
+    configureQuotaPerUnit(versionInfo.quota_per_unit);
+    root.render(<App />);
+  } catch {
+    root.render(<div className="app-start-error" role="alert">服务配置读取失败，请刷新后重试。</div>);
+  }
+}
+
+start();

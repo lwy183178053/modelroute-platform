@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Pencil, Plus, Search, Trash2 } from 'lucide-react';
-import { apiRequest, formatQuota } from '../../api';
+import { apiRequest, formatQuota, getQuotaPerUnit } from '../../api';
 import { ActionMenu, Button, CopyValue, Field, InlineNotice, Modal, Section, Status, TextInput } from '../../ui';
 
 function localDateTime(timestamp) {
@@ -19,14 +19,14 @@ function RedemptionDialog({ close, config, notify }) {
   const editing = config.mode === 'edit';
   const item = config.item || {};
   const [name, setName] = useState(item.name || '');
-  const [quotaCNY, setQuotaCNY] = useState(editing ? String(Number(item.quota || 0) / 500_000) : '1');
+  const [quotaCNY, setQuotaCNY] = useState(editing ? String(Number(item.quota || 0) / getQuotaPerUnit()) : '1');
   const [count, setCount] = useState('1');
   const [expiresAt, setExpiresAt] = useState(localDateTime(item.expired_time));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   const save = async () => {
-    const quota = Math.round(Number(quotaCNY) * 500_000);
+    const quota = Math.round(Number(quotaCNY) * getQuotaPerUnit());
     const quantity = Number(count);
     if (!name.trim() || !Number.isInteger(quota) || quota <= 0 || (!editing && (!Number.isInteger(quantity) || quantity < 1))) {
       setError('请填写有效的名称、额度和数量');

@@ -12,16 +12,15 @@ import (
 	"strings"
 )
 
-const newAPIQuotaPerCNYCent int64 = 5000
-
-func paymentQuota(cnyCents int64) (int64, error) {
-	if cnyCents <= 0 {
+func paymentQuota(cnyCents int64, quotaPerUnit int64) (int64, error) {
+	if cnyCents <= 0 || quotaPerUnit <= 0 || quotaPerUnit%100 != 0 {
 		return 0, errors.New("充值金额必须为正数")
 	}
-	if cnyCents > math.MaxInt64/newAPIQuotaPerCNYCent {
+	quotaPerCent := quotaPerUnit / 100
+	if cnyCents > math.MaxInt64/quotaPerCent {
 		return 0, errors.New("核心服务额度超出范围")
 	}
-	return cnyCents * newAPIQuotaPerCNYCent, nil
+	return cnyCents * quotaPerCent, nil
 }
 
 func parseGatewayMoney(value string) (int64, error) {

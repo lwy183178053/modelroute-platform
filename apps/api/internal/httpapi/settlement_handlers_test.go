@@ -28,7 +28,7 @@ func (s *settlementRepositoryStub) MerchantWithdrawals(context.Context, int, int
 
 func (s *settlementRepositoryStub) CreateMerchantWithdrawal(_ context.Context, command CreateMerchantWithdrawalCommand) (MerchantWithdrawal, error) {
 	s.created = command
-	taxQuota, netPayoutQuota, _ := withdrawalBreakdown(command.AmountQuota)
+	taxQuota, netPayoutQuota, _ := withdrawalBreakdown(command.AmountQuota, command.QuotaPerUnit)
 	return MerchantWithdrawal{
 		ID: 8, WithdrawalNo: command.WithdrawalNo, MerchantID: 31, AmountQuota: command.AmountQuota,
 		TaxQuota: taxQuota, NetPayoutQuota: netPayoutQuota,

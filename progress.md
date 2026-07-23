@@ -1860,3 +1860,27 @@
 - `docs/运营管理与升级验收.md`：记录精简后的运营总览与渠道日志范围。
 - `progress.md`：追加本轮改动、测试、文件清单和回滚点。
 - 回滚点：本轮前的本地基线为 `08eb7fedb3e0`；提交后执行 `git revert <本阶段提交>` 可回退本轮代码、文档与截图。当前改动未推送、未部署到 103，服务器运行状态未改变。
+
+## 2026-07-23 - Task: 启动本地 UI 交互预览并修复多模型标签显示
+
+### What was done
+
+- 在 Git 忽略目录启动本地交互预览服务，使用真实 React 页面和内存演示接口，默认进入管理员兼商户身份，便于直接检查四套工作区和主要弹窗。
+- 修复渠道表多模型标签无间距导致模型名连成一串的问题，增加独立标签、稳定宽度和长名称换行样式。
+
+### Testing
+
+- `http://127.0.0.1:57723/` 返回 `200`，`/api/me` 返回管理员账号类型。
+- Playwright 实浏览器验证管理后台、渠道管理页、3 条生命周期数据和截图，运行时错误为 `0`，页面宽度 `1440`、滚动宽度 `1440`。
+- `npm.cmd run test:ui` 通过。
+- `npm.cmd run capture` 通过，桌面和移动端截图重新生成。
+
+### Notes
+
+- `apps/web/src/styles.css`：增加多模型标签的间距、边框和换行样式。
+- `apps/web/artifacts/admin-channels-desktop.png`：更新多模型渠道标签的桌面截图。
+- `apps/web/artifacts/admin-channels-mobile.png`：更新多模型渠道标签的移动端截图。
+- `data/ui-preview/vite.config.mjs`：Git 忽略的本地演示接口和内存数据，不进入正式构建与服务器发布。
+- `data/ui-preview/verify.mjs`：Git 忽略的本地浏览器渲染检查脚本。
+- `data/ui-preview/current.png`：Git 忽略的本地渠道管理截图。
+- 回滚点：撤销本轮未提交的 `apps/web/src/styles.css` 与截图改动即可恢复上一提交 `acaa5edd9c32`；本地预览服务可通过结束监听 `57723` 的 Node 进程关闭，未连接和修改服务器。

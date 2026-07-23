@@ -127,6 +127,7 @@ main { min-height: calc(100vh - 66px); }
 .model-cell > div { min-width: 0; display: grid; }
 .model-cell strong { color: var(--ink); font-size: 13px; }
 .model-cell span { margin-top: 2px; color: var(--muted); font-size: 10px; }
+.tag { display: inline-flex; align-items: center; max-width: 220px; margin: 2px 6px 2px 0; padding: 3px 7px; border: 1px solid #d8e5e1; border-radius: 4px; background: #f5faf8; color: #35655a; font-size: 11px; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; }
 .provider-logo { display: inline-grid; place-items: center; flex: 0 0 auto; color: var(--ink); }
 .status { width: max-content; min-height: 24px; padding: 3px 8px; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 650; white-space: nowrap; }
 .status-success { background: var(--green-soft); color: var(--green); }

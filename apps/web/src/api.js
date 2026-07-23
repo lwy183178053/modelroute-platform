@@ -51,14 +51,6 @@ export function formatPriceMicros(value) {
   }).format(Number(value) / 1_000_000);
 }
 
-export function formatOfferPrice(tiers) {
-  const tier = tiers?.[0];
-  if (!tier) return '-';
-  const input = formatPriceMicros(tier.input_price_micros);
-  const output = tier.output_price_micros == null ? '' : ` / ${formatPriceMicros(tier.output_price_micros)} 输出`;
-  return `${input} 输入${output}`;
-}
-
 export function formatImagePrice(items) {
   if (!items?.length) return '-';
   const minimum = Math.min(...items.map((item) => Number(item.price_micros || 0)));

@@ -49,7 +49,7 @@ func (s *ServiceAccount) ProbeToken(ctx context.Context) (ProbeToken, error) {
 		}
 	}
 	if len(items) == 0 {
-		return ProbeToken{}, fmt.Errorf("New API 未返回探活令牌编号")
+		return ProbeToken{}, fmt.Errorf("模型核心服务未返回探活令牌编号")
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].ID > items[j].ID })
 	data, err := s.Do(ctx, http.MethodPost, fmt.Sprintf("/api/token/%d/key", items[0].ID), nil)
@@ -60,7 +60,7 @@ func (s *ServiceAccount) ProbeToken(ctx context.Context) (ProbeToken, error) {
 		Key string `json:"key"`
 	}
 	if err := json.Unmarshal(data, &revealed); err != nil || revealed.Key == "" {
-		return ProbeToken{}, fmt.Errorf("New API 探活令牌响应无效")
+		return ProbeToken{}, fmt.Errorf("模型核心服务探活令牌响应无效")
 	}
 	probe := ProbeToken{ID: items[0].ID, Key: revealed.Key}
 	s.probe = &probe
@@ -127,10 +127,10 @@ func (s *ServiceAccount) authentication(ctx context.Context, force bool) (Auth, 
 		"password": s.password,
 	}, "")
 	if err != nil {
-		return Auth{}, fmt.Errorf("New API 服务账号登录失败：%w", err)
+		return Auth{}, fmt.Errorf("模型核心服务账号登录失败：%w", err)
 	}
 	if result.User.Status != 1 || result.User.Role < 10 {
-		return Auth{}, fmt.Errorf("New API 服务账号状态或角色无效")
+		return Auth{}, fmt.Errorf("模型核心服务账号状态或角色无效")
 	}
 	s.auth = Auth{Cookie: result.Cookie, UserID: result.User.ID}
 	return s.auth, nil

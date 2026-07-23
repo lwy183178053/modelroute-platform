@@ -38,7 +38,7 @@ func (p *HTTPPinger) Ping(ctx context.Context) error {
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("New API 健康接口状态码为 %d", response.StatusCode)
+		return fmt.Errorf("模型核心服务健康接口状态码为 %d", response.StatusCode)
 	}
 	var payload struct {
 		Success bool `json:"success"`
@@ -47,7 +47,7 @@ func (p *HTTPPinger) Ping(ctx context.Context) error {
 		return fmt.Errorf("解析 New API 健康响应：%w", err)
 	}
 	if !payload.Success {
-		return fmt.Errorf("New API 报告未就绪")
+		return fmt.Errorf("模型核心服务报告未就绪")
 	}
 	return nil
 }

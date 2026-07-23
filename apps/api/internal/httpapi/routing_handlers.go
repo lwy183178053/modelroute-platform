@@ -1,8 +1,6 @@
 package httpapi
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -375,14 +373,6 @@ func validateModelDescriptor(publicName string, provider string, protocol string
 		return errors.New("模型协议不在平台开放范围")
 	}
 	return nil
-}
-
-func newOfferAlias() string {
-	var value [12]byte
-	if _, err := rand.Read(value[:]); err != nil {
-		panic("系统随机源不可用")
-	}
-	return "mkt-ov-" + hex.EncodeToString(value[:])
 }
 
 func (s *server) routingReady(w http.ResponseWriter, requireSync bool) bool {

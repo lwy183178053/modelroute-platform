@@ -108,7 +108,7 @@ func administratorFromBody(body []byte, expectedUsername string) (newapi.User, e
 		return newapi.User{}, fmt.Errorf("解析管理员账号：%w", err)
 	}
 	if user.ID <= 0 || user.Status != 1 || user.Role < 10 || !strings.EqualFold(strings.TrimSpace(user.Username), strings.TrimSpace(expectedUsername)) {
-		return newapi.User{}, fmt.Errorf("New API 服务账号不是配置的有效唯一管理员")
+		return newapi.User{}, fmt.Errorf("模型核心服务账号不是配置的有效唯一管理员")
 	}
 	return user, nil
 }

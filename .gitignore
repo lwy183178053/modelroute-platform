@@ -16,6 +16,3 @@ data/
 backups/
 certs/
 secrets/
-
-# 原型目录仍被本机预览进程句柄占用；正式前端已经校验迁入 apps/web。
-ui-preview/

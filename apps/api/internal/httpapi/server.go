@@ -224,17 +224,6 @@ func (s *server) versionInfo(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func modelRouteDisabled(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-		"error": map[string]any{
-			"message": "模型路由正在部署中",
-			"type":    "server_error",
-			"param":   nil,
-			"code":    "service_not_ready",
-		},
-	})
-}
-
 type requestIDContextKey struct{}
 
 func requestID(next http.Handler) http.Handler {

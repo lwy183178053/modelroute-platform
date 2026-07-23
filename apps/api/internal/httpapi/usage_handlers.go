@@ -213,14 +213,6 @@ func decodeJSONValue(data []byte) (any, error) {
 	return value, nil
 }
 
-func sanitizedJSONValue(data []byte) (any, error) {
-	value, err := decodeJSONValue(data)
-	if err != nil {
-		return nil, err
-	}
-	return sanitizeInternalAliases(value, nil), nil
-}
-
 func collectInternalAliases(values ...any) []string {
 	seen := make(map[string]struct{})
 	var visit func(any)

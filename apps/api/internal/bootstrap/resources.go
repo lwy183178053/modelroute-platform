@@ -131,7 +131,7 @@ func ensureAdministratorMerchant(ctx context.Context, admin httpapi.AdminNewAPI,
 		return fmt.Errorf("解析唯一管理员账号：%w", err)
 	}
 	if user.ID <= 0 || user.Status != 1 || user.Role < 10 || !strings.EqualFold(strings.TrimSpace(user.Username), strings.TrimSpace(administratorUsername)) {
-		return fmt.Errorf("New API 服务账号不是配置的有效唯一管理员")
+		return fmt.Errorf("模型核心服务账号不是配置的有效唯一管理员")
 	}
 	if _, err := merchants.EnsurePlatformMerchant(ctx, user.ID, publicOrigin); err != nil {
 		return fmt.Errorf("创建管理员直属商户：%w", err)

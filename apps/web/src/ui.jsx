@@ -12,7 +12,6 @@ import {
   Clock3,
   Copy,
   Database,
-  ExternalLink,
   LoaderCircle,
   MoreHorizontal,
   ServerCog,
@@ -247,23 +246,6 @@ export function Pagination({ page = 1, pageSize = 20, total = 0, onPageChange, o
   );
 }
 
-export function Segmented({ value, onChange, options, ariaLabel }) {
-  return (
-    <div className="segmented" role="group" aria-label={ariaLabel}>
-      {options.map((option) => (
-        <button
-          className={value === option.value ? 'active' : ''}
-          key={option.value}
-          onClick={() => onChange(option.value)}
-          type="button"
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 export function Modal({ title, description, children, footer, onClose, wide = false }) {
   return (
     <div className="modal-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -304,8 +286,4 @@ export function CopyValue({ children, onCopy }) {
 export function InlineNotice({ tone = 'info', children }) {
   const Icon = tone === 'warning' ? AlertTriangle : tone === 'success' ? Check : ServerCog;
   return <div className={`inline-notice inline-notice-${tone}`}><Icon size={17} />{children}</div>;
-}
-
-export function ExternalAnchor({ children, href = '#' }) {
-  return <a className="external-anchor" href={href} onClick={(event) => event.preventDefault()}>{children}<ExternalLink size={13} /></a>;
 }

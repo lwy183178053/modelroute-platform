@@ -2322,3 +2322,66 @@
 - `apps/web/scripts/ui-smoke.mjs`：增加多页用户列表分页跳转回归数据和断言。
 - `progress.md`：追加本次回归验证记录。
 - 回滚点：执行 `git revert <本轮提交哈希>` 可回退分页跳页回归测试；本轮仅本地修改，未上传服务器。
+
+## 2026-07-23 - Task: 完整项目审计与开发阶段简化
+
+### What was done
+
+- 删除后端、前端和测试中的零引用函数、组件、导入与辅助代码，统一内部错误文案，并使用 `staticcheck` 把 Go 全包静态检查收敛到零告警。
+- 删除旧仪表盘、分组编辑、旧健康事件和旧支付列表遗留的无引用样式；移除已经删除的系统任务截图和三份被 V2 规范替代的早期计划文档。
+- 将前端包名、页面标题、描述和 README 从原型口径统一为正式 ModelRoute 平台，并清除已经不存在的根目录旧原型忽略规则。
+- 修正公告头像交互文档和 V2 迁移清单，移除当前运营文档内已经失效的 V1 验收数据；保留内网核心 Embeddings 契约作为固定核心版本完整性校验，公网仍不注册该接口。
+- 对后端路由、前端调用、部署验收、依赖、跟踪凭据、模型证据链接和本地预览进程做了交叉检查；数据库中多模型渠道的代表模型字段涉及结构迁移，本轮未混入普通清理。
+
+### Testing
+
+- `staticcheck ./...`、`go test ./...`、`go vet ./...`、`go build ./cmd/api ./cmd/worker ./cmd/seed-models` 全部通过。
+- `go mod tidy -diff` 无输出，Go 模块文件无需变更。
+- `npm.cmd ls --all --depth=0` 通过，前端直接依赖完整；`npm.cmd run test:ui` 通过。
+- `npm.cmd run capture` 通过，桌面与移动端页面无横向溢出、运行时错误为 0。
+- `node data/ui-preview/verify.mjs` 通过，本地 `127.0.0.1:57723` 返回正式页面标题，模型 21 条、渠道 3 条、页面宽度与滚动宽度均为 1440。
+- `python -m unittest discover -s deploy/tests -p 'test_*.py'` 共 27 项通过。
+- `docker compose --env-file .env.example --profile tools config --quiet` 与 `git diff --check` 通过。
+- Git 跟踪内容凭据模式扫描仅命中示例占位值和隔离契约测试口令，未发现生产上游、支付或服务器凭据。
+
+### Notes
+
+- `.dockerignore`：删除不存在的根目录旧原型排除项。
+- `.gitignore`：删除不存在的根目录旧原型忽略项。
+- `README.md`：将前端描述更新为正式三角色统一界面。
+- `apps/api/cmd/seed-models/main.go`：统一核心服务管理员校验错误文案。
+- `apps/api/internal/bootstrap/resources.go`：统一启动期核心服务管理员校验错误文案。
+- `apps/api/internal/dependencies/checks.go`：统一核心服务健康检查错误文案。
+- `apps/api/internal/httpapi/account_handlers.go`：删除零引用查询参数辅助函数。
+- `apps/api/internal/httpapi/pricing_sync_test.go`：删除零引用 JSON 测试辅助函数。
+- `apps/api/internal/httpapi/routing_handlers.go`：删除零引用报价别名生成函数及导入。
+- `apps/api/internal/httpapi/server.go`：删除未注册、零引用的部署中占位响应。
+- `apps/api/internal/httpapi/usage_handlers.go`：删除零引用日志清理包装函数。
+- `apps/api/internal/newapi/client.go`：统一核心服务客户端错误文案。
+- `apps/api/internal/newapi/service_account.go`：统一核心服务账号和探活令牌错误文案。
+- `apps/web/index.html`：使用正式平台标题和页面描述。
+- `apps/web/package.json`：将前端包名更新为 `modelroute-web`。
+- `apps/web/package-lock.json`：同步正式前端包名。
+- `apps/web/src/api.js`：删除零引用报价格式化函数。
+- `apps/web/src/styles.css`：删除旧页面和零引用组件样式及响应式规则。
+- `apps/web/src/ui.jsx`：删除零引用分段控件、外链占位组件及图标导入。
+- `apps/web/src/views/admin/AdminWithdrawals.jsx`：删除零引用按钮导入。
+- `apps/web/artifacts/admin-tasks-desktop.png`：删除已下线系统任务桌面截图。
+- `apps/web/artifacts/admin-tasks-mobile.png`：删除已下线系统任务移动端截图。
+- `apps/web/artifacts/admin-mobile.png`：按清理后的前端构建刷新移动端验收图。
+- `apps/web/artifacts/admin-redemptions-mobile.png`：按清理后的前端构建刷新移动端验收图。
+- `apps/web/artifacts/admin-settings-desktop.png`：按清理后的前端构建刷新桌面验收图。
+- `apps/web/artifacts/admin-settings-mobile.png`：按清理后的前端构建刷新移动端验收图。
+- `apps/web/artifacts/admin-usage-mobile.png`：按清理后的前端构建刷新移动端验收图。
+- `apps/web/artifacts/admin-withdrawals-mobile.png`：按清理后的前端构建刷新移动端验收图。
+- `apps/web/artifacts/announcement-panel-mobile.png`：按清理后的前端构建刷新移动端验收图。
+- `apps/web/artifacts/console-mobile.png`：按清理后的前端构建刷新移动端验收图。
+- `apps/web/artifacts/market-mobile.png`：按清理后的前端构建刷新移动端验收图。
+- `apps/web/artifacts/payment-config-mobile.png`：按清理后的前端构建刷新移动端验收图。
+- `docs/superpowers/plans/2026-07-22-ModelRoute完整实施计划.md`：删除被当前 V2 文档替代的旧计划。
+- `docs/superpowers/plans/2026-07-22-UI原型实施计划.md`：删除已经完成且失效的原型计划。
+- `docs/superpowers/specs/2026-07-22-API聚合平台设计规范.md`：删除与当前 V2 行为冲突的早期规范。
+- `docs/公告管理.md`：同步头像静态身份摘要的当前交互。
+- `docs/运营管理与升级验收.md`：删除 V1 历史验收段落并修正 V2 迁移清单。
+- `progress.md`：追加本轮审计、验证和回滚记录。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可恢复本轮全部清理、文档和截图；本轮只更新本地仓库与本地预览，未上传服务器。

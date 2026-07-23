@@ -315,11 +315,3 @@ func validQuotaChange(mode string, value int) bool {
 		return false
 	}
 }
-
-func positiveQueryInt(r *http.Request, name string, fallback int) int {
-	value, err := strconv.Atoi(r.URL.Query().Get(name))
-	if err != nil || value < 1 {
-		return fallback
-	}
-	return value
-}

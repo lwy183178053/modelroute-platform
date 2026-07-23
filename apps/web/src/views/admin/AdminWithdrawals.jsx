@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Check, FileCheck2, ShieldAlert, X } from 'lucide-react';
 import { apiRequest, formatQuota } from '../../api';
-import { ActionMenu, Button, InlineNotice, Section, Status } from '../../ui';
+import { ActionMenu, InlineNotice, Section, Status } from '../../ui';
 
 const statusNames = { pending: '待审核', approved: '待打款', paid: '已打款', rejected: '已驳回' };
 const reasonNames = {

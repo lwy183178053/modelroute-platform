@@ -133,7 +133,7 @@ func (c *Client) Authenticate(ctx context.Context, path string, body any, cookie
 	result.User = loginData.User
 	result.RequireTwoFactor = loginData.RequireTwoFactor
 	if result.Cookie == "" {
-		return AuthenticationResult{}, fmt.Errorf("New API 登录响应缺少会话 Cookie")
+		return AuthenticationResult{}, fmt.Errorf("模型核心服务登录响应缺少会话 Cookie")
 	}
 	return result, nil
 }
@@ -184,7 +184,7 @@ func (c *Client) request(ctx context.Context, method string, path string, body a
 		return nil, nil, fmt.Errorf("读取 New API 响应：%w", err)
 	}
 	if len(responseBody) > maxResponseBytes {
-		return nil, nil, fmt.Errorf("New API 响应超过限制")
+		return nil, nil, fmt.Errorf("模型核心服务响应超过限制")
 	}
 	var envelope struct {
 		Success bool            `json:"success"`

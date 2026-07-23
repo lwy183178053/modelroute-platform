@@ -217,27 +217,3 @@ func assertJSONString(t *testing.T, raw string, key string, want string) {
 		t.Fatalf("%s = %q，期望 %q；配置：%s", key, got, want, raw)
 	}
 }
-
-func assertJSONNumber(t *testing.T, raw string, key string, want string) {
-	t.Helper()
-	var values map[string]json.Number
-	decoder := json.NewDecoder(strings.NewReader(raw))
-	decoder.UseNumber()
-	if err := decoder.Decode(&values); err != nil {
-		t.Fatalf("解析 %s 失败：%v", raw, err)
-	}
-	if got := values[key].String(); got != want {
-		t.Fatalf("%s = %q，期望 %q；配置：%s", key, got, want, raw)
-	}
-}
-
-func assertJSONMissing(t *testing.T, raw string, key string) {
-	t.Helper()
-	var values map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(raw), &values); err != nil {
-		t.Fatalf("解析 %s 失败：%v", raw, err)
-	}
-	if _, exists := values[key]; exists {
-		t.Fatalf("配置不应包含 %s：%s", key, raw)
-	}
-}

@@ -41,8 +41,8 @@ func TestCurrentCatalogCoversPinnedProvidersAndProtocols(t *testing.T) {
 	if catalog.Version != "2026-07-23-v2" || catalog.Digest == "" {
 		t.Fatalf("种子版本或摘要无效：%+v", catalog)
 	}
-	if len(catalog.Models) != 20 {
-		t.Fatalf("当前种子模型数=%d，期望 20", len(catalog.Models))
+	if len(catalog.Models) != 21 {
+		t.Fatalf("当前种子模型数=%d，期望 21", len(catalog.Models))
 	}
 	providers := map[string]bool{}
 	protocols := map[string]bool{}
@@ -68,12 +68,12 @@ func TestCurrentCatalogCoversPinnedProvidersAndProtocols(t *testing.T) {
 	if protocols["embeddings"] {
 		t.Fatal("V2 模型种子仍包含 Embeddings")
 	}
-	for _, name := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-image-1", "gpt-image-1.5", "gpt-image-2", "claude-opus-4-8", "kimi-k3"} {
+	for _, name := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-image-1", "gpt-image-1.5", "gpt-image-2", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-5", "kimi-k3"} {
 		if !models[name] {
 			t.Fatalf("当前种子缺少已核验模型 %s", name)
 		}
 	}
-	for _, name := range []string{"gpt-5.4-pro", "claude-fable-5", "claude-sonnet-5"} {
+	for _, name := range []string{"gpt-5.4-pro", "claude-fable-5", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"} {
 		if models[name] {
 			t.Fatalf("缺少 API 单价证据的模型不应自动发布：%s", name)
 		}

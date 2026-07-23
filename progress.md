@@ -1939,3 +1939,33 @@
 - `data/ui-preview/verify.mjs`：本地忽略目录中的真实浏览器回归脚本，不进入 Git。
 - 凭据只存在于当前本地预览进程环境，未写入 Git、文档、进度日志、截图或接口响应；本轮未推送、未上传、未部署服务器。
 - 回滚点：提交后执行 `git revert <本轮提交哈希>` 回退跟踪文件；停止监听 `57723` 的 Node 进程即可关闭本地预览。
+
+## 2026-07-23 - Task: 更新 OpenAI 5.6 与 Anthropic 经典模型目录
+
+### What was done
+
+- 保留 OpenAI `gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna` 三个文本模型，并让本地模型定价页完整显示三项及其上下文阶梯价格。
+- Anthropic 目录调整为 `claude-opus-4-8`、`claude-opus-4-7`、`claude-opus-4-6`、`claude-sonnet-5`，移除旧的 Sonnet 4.6 与 Haiku 4.5 条目。
+- 同步更新固定模型支持清单、模型种子校验、官方模型种子说明、部署验收数量和本地截图数据；模型调用链、路由和计费结构未改动。
+
+### Testing
+
+- 先以模型数量和名称回归锁定旧种子失败，再完成种子和支持清单更新。
+- `go test -count=1 ./...`、`go vet ./...`、`go build ./...` 通过。
+- `npm.cmd run test:ui`、`npm.cmd run capture` 通过。
+- 本地预览 `/api/models` 返回 9 个演示模型，包含 3 个 OpenAI 5.6 变体和 4 个 Anthropic 经典模型；真实上游同步返回 20 个模型，其中 4 个匹配当前目录。
+- `node data/ui-preview/verify.mjs` 通过，浏览器运行时错误为 0，页面宽度和滚动宽度均为 1440；`git diff --check` 和 Node 语法检查通过。
+
+### Notes
+
+- `apps/api/internal/modelseed/data/2026-07-23-v2.json`：更新 Anthropic 模型集合和对应整数价格，种子总数调整为 21。
+- `apps/api/internal/modelseed/support_rc21.go`：允许新的 Anthropic 模型标识进入固定支持清单。
+- `apps/api/internal/modelseed/support_rc21_external_test.go`：将新增模型纳入固定源码交集测试的开发种子例外集合。
+- `apps/api/internal/modelseed/catalog_test.go`：锁定 21 个模型、OpenAI 5.6 三变体和 Anthropic 四项，并禁止旧条目回归。
+- `apps/web/scripts/capture.mjs`：更新渠道审核截图数据中的 Anthropic 模型。
+- `apps/web/artifacts/admin-channels-desktop.png`：更新渠道管理桌面截图。
+- `apps/web/artifacts/admin-settings-desktop.png`：更新平台设置桌面截图。
+- `apps/web/artifacts/admin-settings-mobile.png`：更新平台设置移动端截图。
+- `docs/官方模型种子.md`、`docs/运营管理与升级验收.md`、`docs/部署环境审计.md`、`docs/部署运行手册.md`：同步模型目录和验收数量。
+- `data/ui-preview/vite.config.mjs`：Git 忽略的本地预览模型目录已同步更新，不进入正式提交。
+- 回滚点：本轮提交前的 `e893b6a`；执行 `git revert <本轮提交哈希>` 可回退跟踪文件和截图，模型种子回退后需重新执行种子导入。

@@ -7,7 +7,7 @@ var pinnedNewAPIModels = map[string]map[string]struct{}{
 		"gpt-image-1": {}, "gpt-image-1.5": {}, "gpt-image-2": {},
 	},
 	"Anthropic": {
-		"claude-opus-4-8": {}, "claude-sonnet-4-6": {}, "claude-haiku-4-5-20251001": {},
+		"claude-opus-4-8": {}, "claude-opus-4-7": {}, "claude-opus-4-6": {}, "claude-sonnet-5": {},
 	},
 	"Gemini": {
 		"gemini-3.1-pro-preview": {}, "gemini-3-flash-preview": {},

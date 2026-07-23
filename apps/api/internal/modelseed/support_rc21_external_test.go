@@ -51,6 +51,7 @@ func listedByDefault(provider string, model string) bool {
 	genericModels := map[string]bool{
 		"gpt-5.6-sol": true, "gpt-5.6-terra": true, "gpt-5.6-luna": true,
 		"gpt-5.5": true, "gpt-image-2": true, "kimi-k3": true,
+		"claude-opus-4-7": true, "claude-opus-4-6": true, "claude-sonnet-5": true,
 	}
 	return !genericModels[model]
 }

@@ -114,21 +114,30 @@
       ] }
     },
     {
-      "public_name": "claude-sonnet-4-6",
+      "public_name": "claude-opus-4-7",
+      "provider": "Anthropic",
+      "protocol": "chat_completions",
+      "evidence_url": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 5000000, "output_price_micros": 25000000, "cache_read_price_micros": 500000, "cache_write_price_micros": 6250000 }
+      ] }
+    },
+    {
+      "public_name": "claude-opus-4-6",
+      "provider": "Anthropic",
+      "protocol": "chat_completions",
+      "evidence_url": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "price": { "tiers": [
+        { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 5000000, "output_price_micros": 25000000, "cache_read_price_micros": 500000, "cache_write_price_micros": 6250000 }
+      ] }
+    },
+    {
+      "public_name": "claude-sonnet-5",
       "provider": "Anthropic",
       "protocol": "chat_completions",
       "evidence_url": "https://platform.claude.com/docs/en/about-claude/pricing",
       "price": { "tiers": [
         { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 3000000, "output_price_micros": 15000000, "cache_read_price_micros": 300000, "cache_write_price_micros": 3750000 }
-      ] }
-    },
-    {
-      "public_name": "claude-haiku-4-5-20251001",
-      "provider": "Anthropic",
-      "protocol": "chat_completions",
-      "evidence_url": "https://platform.claude.com/docs/en/about-claude/pricing",
-      "price": { "tiers": [
-        { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 1000000, "output_price_micros": 5000000, "cache_read_price_micros": 100000, "cache_write_price_micros": 1250000 }
       ] }
     },
     {

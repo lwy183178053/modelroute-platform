@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"regexp"
 	"testing"
 	"time"
@@ -71,6 +72,68 @@ func TestSQLMerchantStoreEnsuresPlatformMerchantForAdministrator(t *testing.T) {
 	}
 	if identity.MerchantID != 31 || identity.UserID != 1 || identity.DisplayName != "ModelRoute 官方" || !identity.IsMerchant || !identity.IsPlatformOwned {
 		t.Fatalf("平台商户身份=%+v", identity)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSQLMerchantStoreDeletesRejectedReviewAndWithdrawsPendingReview(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewSQLMerchantStore(database)
+
+	for _, testCase := range []struct {
+		name     string
+		status   string
+		expected string
+		testID   any
+	}{
+		{name: "撤销等待审核", status: "pending", expected: "withdrawn", testID: int64(81)},
+		{name: "删除驳回记录", status: "rejected", expected: "deleted", testID: nil},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			mock.ExpectBegin()
+			mock.ExpectQuery(regexp.QuoteMeta("SELECT r.status, r.application_id, r.channel_test_id")).
+				WithArgs(int64(21), int64(31)).
+				WillReturnRows(sqlmock.NewRows([]string{"status", "application_id", "channel_test_id"}).AddRow(testCase.status, nil, testCase.testID))
+			mock.ExpectExec(regexp.QuoteMeta("DELETE FROM merchant_channel_reviews WHERE id = $1")).
+				WithArgs(int64(21)).WillReturnResult(sqlmock.NewResult(0, 1))
+			if testCase.testID != nil {
+				mock.ExpectExec(regexp.QuoteMeta("DELETE FROM merchant_channel_tests")).
+					WithArgs(testCase.testID).WillReturnResult(sqlmock.NewResult(0, 1))
+			}
+			mock.ExpectCommit()
+
+			action, deleteErr := store.DeleteChannelReview(context.Background(), 21, 31)
+			if deleteErr != nil || action != testCase.expected {
+				t.Fatalf("删除审核记录 action=%q err=%v", action, deleteErr)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestSQLMerchantStoreRejectsReviewDeletionWhileAdministratorProcessesIt(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT r.status, r.application_id, r.channel_test_id")).
+		WithArgs(int64(21), int64(31)).
+		WillReturnRows(sqlmock.NewRows([]string{"status", "application_id", "channel_test_id"}).AddRow("approving", nil, int64(81)))
+	mock.ExpectRollback()
+
+	_, deleteErr := NewSQLMerchantStore(database).DeleteChannelReview(context.Background(), 21, 31)
+	if !errors.Is(deleteErr, ErrMerchantInvalidState) {
+		t.Fatalf("审批处理中删除错误=%v", deleteErr)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

@@ -33,7 +33,7 @@ type ChannelPriceRoute struct {
 type PriceSyncRepository interface {
 	AliasPrices(context.Context) ([]aliasPrice, error)
 	OfferChannelRoutes(context.Context, int64) ([]ChannelPriceRoute, error)
-	ActivateOffer(context.Context, int64) error
+	FinalizeOffer(context.Context, int64, bool) error
 }
 
 type AdminNewAPI interface {
@@ -58,7 +58,7 @@ func NewPriceSynchronizer(repository PriceSyncRepository, admin AdminNewAPI) *Pr
 	return &PriceSynchronizer{repository: repository, admin: admin}
 }
 
-func (s *PriceSynchronizer) SyncOffer(ctx context.Context, offerID int64) error {
+func (s *PriceSynchronizer) SyncOffer(ctx context.Context, offerID int64, activate bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -125,8 +125,8 @@ func (s *PriceSynchronizer) SyncOffer(ctx context.Context, offerID int64) error 
 			return s.syncRollbackError(ctx, fmt.Errorf("同步 New API 渠道模型：%w", err), existing, attemptedOptions, attemptedChannels)
 		}
 	}
-	if err := s.repository.ActivateOffer(ctx, offerID); err != nil {
-		return s.syncRollbackError(ctx, fmt.Errorf("激活报价：%w", err), existing, attemptedOptions, attemptedChannels)
+	if err := s.repository.FinalizeOffer(ctx, offerID, activate); err != nil {
+		return s.syncRollbackError(ctx, fmt.Errorf("完成模型价格同步：%w", err), existing, attemptedOptions, attemptedChannels)
 	}
 	return nil
 }

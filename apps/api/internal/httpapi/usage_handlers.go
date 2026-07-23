@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lwy183178053/modelroute-platform/apps/api/internal/newapi"
 	"github.com/lwy183178053/modelroute-platform/apps/api/internal/platformauth"
 )
 
@@ -22,11 +21,151 @@ func (s *server) usage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.writeUsage(w, r, session, false)
+	s.writeUserUsage(w, r, session)
+}
+
+func (s *server) merchantUsage(w http.ResponseWriter, r *http.Request) {
+	_, session, _, ok := s.requireMerchant(w, r)
+	if !ok {
+		return
+	}
+	query, ok := usageRecordQueryFromRequest(w, r)
+	if !ok {
+		return
+	}
+	if s.services.UsageRecords == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "usage_records_unavailable", "调用记录服务尚未就绪")
+		return
+	}
+	query.MerchantUserID = session.UserID
+	query.FilterMerchantUserID = 0
+	page, err := s.services.UsageRecords.ListUsageRecords(r.Context(), query)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "usage_records_query_failed", "读取商户调用记录失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{
+		"logs": page, "filters": page.Filters,
+	}})
+}
+
+func (s *server) writeUserUsage(w http.ResponseWriter, r *http.Request, session platformauth.Session) {
+	start, end, ok := usageTimeRange(w, r)
+	if !ok {
+		return
+	}
+	query, ok := usageRecordQueryFromRequest(w, r)
+	if !ok {
+		return
+	}
+	if s.services.UsageRecords == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "usage_records_unavailable", "调用记录服务尚未就绪")
+		return
+	}
+	query.ConsumerUserID = session.UserID
+	page, err := s.services.UsageRecords.ListUsageRecords(r.Context(), query)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "usage_records_query_failed", "读取用户调用记录失败")
+		return
+	}
+	filters := url.Values{
+		"start_timestamp": []string{strconv.FormatInt(start, 10)},
+		"end_timestamp":   []string{strconv.FormatInt(end, 10)},
+		"type":            []string{"2"},
+	}
+	stats, err := s.usageNewAPIDo(r, session, false, "/api/log/self/stat?"+filters.Encode())
+	if err != nil {
+		writeUpstreamError(w, err, http.StatusBadGateway)
+		return
+	}
+	trendQuery := url.Values{
+		"start_timestamp": []string{strconv.FormatInt(start, 10)},
+		"end_timestamp":   []string{strconv.FormatInt(end, 10)},
+	}
+	trend, err := s.usageNewAPIDo(r, session, false, "/api/data/self?"+trendQuery.Encode())
+	if err != nil {
+		writeUpstreamError(w, err, http.StatusBadGateway)
+		return
+	}
+	statValue, err := decodeJSONValue(stats)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "usage_contract_error", "核心服务用量统计响应格式无效")
+		return
+	}
+	trendValue, err := decodeJSONValue(trend)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "usage_contract_error", "核心服务用量趋势响应格式无效")
+		return
+	}
+	aliases := collectInternalAliases(trendValue)
+	mappings := map[string]string{}
+	if len(aliases) > 0 && s.services.UsageAliases != nil {
+		mappings, err = s.services.UsageAliases.PublicModelNames(r.Context(), aliases)
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "usage_model_mapping_failed", "读取公开模型名称失败")
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"data": map[string]any{
+			"start_timestamp": start,
+			"end_timestamp":   end,
+			"stats":           statValue,
+			"trend":           sanitizeInternalAliases(trendValue, mappings),
+			"logs":            page,
+			"filters":         page.Filters,
+		},
+	})
+}
+
+func usageRecordQueryFromRequest(w http.ResponseWriter, r *http.Request) (UsageRecordQuery, bool) {
+	page, pageSize := pagination(r)
+	query := UsageRecordQuery{
+		ModelName: strings.TrimSpace(r.URL.Query().Get("model_name")),
+		Page:      page,
+		PageSize:  pageSize,
+	}
+	if len(query.ModelName) > 255 {
+		writeAPIError(w, http.StatusBadRequest, "invalid_model_name", "模型筛选名称无效")
+		return UsageRecordQuery{}, false
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("merchant_user_id")); raw != "" {
+		merchantUserID, err := strconv.Atoi(raw)
+		if err != nil || merchantUserID <= 0 {
+			writeAPIError(w, http.StatusBadRequest, "invalid_merchant_user_id", "商户用户 ID 无效")
+			return UsageRecordQuery{}, false
+		}
+		query.FilterMerchantUserID = merchantUserID
+	}
+	var err error
+	if raw := strings.TrimSpace(r.URL.Query().Get("start_timestamp")); raw != "" {
+		query.StartTimestamp, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil || query.StartTimestamp <= 0 {
+			writeAPIError(w, http.StatusBadRequest, "invalid_time_range", "开始时间无效")
+			return UsageRecordQuery{}, false
+		}
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("end_timestamp")); raw != "" {
+		query.EndTimestamp, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil || query.EndTimestamp <= 0 {
+			writeAPIError(w, http.StatusBadRequest, "invalid_time_range", "结束时间无效")
+			return UsageRecordQuery{}, false
+		}
+	}
+	if query.StartTimestamp > 0 && query.EndTimestamp > 0 && query.EndTimestamp < query.StartTimestamp {
+		writeAPIError(w, http.StatusBadRequest, "invalid_time_range", "调用记录时间范围无效")
+		return UsageRecordQuery{}, false
+	}
+	return query, true
 }
 
 func (s *server) adminChannelLogs(w http.ResponseWriter, r *http.Request) {
-	_, session, ok := s.requireSession(w, r, roleAdmin)
+	_, _, ok := s.requireSession(w, r, roleAdmin)
+	if !ok {
+		return
+	}
+	query, ok := usageRecordQueryFromRequest(w, r)
 	if !ok {
 		return
 	}
@@ -53,119 +192,24 @@ func (s *server) adminChannelLogs(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		clonedRequest := r.Clone(r.Context())
-		clonedURL := *r.URL
-		query := clonedURL.Query()
-		query.Del("channel_id")
-		query.Del("merchant_user_id")
-		query.Set("channel", strconv.Itoa(channel.NewAPIChannelID))
-		clonedURL.RawQuery = query.Encode()
-		clonedRequest.URL = &clonedURL
-		r = clonedRequest
+		query.ChannelID = channelID
 	}
-	s.writeUsage(w, r, session, true)
+	if s.services.UsageRecords == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "usage_records_unavailable", "调用记录服务尚未就绪")
+		return
+	}
+	query.Admin = true
+	page, err := s.services.UsageRecords.ListUsageRecords(r.Context(), query)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "usage_records_query_failed", "读取渠道调用记录失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{
+		"logs": page, "filters": page.Filters,
+	}})
 }
 
-func (s *server) writeUsage(w http.ResponseWriter, r *http.Request, session platformauth.Session, admin bool) {
-	start, end, ok := usageTimeRange(w, r)
-	if !ok {
-		return
-	}
-	page, pageSize := pagination(r)
-	if pageSize > 50 {
-		pageSize = 50
-	}
-
-	filters := url.Values{}
-	filters.Set("start_timestamp", strconv.FormatInt(start, 10))
-	filters.Set("end_timestamp", strconv.FormatInt(end, 10))
-	for _, key := range []string{"type", "token_name", "group", "request_id", "upstream_request_id"} {
-		if value := strings.TrimSpace(r.URL.Query().Get(key)); value != "" {
-			filters.Set(key, value)
-		}
-	}
-	if admin {
-		for _, key := range []string{"username", "channel"} {
-			if value := strings.TrimSpace(r.URL.Query().Get(key)); value != "" {
-				filters.Set(key, value)
-			}
-		}
-	}
-
-	logQuery := cloneValues(filters)
-	logQuery.Set("p", strconv.Itoa(page))
-	logQuery.Set("page_size", strconv.Itoa(pageSize))
-	logPath, statPath, trendPath := "/api/log/self?", "/api/log/self/stat?", "/api/data/self?"
-	if admin {
-		logPath, statPath, trendPath = "/api/log/?", "/api/log/stat?", "/api/data/?"
-	}
-
-	logs, err := s.usageNewAPIDo(r, session, admin, logPath+logQuery.Encode())
-	if err != nil {
-		writeUpstreamError(w, err, http.StatusBadGateway)
-		return
-	}
-	stats, err := s.usageNewAPIDo(r, session, admin, statPath+filters.Encode())
-	if err != nil {
-		writeUpstreamError(w, err, http.StatusBadGateway)
-		return
-	}
-	trendQuery := url.Values{
-		"start_timestamp": []string{strconv.FormatInt(start, 10)},
-		"end_timestamp":   []string{strconv.FormatInt(end, 10)},
-	}
-	trend, err := s.usageNewAPIDo(r, session, admin, trendPath+trendQuery.Encode())
-	if err != nil {
-		writeUpstreamError(w, err, http.StatusBadGateway)
-		return
-	}
-
-	logValue, err := decodeJSONValue(logs)
-	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, "new_api_contract_error", "核心服务调用日志响应格式无效")
-		return
-	}
-	statValue, err := decodeJSONValue(stats)
-	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, "new_api_contract_error", "核心服务用量统计响应格式无效")
-		return
-	}
-	trendValue, err := decodeJSONValue(trend)
-	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, "new_api_contract_error", "核心服务用量趋势响应格式无效")
-		return
-	}
-	aliases := collectInternalAliases(logValue, statValue, trendValue)
-	mappings := map[string]string{}
-	if len(aliases) > 0 && s.services.UsageAliases != nil {
-		mappings, err = s.services.UsageAliases.PublicModelNames(r.Context(), aliases)
-		if err != nil {
-			writeAPIError(w, http.StatusInternalServerError, "usage_model_mapping_failed", "读取公开模型名称失败")
-			return
-		}
-	}
-	logValue = sanitizeInternalAliases(logValue, mappings)
-	statValue = sanitizeInternalAliases(statValue, mappings)
-	trendValue = sanitizeInternalAliases(trendValue, mappings)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"data": map[string]any{
-			"start_timestamp": start,
-			"end_timestamp":   end,
-			"stats":           statValue,
-			"trend":           trendValue,
-			"logs":            logValue,
-		},
-	})
-}
-
-func (s *server) usageNewAPIDo(r *http.Request, session platformauth.Session, admin bool, path string) ([]byte, error) {
-	if admin {
-		if s.services.AdminNewAPI == nil {
-			return nil, &newapi.APIError{StatusCode: http.StatusServiceUnavailable, Message: "核心管理服务尚未就绪"}
-		}
-		return s.services.AdminNewAPI.Do(r.Context(), http.MethodGet, path, nil)
-	}
+func (s *server) usageNewAPIDo(r *http.Request, session platformauth.Session, _ bool, path string) ([]byte, error) {
 	return s.services.NewAPI.Do(r.Context(), http.MethodGet, path, nil, upstreamAuth(session))
 }
 
@@ -193,14 +237,6 @@ func usageTimeRange(w http.ResponseWriter, r *http.Request) (int64, int64, bool)
 		return 0, 0, false
 	}
 	return start, end, true
-}
-
-func cloneValues(source url.Values) url.Values {
-	copy := make(url.Values, len(source))
-	for key, values := range source {
-		copy[key] = append([]string(nil), values...)
-	}
-	return copy
 }
 
 func decodeJSONValue(data []byte) (any, error) {

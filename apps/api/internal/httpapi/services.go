@@ -59,6 +59,7 @@ type Services struct {
 	PaymentCredit  HealthCycleRunner
 	Settlement     SettlementRepository
 	SettlementSync HealthCycleRunner
+	UsageRecords   UsageRecordReader
 	UsageAliases   UsageAliasResolver
 	Overview       AdminOverviewReader
 	Announcements  AnnouncementRepository

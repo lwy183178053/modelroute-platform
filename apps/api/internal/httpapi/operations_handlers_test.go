@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -78,6 +77,10 @@ func TestUsageReturnsRealNewAPIDataWithoutInternalOfferAlias(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": data})
 	}))
+	services.UsageRecords = &usageRecordReaderStub{page: UsageRecordPage{
+		Page: 1, PageSize: 20, Total: 1,
+		Items: []UsageRecord{{ID: 1, ModelName: "gpt-4o-mini", GrossQuota: 500000}},
+	}}
 	services.UsageAliases = usageAliasResolverStub{aliases: map[string]string{alias: "gpt-4o-mini"}}
 	token := createPlatformSession(t, services, 7, 1)
 	handler := NewServerWithServices("test", Dependencies{}, services)
@@ -153,25 +156,19 @@ func TestAdminOverviewUsesRepositorySnapshotAndRoleChecks(t *testing.T) {
 	}
 }
 
-func TestAdminChannelLogsRequireAdminAndHideInternalOfferAlias(t *testing.T) {
-	const alias = "mkt-ov-abcdefabcdefabcdefabcdef"
-	admin := &adminOperationStub{handler: func(method string, path string, _ any) ([]byte, error) {
-		if method != http.MethodGet {
-			return nil, fmt.Errorf("错误方法 %s", method)
-		}
-		switch {
-		case strings.HasPrefix(path, "/api/log/?"):
-			return []byte(`{"page":1,"page_size":20,"total":1,"items":[{"id":9,"type":2,"model_name":"` + alias + `","quota":700000}]}`), nil
-		case strings.HasPrefix(path, "/api/log/stat?"):
-			return []byte(`{"quota":700000,"rpm":1,"tpm":200}`), nil
-		case strings.HasPrefix(path, "/api/data/?"):
-			return []byte(`[{"created_at":1784649600,"model_name":"` + alias + `","quota":700000,"count":1}]`), nil
-		default:
-			return nil, fmt.Errorf("未知管理员用量路径 %s", path)
-		}
-	}}
+func TestAdminChannelLogsRequireAdminAndUseSharedUsageRecords(t *testing.T) {
 	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	services.AdminNewAPI = admin
+	reader := &usageRecordReaderStub{page: UsageRecordPage{Page: 1, PageSize: 200, Total: 1, Items: []UsageRecord{{
+		ID: 9, ConsumerUserID: 27, ModelName: "gpt-5.6", MerchantUserID: 7, MerchantName: "北辰云智",
+		ChannelID: 51, ChannelName: "主线路", GrossQuota: 700000,
+	}}}}
+	services.UsageRecords = reader
+	services.Merchants = &merchantChannelLookupStub{
+		merchantRepositoryStub: &merchantRepositoryStub{},
+		channel: func(context.Context, int64) (MerchantChannel, error) {
+			return MerchantChannel{ID: 51, UserID: 7, NewAPIChannelID: 41}, nil
+		},
+	}
 	handler := NewServerWithServices("test", Dependencies{}, services)
 
 	regularToken := createPlatformSession(t, services, 7, 1)
@@ -184,12 +181,15 @@ func TestAdminChannelLogsRequireAdminAndHideInternalOfferAlias(t *testing.T) {
 	}
 
 	adminToken := createPlatformSession(t, services, 1, 100)
-	request := httptest.NewRequest(http.MethodGet, "/api/admin/channel-logs?start_timestamp=1784649600&end_timestamp=1784736000", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/channel-logs?merchant_user_id=7&channel_id=51&model_name=gpt-5.6&p=1&page_size=200", nil)
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: adminToken})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "mkt-ov-") || !strings.Contains(response.Body.String(), `"total":1`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"total":1`) || !strings.Contains(response.Body.String(), `"user_id":27`) {
 		t.Fatalf("管理员用量响应=%d %s", response.Code, response.Body.String())
+	}
+	if !reader.query.Admin || reader.query.FilterMerchantUserID != 7 || reader.query.ChannelID != 51 || reader.query.ModelName != "gpt-5.6" || reader.query.PageSize != 200 {
+		t.Fatalf("管理员调用记录查询=%+v", reader.query)
 	}
 }
 
@@ -202,25 +202,9 @@ func (s *merchantChannelLookupStub) Channel(ctx context.Context, channelID int64
 	return s.channel(ctx, channelID)
 }
 
-func TestAdminChannelLogsTranslatePlatformChannelID(t *testing.T) {
-	seenChannel := ""
+func TestAdminChannelLogsRejectMismatchedMerchantAndChannel(t *testing.T) {
 	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	services.AdminNewAPI = &adminOperationStub{handler: func(_ string, path string, _ any) ([]byte, error) {
-		parsed, err := url.Parse(path)
-		if err != nil {
-			return nil, err
-		}
-		if value := parsed.Query().Get("channel"); value != "" {
-			seenChannel = value
-		}
-		if strings.HasPrefix(parsed.Path, "/api/log/") {
-			return []byte(`{"page":1,"page_size":20,"total":0,"items":[]}`), nil
-		}
-		if strings.HasPrefix(parsed.Path, "/api/log/stat") {
-			return []byte(`{"quota":0,"rpm":0,"tpm":0}`), nil
-		}
-		return []byte(`[]`), nil
-	}}
+	services.UsageRecords = &usageRecordReaderStub{}
 	services.Merchants = &merchantChannelLookupStub{
 		merchantRepositoryStub: &merchantRepositoryStub{},
 		channel: func(_ context.Context, channelID int64) (MerchantChannel, error) {
@@ -231,12 +215,12 @@ func TestAdminChannelLogsTranslatePlatformChannelID(t *testing.T) {
 		},
 	}
 	token := createPlatformSession(t, services, 1, 100)
-	request := httptest.NewRequest(http.MethodGet, "/api/admin/channel-logs?channel_id=51&merchant_user_id=7", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/channel-logs?channel_id=51&merchant_user_id=8", nil)
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()
 	NewServerWithServices("test", Dependencies{}, services).ServeHTTP(response, request)
-	if response.Code != http.StatusOK || seenChannel != "41" {
-		t.Fatalf("渠道日志响应=%d %s，内部筛选=%q", response.Code, response.Body.String(), seenChannel)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("渠道与商户不匹配响应=%d %s", response.Code, response.Body.String())
 	}
 }
 

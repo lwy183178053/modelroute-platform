@@ -58,8 +58,7 @@ function AdminOverview({ data, error, loading, reload, setSection }) {
   const summary = data?.summary || {};
   const pendingCount = Number(summary.pending_merchant_applications || 0)
     + Number(summary.pending_channel_reviews || 0)
-    + Number(summary.pending_withdrawals || 0)
-    + Number(summary.open_reconciliation || 0);
+    + Number(summary.pending_withdrawals || 0);
   const channelAttention = Number(summary.pending_channel_reviews || 0)
     + Number(summary.cooling_channels || 0)
     + Number(summary.disabled_channels || 0);
@@ -73,7 +72,7 @@ function AdminOverview({ data, error, loading, reload, setSection }) {
       <div className="metrics-grid admin-metrics">
         <Metric label="今日平台成交" value={formatQuota(summary.today_gross_quota)} hint={`平台收入 ${formatQuota(summary.today_platform_quota)}`} icon={BadgeDollarSign} />
         <Metric label="活跃渠道" value={`${summary.active_channels || 0} / ${summary.total_channels || 0}`} hint={`${summary.cooling_channels || 0} 个冷却 · ${summary.disabled_channels || 0} 个停用`} icon={HeartPulse} tone="green" />
-        <Metric label="待处理事项" value={String(pendingCount)} hint="商户、渠道、提现与对账" icon={ClipboardCheck} tone="amber" />
+        <Metric label="待处理事项" value={String(pendingCount)} hint="商户、渠道与提现" icon={ClipboardCheck} tone="amber" />
         <Metric label="计费同步" value={syncHealthy ? '正常' : '异常'} hint={`日志延迟 ${Number(data?.sync_delay_seconds || 0)} 秒`} icon={ShieldCheck} tone="blue" />
       </div>
 
@@ -81,7 +80,7 @@ function AdminOverview({ data, error, loading, reload, setSection }) {
         <Section title="待办事项" description="来自当前平台业务状态">
           <div className="task-list">
             <button onClick={() => setSection('merchants')} type="button"><span className="task-icon task-warning"><Building2 size={17} /></span><span><strong>商户入驻待审核</strong><small>等待验证或批准</small></span><Status>{summary.pending_merchant_applications || 0} 项</Status></button>
-            <button onClick={() => setSection('withdrawals')} type="button"><span className="task-icon task-blue"><Landmark size={17} /></span><span><strong>提现与对账待处理</strong><small>{summary.open_reconciliation || 0} 条对账异常</small></span><Status>{summary.pending_withdrawals || 0} 笔</Status></button>
+            <button onClick={() => setSection('withdrawals')} type="button"><span className="task-icon task-blue"><Landmark size={17} /></span><span><strong>提现待处理</strong><small>等待审核或确认打款</small></span><Status>{summary.pending_withdrawals || 0} 笔</Status></button>
             <button onClick={() => setSection('channels')} type="button"><span className="task-icon task-warning"><HeartPulse size={17} /></span><span><strong>渠道待处理</strong><small>{summary.cooling_channels || 0} 个冷却，{summary.disabled_channels || 0} 个停用</small></span><Status>{channelAttention} 项</Status></button>
           </div>
         </Section>
@@ -95,12 +94,12 @@ function AdminOverview({ data, error, loading, reload, setSection }) {
         </Section>
       </div>
 
-      <Section title="实时交易概况" description="数据以最终结算日志为准" actions={<Button onClick={() => setSection('usage')} variant="ghost">查看完整报表</Button>}>
+      <Section title="实时交易概况" description="数据以成功调用记录为准" actions={<Button onClick={() => setSection('usage')} variant="ghost">查看完整报表</Button>}>
         <div className="transaction-band">
           <div><span>请求总数</span><strong>{summary.today_request_count || 0}</strong><small>今日路由请求</small></div>
           <div><span>成功请求</span><strong>{summary.today_successful_requests || 0} / {summary.today_request_count || 0}</strong><small>{successRate(summary.today_successful_requests, summary.today_request_count)}</small></div>
-          <div><span>用户扣费</span><strong>{formatQuota(summary.today_gross_quota)}</strong><small>退款 {formatQuota(summary.today_refund_quota)}</small></div>
-          <div><span>商户应计</span><strong>{formatQuota(summary.today_merchant_quota)}</strong><small>结算账本已确认</small></div>
+          <div><span>用户消费</span><strong>{formatQuota(summary.today_gross_quota)}</strong><small>成功调用自动扣费</small></div>
+          <div><span>商户收入</span><strong>{formatQuota(summary.today_merchant_quota)}</strong><small>消费完成后自动入账</small></div>
           <div><span>平台收入</span><strong>{formatQuota(summary.today_platform_quota)}</strong><small>成交额的 10%</small></div>
         </div>
       </Section>
@@ -132,14 +131,14 @@ export default function AdminView({ section, setSection, openModal, notify }) {
     const counts = {
       merchants: Number(summary.pending_merchant_applications || 0),
       channels: Number(summary.pending_channel_reviews || 0) + Number(summary.cooling_channels || 0) + Number(summary.disabled_channels || 0),
-      withdrawals: Number(summary.pending_withdrawals || 0) + Number(summary.open_reconciliation || 0),
+      withdrawals: Number(summary.pending_withdrawals || 0),
     };
     return baseSections.map((item) => ({ ...item, count: counts[item.id] || 0 }));
   }, [overview]);
 
   return (
     <div className="view-shell admin-view">
-      <PageHeader eyebrow="平台管理" title="运营管理" description="统一处理用户、商户、渠道、模型、支付和结算业务。" />
+      <PageHeader eyebrow="平台管理" title="运营管理" description="统一处理用户、商户、渠道、模型、支付和提现业务。" />
       <div className="admin-layout">
         <aside className="admin-sidebar" aria-label="管理员功能">
           {sections.map(({ id, label, icon: Icon, count }) => <button className={section === id ? 'active' : ''} key={id} onClick={() => setSection(id)} type="button"><Icon size={17} /><span>{label}</span>{count > 0 && <b>{count}</b>}</button>)}

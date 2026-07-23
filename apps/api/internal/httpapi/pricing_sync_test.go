@@ -13,6 +13,7 @@ type priceSyncRepositoryStub struct {
 	prices      []aliasPrice
 	channels    []ChannelPriceRoute
 	activatedID int64
+	activate    bool
 }
 
 func (s *priceSyncRepositoryStub) AliasPrices(context.Context) ([]aliasPrice, error) {
@@ -23,8 +24,9 @@ func (s *priceSyncRepositoryStub) OfferChannelRoutes(context.Context, int64) ([]
 	return s.channels, nil
 }
 
-func (s *priceSyncRepositoryStub) ActivateOffer(_ context.Context, offerID int64) error {
+func (s *priceSyncRepositoryStub) FinalizeOffer(_ context.Context, offerID int64, activate bool) error {
 	s.activatedID = offerID
+	s.activate = activate
 	return nil
 }
 
@@ -136,10 +138,10 @@ func TestPriceSynchronizerUpdatesAllOptionsAndChannelBeforeActivation(t *testing
 	}
 	admin := &adminNewAPIStub{}
 	synchronizer := NewPriceSynchronizer(repository, admin)
-	if err := synchronizer.SyncOffer(context.Background(), 42); err != nil {
+	if err := synchronizer.SyncOffer(context.Background(), 42, true); err != nil {
 		t.Fatalf("同步报价失败：%v", err)
 	}
-	if repository.activatedID != 42 {
+	if repository.activatedID != 42 || !repository.activate {
 		t.Fatalf("激活报价 = %d", repository.activatedID)
 	}
 	optionUpdates := 0
@@ -172,7 +174,7 @@ func TestPriceSynchronizerDoesNotActivateWhenExpressionUpdateFails(t *testing.T)
 		channels: []ChannelPriceRoute{{MerchantChannelID: 51, NewAPIChannelID: 41}},
 	}
 	admin := &adminNewAPIStub{failKey: "billing_setting.billing_expr"}
-	err := NewPriceSynchronizer(repository, admin).SyncOffer(context.Background(), 42)
+	err := NewPriceSynchronizer(repository, admin).SyncOffer(context.Background(), 42, true)
 	if err == nil || repository.activatedID != 0 {
 		t.Fatalf("同步错误=%v，激活报价=%d", err, repository.activatedID)
 	}
@@ -195,7 +197,7 @@ func TestPriceSynchronizerRestoresOptionsAndChannelWhenChannelUpdateFails(t *tes
 		channels: []ChannelPriceRoute{{MerchantChannelID: 51, NewAPIChannelID: 41, PublicModels: []string{"gpt-5.5"}, Aliases: map[string]string{"mkt-ov-42": "gpt-5.5"}}},
 	}
 	admin := &adminNewAPIStub{failChannel: true}
-	err := NewPriceSynchronizer(repository, admin).SyncOffer(context.Background(), 42)
+	err := NewPriceSynchronizer(repository, admin).SyncOffer(context.Background(), 42, true)
 	if err == nil || repository.activatedID != 0 {
 		t.Fatalf("同步错误=%v，激活报价=%d", err, repository.activatedID)
 	}
@@ -204,6 +206,22 @@ func TestPriceSynchronizerRestoresOptionsAndChannelWhenChannelUpdateFails(t *tes
 	}
 	if admin.updates["billing_setting.billing_mode"] != `{"existing":"tiered_expr"}` || admin.updates["billing_setting.billing_expr"] != `{"existing":"v1:tier(\"tier_1\", p * 2)"}` {
 		t.Fatalf("失败后价格配置未回滚：%v", admin.updates)
+	}
+}
+
+func TestPriceSynchronizerCanFinalizeUpdatedOfferAsInactive(t *testing.T) {
+	repository := &priceSyncRepositoryStub{
+		prices: []aliasPrice{{
+			Alias: "mkt-ov-43", Protocol: "responses", MultiplierBPS: 9_000,
+			Price: OfficialPrice{Tiers: []PriceTier{{MinimumInputTokens: 0, InputPriceMicros: 1_000_000, OutputPriceMicros: int64Pointer(2_000_000)}}},
+		}},
+		channels: []ChannelPriceRoute{{MerchantChannelID: 51, NewAPIChannelID: 41, PublicModels: []string{"gpt-5.5"}, Aliases: map[string]string{"mkt-ov-43": "gpt-5.5"}}},
+	}
+	if err := NewPriceSynchronizer(repository, &adminNewAPIStub{}).SyncOffer(context.Background(), 43, false); err != nil {
+		t.Fatalf("同步下架模型新价格失败：%v", err)
+	}
+	if repository.activatedID != 43 || repository.activate {
+		t.Fatalf("下架模型同步结束状态错误：id=%d activate=%v", repository.activatedID, repository.activate)
 	}
 }
 

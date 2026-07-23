@@ -10,8 +10,8 @@ func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Files() 返回错误：%v", err)
 	}
-	if len(files) != 2 {
-		t.Fatalf("V2 多模型渠道必须包含两份连续迁移，实际 = %d", len(files))
+	if len(files) != 3 {
+		t.Fatalf("V2 多模型渠道和模型生命周期必须包含三份连续迁移，实际 = %d", len(files))
 	}
 	file := files[0]
 	if file.Version != 1 || file.Name != "000001_v2_baseline.sql" {
@@ -71,5 +71,8 @@ func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
 	}
 	if !strings.Contains(files[1].SQL, "ALTER COLUMN channel_test_id DROP NOT NULL") {
 		t.Fatal("多模型渠道迁移未允许没有旧版检测凭证的审核记录")
+	}
+	if !strings.Contains(files[2].SQL, "'deleted'") {
+		t.Fatal("模型生命周期迁移缺少 deleted 状态")
 	}
 }

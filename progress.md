@@ -2385,3 +2385,80 @@
 - `docs/运营管理与升级验收.md`：删除 V1 历史验收段落并修正 V2 迁移清单。
 - `progress.md`：追加本轮审计、验证和回滚记录。
 - 回滚点：执行 `git revert <本轮提交哈希>` 可恢复本轮全部清理、文档和截图；本轮只更新本地仓库与本地预览，未上传服务器。
+
+## 2026-07-23 - Task: 统一调用记录并简化商户模型与财务界面
+
+### What was done
+
+- 用户、商户和管理员调用记录统一改读 `settlement_sources` 成功消费事实，默认不限制明细时间范围，并按模型、商户用户 ID、平台渠道 ID 和 `20/50/200` 页大小查询。
+- 用户页面显示承载商户，商户页面显示渠道和 90% 自动入账金额，管理员页面显示消费用户、商户和渠道；三种视角共用调用记录表格，不展示退款行、状态列或 Token 合计。
+- 修复商户调用记录的范围覆盖问题：即使请求手工传入其他商户用户 ID，查询仍强制使用当前登录商户。
+- 商户渠道生命周期增加审核中撤销和驳回记录删除；正式渠道继续支持同步模型、下架、恢复和删除，并保持跨商户权限隔离。
+- 商户“模型报价”和独立“健康状态”合并为“上架模型”，支持修改模型价格、上架、下架、删除和按需展开渠道健康；删除后保留历史调用关系。
+- 删除产品层商户账本、单次退款、人工结算和人工对账入口及无用读取代码；成功调用继续自动完成商户 90%、平台 10% 的内部幂等入账，核心服务失败冲正、余额、提现和内部账本继续保留。
+- 更新桌面与移动端截图验收，新增用户调用记录、账户设置、商户调用记录和渠道健康展开页面；本轮只完成本地开发、验证和提交，不发布服务器。
+
+### Testing
+
+- `go test ./internal/httpapi -run TestMerchantUsageUsesSessionMerchantAndReturnsNetIncome -count=1`：先复现商户筛选覆盖失败，修复后通过。
+- `go test ./... -count=1`、`go vet ./...`、`go build ./...`、`staticcheck ./...` 全部通过。
+- `npm.cmd run test:ui` 通过，覆盖三套侧栏、统一调用筛选、渠道审核撤销/删除、模型价格修改、上下架、删除、渠道健康展开、分页和权限隐藏。
+- `npm.cmd run capture` 通过，桌面与移动端截图均非空，根页面无横向溢出；人工查看账户设置、用户调用记录、商户调用记录和渠道健康展开未发现内容重叠。
+- `python -m unittest discover -s deploy/tests -p 'test_*.py'` 共 27 项通过。
+- `docker compose config --quiet` 通过；本地没有加载生产环境文件，因此仅输出缺少生产变量的预期警告。
+- 变更 Go 文件 `gofmt -d` 无差异；三个前端脚本 `node --check`、`git diff --check` 和前端旧产品术语扫描通过。
+- Git 跟踪内容凭据扫描未命中聊天中提供的支付密钥、上游密钥或服务器密码。
+
+### Notes
+
+- `apps/api/internal/bootstrap/resources.go`：把结算存储注册为统一调用记录读取器。
+- `apps/api/internal/httpapi/channel_models_handlers.go`：增加商户撤销或删除渠道审核记录处理器。
+- `apps/api/internal/httpapi/merchant_handlers.go`：将通用分页上限调整为 200 条。
+- `apps/api/internal/httpapi/merchant_store.go`：实现渠道审核记录的归属校验、状态限制和删除事务。
+- `apps/api/internal/httpapi/merchant_store_test.go`：覆盖审核撤销、驳回删除、处理中冲突和跨商户隔离。
+- `apps/api/internal/httpapi/merchant_types.go`：增加渠道审核记录管理接口。
+- `apps/api/internal/httpapi/operations_handlers_test.go`：把管理员渠道日志测试改为统一调用事实查询。
+- `apps/api/internal/httpapi/pricing_sync.go`：支持价格同步后按调用方要求保持下架或激活。
+- `apps/api/internal/httpapi/pricing_sync_test.go`：覆盖激活和保持下架两种价格同步结果。
+- `apps/api/internal/httpapi/routing_handlers.go`：实现上架模型修改价格、上架、下架和删除处理流程。
+- `apps/api/internal/httpapi/routing_handlers_test.go`：覆盖模型生命周期、同步失败和下架后调价。
+- `apps/api/internal/httpapi/routing_store.go`：实现模型最新状态、删除标记、上下架同步和成功调用统计。
+- `apps/api/internal/httpapi/routing_store_test.go`：覆盖删除隐藏、下架保留、可用渠道和历史统计。
+- `apps/api/internal/httpapi/server.go`：注册新商户调用记录和模型生命周期接口，移除旧账本、健康和对账路由。
+- `apps/api/internal/httpapi/services.go`：增加统一调用记录读取依赖。
+- `apps/api/internal/httpapi/settlement_handlers.go`：删除商户账本和管理员人工对账产品处理器。
+- `apps/api/internal/httpapi/settlement_handlers_test.go`：确认旧账本和人工对账路由不再开放，并保留提现回归。
+- `apps/api/internal/httpapi/settlement_reconciliation.go`：删除无产品入口的人工对账读取和忽略实现。
+- `apps/api/internal/httpapi/settlement_types.go`：从产品服务接口移除账本列表和人工对账类型。
+- `apps/api/internal/httpapi/usage_handlers.go`：实现用户、商户和管理员统一调用记录接口，并强制商户会话隔离。
+- `apps/api/internal/httpapi/usage_records.go`：新增基于成功消费事实的共用查询、筛选、分页和字段映射。
+- `apps/api/internal/httpapi/usage_records_test.go`：覆盖无默认保留窗口、三种查询范围、筛选、字段和越权参数。
+- `apps/api/internal/migrations/migrate_test.go`：将迁移验收更新到第 3 份迁移。
+- `apps/api/internal/migrations/sql/000003_offer_deleted_status.sql`：为模型价格版本增加 `deleted` 状态。
+- `apps/web/src/Modals.jsx`：统一“设置模型价格”文案并保留 `0.00x..5.00x` 输入。
+- `apps/web/src/styles.css`：增加调用筛选、Token 明细和渠道健康展开的桌面与移动端样式。
+- `apps/web/src/ui.jsx`：移除已下线退款和结算状态的界面色彩映射。
+- `apps/web/src/views/AdminView.jsx`：从运营待办和计数中移除人工对账。
+- `apps/web/src/views/ConsoleView.jsx`：增加用户调用记录模型与商户筛选并接入服务端分页。
+- `apps/web/src/views/MerchantView.jsx`：合并上架模型与健康，接入审核撤销、模型生命周期和商户调用记录。
+- `apps/web/src/views/UsagePanels.jsx`：重做三种视角共用的调用记录表格和独立 Token 字段。
+- `apps/web/src/views/admin/AdminUsage.jsx`：改为按商户、渠道和模型筛选统一调用记录。
+- `apps/web/src/views/admin/AdminWithdrawals.jsx`：删除人工对账队列，只保留人工提现审核。
+- `apps/web/scripts/ui-smoke.mjs`：更新 mock 契约并增加统一调用、渠道审核和模型生命周期回归。
+- `apps/web/scripts/capture.mjs`：移除旧接口 mock，增加账户设置、三类调用记录和渠道健康展开截图。
+- `apps/web/scripts/production-smoke.mjs`：同步商户五项侧栏和“上架模型”验收口径。
+- `apps/web/artifacts/admin-announcements-{desktop,mobile}.png`、`admin-channels-{desktop,mobile}.png`、`admin-{desktop,mobile}.png`：刷新公告、渠道和管理概览截图。
+- `apps/web/artifacts/admin-image-price-desktop.png`、`admin-model-price-desktop.png`、`admin-models-{desktop,mobile}.png`：刷新模型和价格截图。
+- `apps/web/artifacts/admin-redemptions-{desktop,mobile}.png`、`admin-settings-{desktop,mobile}.png`、`admin-usage-{desktop,mobile}.png`、`admin-withdrawals-{desktop,mobile}.png`：刷新运营功能截图。
+- `apps/web/artifacts/announcement-panel-{desktop,mobile}.png`、`console-{desktop,mobile}.png`、`market-{desktop,mobile}.png`、`merchant-{desktop,mobile}.png`：刷新三工作区与公告截图。
+- `apps/web/artifacts/merchant-offers-{desktop,mobile}.png`、`payment-config-desktop.png`、`withdrawal-modal-{desktop,mobile}.png`：刷新上架模型、支付和提现截图。
+- `apps/web/artifacts/console-settings-{desktop,mobile}.png`、`console-usage-{desktop,mobile}.png`、`merchant-channel-health-{desktop,mobile}.png`、`merchant-usage-{desktop,mobile}.png`：新增账户设置、用户调用、渠道健康和商户调用截图。
+- `docs/统一调用记录.md`：新增统一消费事实、权限视角、永久明细和内部入账边界说明。
+- `docs/账号与管理员接口.md`：同步商户五项侧栏和商户调用记录分页。
+- `docs/模型报价路由与健康.md`：同步“上架模型”、模型生命周期和商户调用接口。
+- `docs/运营管理与升级验收.md`：同步永久调用明细、运营筛选和已删除产品入口。
+- `docs/部署运行手册.md`：将开发重置后的平台迁移清单更新为三份迁移。
+- `docs/商户与渠道审核接口.md`：补充审核撤销、驳回删除和统一调用事实。
+- `docs/结算与人工提现.md`：明确成功调用自动入账、失败自动退回和无人工结算页面。
+- `progress.md`：追加本轮实现、测试、文件清单和回滚点。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可回退统一调用记录、渠道审核、上架模型、界面简化、文档和截图；本轮未上传服务器。

@@ -335,6 +335,28 @@ func (s *server) deleteMerchantChannel(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"id": id, "status": "archived"}})
 }
 
+func (s *server) deleteMerchantChannelReview(w http.ResponseWriter, r *http.Request) {
+	_, _, identity, ok := s.requireMerchant(w, r)
+	if !ok || !s.requireSameOrigin(w, r) {
+		return
+	}
+	manager, ok := s.services.Merchants.(MerchantChannelReviewManagement)
+	if !ok {
+		writeAPIError(w, http.StatusServiceUnavailable, "channel_review_management_unavailable", "渠道审核管理服务尚未就绪")
+		return
+	}
+	id, ok := pathInt64(w, r, "id", "渠道审核编号无效")
+	if !ok {
+		return
+	}
+	action, err := manager.DeleteChannelReview(r.Context(), id, identity.MerchantID)
+	if err != nil {
+		s.writeMerchantStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"id": id, "action": action}})
+}
+
 func (s *server) adminUpdateChannelStatus(w http.ResponseWriter, r *http.Request) {
 	_, _, ok := s.requireSession(w, r, roleAdmin)
 	if !ok || !s.requireSameOrigin(w, r) {

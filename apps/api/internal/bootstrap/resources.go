@@ -101,6 +101,7 @@ func buildHTTPServices(database *sql.DB, redisClient *redis.Client, cfg config.C
 		OfferSync:     httpapi.NewPriceSynchronizer(routing, adminNewAPI),
 		Payments:      payments,
 		Settlement:    settlement,
+		UsageRecords:  settlement,
 		UsageAliases:  routing,
 		Overview:      httpapi.NewSQLAdminOverviewStore(database),
 		Announcements: httpapi.NewSQLAnnouncementStore(database),

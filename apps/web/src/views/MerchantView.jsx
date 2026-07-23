@@ -1,22 +1,18 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BadgeDollarSign, CloudCog, HeartPulse, Landmark, LayoutDashboard,
-  Plus, ReceiptText, ServerCog, WalletCards, Waypoints,
+  Plus, ServerCog, WalletCards, Waypoints, FileText,
 } from 'lucide-react';
 import { apiRequest, formatCompactCount, formatLastCalled, formatQuota } from '../api';
-import { ActionMenu, Button, InlineNotice, Metric, PageHeader, Section, Status } from '../ui';
+import { ActionMenu, Button, InlineNotice, Metric, PageHeader, Pagination, Section, Select, Status } from '../ui';
+import { UsageLogTable, useUsage } from './UsagePanels';
 
 const statusNames = {
   pending: '审核中', verifying: '审核中', verified: '审核中', approving: '审核中',
-  approved: '已审核', rejected: '不通过', active: '已审核', archived: '已下架',
-  syncing: '同步中', sync_failed: '同步失败', disabled: '已停用', inactive: '已下架',
+  approved: '已审核', rejected: '不通过', active: '已审核', archived: '已删除',
+  syncing: '同步中', sync_failed: '同步失败', disabled: '已下架', inactive: '已下架', deleted: '已删除',
 };
-
 const withdrawalStatusNames = { pending: '待审核', approved: '待打款', paid: '已打款', rejected: '已驳回' };
-const ledgerNames = {
-  earning: '调用结算', refund: '退款冲正', withdrawal_freeze: '提现冻结',
-  withdrawal_release: '驳回释放', withdrawal_paid: '确认打款',
-};
 const healthNames = {
   pending: '待调用', healthy: '健康', degraded: '降级', cooling: '冷却', recovering: '恢复中', disabled: '已停用',
 };
@@ -24,9 +20,8 @@ const protocolNames = { chat_completions: '聊天补全', responses: 'Responses'
 const merchantSections = [
   { id: 'overview', label: '经营概览', icon: LayoutDashboard },
   { id: 'channels', label: '渠道管理', icon: Waypoints },
-  { id: 'offers', label: '模型报价', icon: BadgeDollarSign },
-  { id: 'health', label: '健康状态', icon: HeartPulse },
-  { id: 'ledger', label: '结算账本', icon: ReceiptText },
+  { id: 'offers', label: '上架模型', icon: BadgeDollarSign },
+  { id: 'usage', label: '调用记录', icon: FileText },
   { id: 'withdrawals', label: '提现记录', icon: Landmark },
 ];
 
@@ -43,12 +38,6 @@ function formatLatency(value) {
 function formatDate(value) {
   if (!value) return '-';
   return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
-}
-
-function formatQuotaDelta(value) {
-  const amount = Number(value || 0);
-  if (!amount) return '-';
-  return `${amount > 0 ? '+' : '-'}${formatQuota(Math.abs(amount))}`;
 }
 
 function formatMultiplier(value) {
@@ -72,42 +61,53 @@ export default function MerchantView({ account, openModal }) {
   const [merchant, setMerchant] = useState(null);
   const [models, setModels] = useState([]);
   const [offers, setOffers] = useState([]);
-  const [health, setHealth] = useState([]);
   const [balance, setBalance] = useState(null);
-  const [ledger, setLedger] = useState([]);
   const [withdrawals, setWithdrawals] = useState([]);
+  const [withdrawalTotal, setWithdrawalTotal] = useState(0);
+  const [withdrawalPage, setWithdrawalPage] = useState(1);
+  const [withdrawalPageSize, setWithdrawalPageSize] = useState(20);
+  const [usagePage, setUsagePage] = useState(1);
+  const [usagePageSize, setUsagePageSize] = useState(20);
+  const [usageModel, setUsageModel] = useState('all');
+  const [expandedOffer, setExpandedOffer] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busyChannel, setBusyChannel] = useState(0);
+
+  const usageEndpoint = useMemo(() => {
+    const query = new URLSearchParams({ p: String(usagePage), page_size: String(usagePageSize) });
+    if (usageModel !== 'all') query.set('model_name', usageModel);
+    return `/api/merchant/usage?${query}`;
+  }, [usageModel, usagePage, usagePageSize]);
+  const usage = useUsage(usageEndpoint);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
       const financeRequests = account?.is_merchant || Number(account?.role) >= 10
-        ? [apiRequest('/api/merchant/balance'), apiRequest('/api/merchant/ledger?page_size=50'), apiRequest('/api/merchant/withdrawals?page_size=50')]
-        : [Promise.resolve(null), Promise.resolve(null), Promise.resolve(null)];
-      const [channelData, modelData, offerData, healthData, balanceData, ledgerData, withdrawalData] = await Promise.all([
-        apiRequest('/api/merchant/channels'), apiRequest('/api/models'), apiRequest('/api/merchant/offers'),
-        apiRequest('/api/merchant/health'), ...financeRequests,
+        ? [apiRequest('/api/merchant/balance'), apiRequest(`/api/merchant/withdrawals?p=${withdrawalPage}&page_size=${withdrawalPageSize}`)]
+        : [Promise.resolve(null), Promise.resolve(null)];
+      const [channelData, modelData, offerData, balanceData, withdrawalData] = await Promise.all([
+        apiRequest('/api/merchant/channels'), apiRequest('/api/models'), apiRequest('/api/merchant/offers'), ...financeRequests,
       ]);
       setChannels(channelData?.items || []);
       setReviews(channelData?.reviews || []);
       setMerchant(channelData?.merchant || null);
       setModels(modelData || []);
       setOffers(offerData || []);
-      setHealth(healthData || []);
       setBalance(balanceData || null);
-      setLedger(ledgerData?.items || []);
       setWithdrawals(withdrawalData?.items || []);
+      setWithdrawalTotal(Number(withdrawalData?.total || 0));
     } catch (requestError) {
       setError(requestError.message || '读取商户经营数据失败');
     } finally {
       setLoading(false);
     }
-  }, [account?.is_merchant, account?.role]);
+  }, [account?.is_merchant, account?.role, withdrawalPage, withdrawalPageSize]);
 
   useEffect(() => { load(); }, [load]);
+
   const syncChannel = async (channel) => {
     setBusyChannel(channel.id);
     try { await apiRequest(`/api/merchant/channels/${channel.id}/models/sync`, { method: 'POST' }); await load(); }
@@ -120,33 +120,43 @@ export default function MerchantView({ account, openModal }) {
     catch (requestError) { setError(requestError.message || '修改渠道状态失败'); }
     finally { setBusyChannel(0); }
   };
-  const archiveChannel = async (channel) => {
-    if (!window.confirm(`确认下架渠道“${channel.channel_name}”吗？`)) return;
+  const deleteChannel = async (channel) => {
+    if (!window.confirm(`确认删除渠道“${channel.channel_name}”吗？`)) return;
     setBusyChannel(channel.id);
     try { await apiRequest(`/api/merchant/channels/${channel.id}`, { method: 'DELETE' }); await load(); }
-    catch (requestError) { setError(requestError.message || '下架渠道失败'); }
+    catch (requestError) { setError(requestError.message || '删除渠道失败'); }
     finally { setBusyChannel(0); }
   };
-  const retireOffer = async (offer) => {
-    const model = models.find((item) => item.public_name === offer.model);
-    if (!model || !window.confirm(`确认取消“${offer.model}”的报价吗？取消后模型市场将立即隐藏。`)) return;
-    try {
-      await apiRequest(`/api/merchant/offers/${model.id}`, { method: 'DELETE' });
-      await load();
-    } catch (requestError) {
-      setError(requestError.message || '取消报价失败');
-    }
+  const deleteReview = async (review) => {
+    const action = review.status === 'rejected' ? '删除记录' : '撤销审核';
+    if (!window.confirm(`确认${action}“${review.channel_name}”吗？`)) return;
+    try { await apiRequest(`/api/merchant/channel-reviews/${review.id}`, { method: 'DELETE' }); await load(); }
+    catch (requestError) { setError(requestError.message || `${action}失败`); }
   };
+  const modelForOffer = (offer) => models.find((item) => item.public_name === offer.model);
+  const changeOfferStatus = async (offer, enabled) => {
+    const model = modelForOffer(offer);
+    if (!model) return;
+    try { await apiRequest(`/api/merchant/offers/${model.id}/status`, { method: 'POST', body: { enabled } }); await load(); }
+    catch (requestError) { setError(requestError.message || `${enabled ? '上架' : '下架'}模型失败`); }
+  };
+  const deleteOffer = async (offer) => {
+    const model = modelForOffer(offer);
+    if (!model || !window.confirm(`确认删除“${offer.model}”吗？历史调用记录仍会保留。`)) return;
+    try { await apiRequest(`/api/merchant/offers/${model.id}`, { method: 'DELETE' }); await load(); }
+    catch (requestError) { setError(requestError.message || '删除上架模型失败'); }
+  };
+
   const activeCount = channels.filter((channel) => channel.status === 'active').length;
   const pendingCount = reviews.filter((review) => ['pending', 'verifying', 'verified', 'approving'].includes(review.status)).length;
   const activeOffers = offers.filter((offer) => offer.offer_status === 'active').length;
-  const healthyChannels = health.flatMap((offer) => offer.channels || []).filter((channel) => channel.health_state === 'healthy').length;
+  const healthyChannels = offers.flatMap((offer) => offer.channels || []).filter((channel) => channel.health_state === 'healthy').length;
   const canSubmit = Boolean(account?.is_merchant || Number(account?.role) >= 10);
   const lifecycleRows = channelLifecycleRows(reviews, channels);
 
   return (
     <div className="view-shell merchant-view">
-      <PageHeader eyebrow={`商户中心 · 用户 ID ${account.id}`} title="商户经营概览" description="管理渠道、模型报价、运行健康、结算账本和人工提现。" actions={merchant && <Status>{merchant.merchant_status === 'active' ? '正常' : statusNames[merchant.merchant_status] || merchant.merchant_status}</Status>} />
+      <PageHeader eyebrow={`商户中心 · 用户 ID ${account.id}`} title="商户经营概览" description="管理渠道、上架模型、调用收入和人工提现。" actions={merchant && <Status>{merchant.merchant_status === 'active' ? '正常' : statusNames[merchant.merchant_status] || merchant.merchant_status}</Status>} />
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}
       {!error && !loading && !canSubmit && <InlineNotice tone="warning">当前商户资料尚未就绪</InlineNotice>}
 
@@ -160,54 +170,50 @@ export default function MerchantView({ account, openModal }) {
             <div className="metrics-grid">
               <Metric label="渠道总数" value={String(channels.length)} hint={`正常 ${activeCount} 个`} icon={Waypoints} />
               <Metric label="审核处理中" value={String(pendingCount)} hint="密钥提交后不再回显" icon={CloudCog} tone="amber" />
-              <Metric label="在售模型" value={String(activeOffers)} hint={`${offers.length} 个报价版本`} icon={ServerCog} tone="blue" />
-              <Metric label="健康渠道" value={String(healthyChannels)} hint={merchant?.merchant_status === 'active' ? '商户身份正常' : '商户身份待处理'} icon={HeartPulse} tone="green" />
+              <Metric label="上架模型" value={String(activeOffers)} hint={`共维护 ${offers.length} 个模型`} icon={ServerCog} tone="blue" />
+              <Metric label="健康渠道" value={String(healthyChannels)} hint="来自真实调用结果" icon={HeartPulse} tone="green" />
             </div>
             <div className="metrics-grid">
-              <Metric label="可提现余额" value={formatQuota(balance?.available_quota)} hint="提交后立即冻结" icon={WalletCards} />
+              <Metric label="可提现余额" value={formatQuota(balance?.available_quota)} hint="成功调用后自动入账" icon={WalletCards} />
               <Metric label="冻结余额" value={formatQuota(balance?.frozen_quota)} hint="等待审核或线下打款" icon={Landmark} tone="amber" />
-              <Metric label="累计结算" value={formatQuota(balance?.lifetime_earned_quota)} hint={`退款冲正 ${formatQuota(balance?.lifetime_refunded_quota)}`} icon={BadgeDollarSign} tone="green" />
+              <Metric label="累计收入" value={formatQuota(balance?.lifetime_earned_quota)} hint="商户获得调用金额的 90%" icon={BadgeDollarSign} tone="green" />
               <Metric label="累计提现" value={formatQuota(balance?.lifetime_paid_quota)} hint="只统计已确认打款" icon={Landmark} tone="blue" />
             </div>
           </>}
 
           {section === 'channels' && <Section title="渠道管理" description="审核中、已审核、不通过和已下架渠道统一展示" actions={canSubmit && <Button icon={Plus} variant="primary" onClick={() => openModal({ type: 'channel', models: models.filter((model) => model.status === 'active'), onSaved: load })}>提交新渠道</Button>}>
-            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>渠道</th><th>模型</th><th>类型</th><th>基础地址</th><th>状态</th><th>结果</th><th>操作</th></tr></thead><tbody>
-              {lifecycleRows.map((item) => <tr key={`${item.kind}-${item.id}`}><td><code>{item.id}</code></td><td><strong>{item.channel_name}</strong>{item.kind === 'channel' && <small>密钥 {item.credential_fingerprint || '-'}</small>}</td><td>{item.kind === 'review' && item.models?.length ? item.models.map((binding) => <span className="tag" key={binding.id}>{binding.upstream_model_name}</span>) : item.matched_models?.length ? item.matched_models.map((model) => <span className="tag" key={model}>{model}</span>) : (item.model || '-')}</td><td>{item.adapter_type || '-'}</td><td><code>{item.base_url}</code></td><td><Status>{item.kind === 'channel' && item.status === 'disabled' ? '已下架' : statusNames[item.status] || item.status}</Status></td><td>{item.verification_error || item.review_reason || '-'}</td><td>{item.kind === 'channel' ? <ActionMenu items={[{ label: '同步模型', disabled: busyChannel === item.id, onClick: () => syncChannel(item) }, { label: item.status === 'active' ? '下架' : '启用', disabled: busyChannel === item.id || item.status === 'archived', onClick: () => toggleChannel(item) }, { label: '删除', danger: true, disabled: busyChannel === item.id, onClick: () => archiveChannel(item) }]} /> : '-'}</td></tr>)}
+            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>渠道</th><th>模型</th><th>协议</th><th>基础地址</th><th>状态</th><th>结果</th><th>操作</th></tr></thead><tbody>
+              {lifecycleRows.map((item) => <tr key={`${item.kind}-${item.id}`}><td><code>{item.id}</code></td><td><strong>{item.channel_name}</strong>{item.kind === 'channel' && <small>密钥 {item.credential_fingerprint || '-'}</small>}</td><td>{item.kind === 'review' && item.models?.length ? item.models.map((binding) => <span className="tag" key={binding.id}>{binding.upstream_model_name}</span>) : item.matched_models?.length ? item.matched_models.map((model) => <span className="tag" key={model}>{model}</span>) : (item.model || '-')}</td><td>{item.adapter_type || '-'}</td><td><code>{item.base_url}</code></td><td><Status>{item.kind === 'channel' && item.status === 'disabled' ? '已下架' : statusNames[item.status] || item.status}</Status></td><td>{item.verification_error || item.review_reason || '-'}</td><td>{item.kind === 'channel' ? <ActionMenu items={[{ label: '同步模型', disabled: busyChannel === item.id, onClick: () => syncChannel(item) }, { label: item.status === 'active' ? '下架' : '重新启用', disabled: busyChannel === item.id || item.status === 'archived', onClick: () => toggleChannel(item) }, { label: '删除', danger: true, disabled: busyChannel === item.id, onClick: () => deleteChannel(item) }]} /> : <ActionMenu items={[['pending', 'verified'].includes(item.status) && { label: '撤销审核', onClick: () => deleteReview(item) }, item.status === 'rejected' && { label: '删除记录', danger: true, onClick: () => deleteReview(item) }]} />}</td></tr>)}
               {!loading && lifecycleRows.length === 0 && <tr><td className="table-message" colSpan="8">暂无渠道</td></tr>}
               {loading && <tr><td className="table-message" colSpan="8">正在读取渠道</td></tr>}
             </tbody></table></div>
           </Section>}
 
-          {section === 'offers' && <Section title="模型报价" actions={canSubmit && <Button disabled={!channels.length || !models.length} icon={BadgeDollarSign} variant="primary" onClick={() => openModal({ type: 'quote', models: models.filter((model) => model.status === 'active'), onSaved: load })}>设置报价</Button>}>
-            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>模型</th><th>倍率</th><th>调用次数</th><th>Token 用量</th><th>最后调用</th><th>可用渠道</th><th>状态</th><th>健康</th><th>操作</th></tr></thead><tbody>
-              {offers.map((offer) => <tr key={offer.offer_id}><td><code>{offer.offer_id}</code></td><td><strong>{offer.model}</strong><small>{protocolNames[offer.protocol] || offer.protocol}</small></td><td><span className="price-multiple">{formatMultiplier(offer.multiplier_bps)}</span></td><td><strong>{formatCompactCount(offer.call_count)}</strong></td><td><strong>{formatCompactCount(offer.token_usage)}</strong></td><td><strong>{formatLastCalled(offer.last_called_at)}</strong></td><td><strong>{offer.channel_count || 0} 个</strong><small>{offer.channels?.map((channel) => `${channel.channel_name} · ID ${channel.merchant_channel_id}`).join('、') || '-'}</small></td><td><Status>{offer.offer_status === 'active' ? '在售' : statusNames[offer.offer_status] || offer.offer_status}</Status></td><td><Status>{healthNames[offer.health_state] || offer.health_state}</Status></td><td><ActionMenu items={[{ label: '调整倍率', onClick: () => openModal({ type: 'quote', models, offer, onSaved: load }) }, { label: '取消报价', danger: true, onClick: () => retireOffer(offer) }]} /></td></tr>)}
-              {!loading && offers.length === 0 && <tr><td className="table-message" colSpan="10">暂无报价版本</td></tr>}
+          {section === 'offers' && <Section title="上架模型" description="一个模型统一设置价格，可由多个已审核渠道承载" actions={canSubmit && <Button disabled={!channels.length || !models.length} icon={BadgeDollarSign} variant="primary" onClick={() => openModal({ type: 'quote', models: models.filter((model) => model.status === 'active'), onSaved: load })}>设置模型价格</Button>}>
+            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>模型</th><th>价格倍率</th><th>调用次数</th><th>Token 用量</th><th>最后调用</th><th>可用渠道</th><th>状态</th><th>健康</th><th>操作</th></tr></thead><tbody>
+              {offers.map((offer) => <FragmentOfferRow key={offer.offer_id} offer={offer} expanded={expandedOffer === offer.offer_id} actions={<ActionMenu items={[{ label: '修改模型价格', onClick: () => openModal({ type: 'quote', models, offer, onSaved: load }) }, offer.offer_status === 'active' ? { label: '下架', onClick: () => changeOfferStatus(offer, false) } : { label: '上架', onClick: () => changeOfferStatus(offer, true) }, { label: expandedOffer === offer.offer_id ? '收起渠道状态' : '查看渠道状态', onClick: () => setExpandedOffer(expandedOffer === offer.offer_id ? 0 : offer.offer_id) }, { label: '删除', danger: true, onClick: () => deleteOffer(offer) }]} /> } />)}
+              {!loading && offers.length === 0 && <tr><td className="table-message" colSpan="10">暂无上架模型</td></tr>}
             </tbody></table></div>
           </Section>}
 
-          {section === 'health' && <Section title="渠道健康" description="健康渠道只由真实调用更新，冷却到期后执行一次恢复检测。">
-            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>模型</th><th>渠道</th><th>状态</th><th>可用率</th><th>P95 首字</th></tr></thead><tbody>
-              {health.flatMap((offer) => (offer.channels || []).map((channel) => <tr key={`${offer.offer_id}-${channel.merchant_channel_id}`}><td><code>{channel.merchant_channel_id}</code></td><td><strong>{offer.model}</strong></td><td>{channel.channel_name}</td><td><Status>{healthNames[channel.health_state] || channel.health_state}</Status></td><td>{formatAvailability(channel.availability_ppm)}</td><td>{formatLatency(channel.ttft_p95_ms)}</td></tr>))}
-              {!loading && health.flatMap((offer) => offer.channels || []).length === 0 && <tr><td className="table-message" colSpan="6">暂无健康记录</td></tr>}
-            </tbody></table></div>
-          </Section>}
-
-          {section === 'ledger' && <Section title="结算账本">
-            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>类型</th><th>关联对象</th><th>可用变动</th><th>冻结变动</th><th>变动后余额</th><th>时间</th></tr></thead><tbody>
-              {ledger.map((entry) => <tr key={entry.id}><td><code>{entry.id}</code></td><td><Status>{ledgerNames[entry.entry_type] || entry.entry_type}</Status></td><td><strong>{entry.model_name || entry.withdrawal_no || '-'}</strong><small>{entry.newapi_log_id ? `消费日志 ID ${entry.newapi_log_id}` : entry.description}</small></td><td>{formatQuotaDelta(entry.available_delta)}</td><td>{formatQuotaDelta(entry.frozen_delta)}</td><td>{formatQuota(entry.available_after)}<small>冻结 {formatQuota(entry.frozen_after)}</small></td><td>{formatDate(entry.created_at)}</td></tr>)}
-              {!loading && ledger.length === 0 && <tr><td className="table-message" colSpan="7">暂无结算账本记录</td></tr>}
-            </tbody></table></div>
-          </Section>}
+          {section === 'usage' && <UsageLogTable view="merchant" data={usage.data} error={usage.error} filters={<div className="filter-toolbar"><Select aria-label="筛选模型" onChange={(event) => { setUsageModel(event.target.value); setUsagePage(1); }} value={usageModel}><option value="all">全部模型</option>{(usage.data?.filters?.models || []).map((model) => <option key={model} value={model}>{model}</option>)}</Select></div>} loading={usage.loading} onRefresh={usage.load} page={usagePage} pageSize={usagePageSize} total={usage.data?.logs?.total} onPageChange={setUsagePage} onPageSizeChange={(nextPageSize) => { setUsagePageSize(nextPageSize); setUsagePage(1); }} />}
 
           {section === 'withdrawals' && <Section title="提现记录" actions={canSubmit && <Button disabled={!balance?.available_quota} icon={Landmark} variant="primary" onClick={() => openModal({ type: 'withdraw', balance, onSaved: load })}>申请提现</Button>}>
             <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>申请号</th><th>金额</th><th>收款方式</th><th>收款账户</th><th>状态</th><th>申请时间</th></tr></thead><tbody>
               {withdrawals.map((item) => <tr key={item.id}><td><code>{item.id}</code></td><td><code>{item.withdrawal_no}</code></td><td><strong>{formatQuota(item.amount_quota)}</strong></td><td>{item.recipient_type === 'alipay' ? '支付宝' : item.recipient_type === 'bank' ? '银行卡' : '其他'}</td><td><code>{item.recipient_account_masked}</code></td><td><Status>{withdrawalStatusNames[item.status] || item.status}</Status></td><td>{formatDate(item.created_at)}</td></tr>)}
               {!loading && withdrawals.length === 0 && <tr><td className="table-message" colSpan="7">暂无提现申请</td></tr>}
             </tbody></table></div>
+            <Pagination page={withdrawalPage} pageSize={withdrawalPageSize} total={withdrawalTotal} onPageChange={setWithdrawalPage} onPageSizeChange={(nextPageSize) => { setWithdrawalPageSize(nextPageSize); setWithdrawalPage(1); }} />
           </Section>}
         </div>
       </div>
     </div>
   );
+}
+
+function FragmentOfferRow({ offer, expanded, actions }) {
+  return <>
+    <tr><td><code>{offer.offer_id}</code></td><td><strong>{offer.model}</strong><small>{protocolNames[offer.protocol] || offer.protocol}</small></td><td><span className="price-multiple">{formatMultiplier(offer.multiplier_bps)}</span></td><td>{formatCompactCount(offer.call_count)}</td><td>{formatCompactCount(offer.token_usage)}</td><td>{formatLastCalled(offer.last_called_at)}</td><td>{offer.channel_count || 0} 个</td><td><Status>{offer.offer_status === 'active' ? '已上架' : statusNames[offer.offer_status] || offer.offer_status}</Status></td><td><Status>{healthNames[offer.health_state] || offer.health_state}</Status></td><td>{actions}</td></tr>
+    {expanded && <tr className="offer-channel-detail"><td colSpan="10"><div className="table-wrap"><table className="data-table compact-table"><thead><tr><th>渠道 ID</th><th>渠道名称</th><th>状态</th><th>可用率</th><th>P95 首字</th></tr></thead><tbody>{(offer.channels || []).map((channel) => <tr key={channel.merchant_channel_id}><td><code>{channel.merchant_channel_id}</code></td><td>{channel.channel_name}</td><td><Status>{healthNames[channel.health_state] || channel.health_state}</Status></td><td>{formatAvailability(channel.availability_ppm)}</td><td>{formatLatency(channel.ttft_p95_ms)}</td></tr>)}</tbody></table></div></td></tr>}
+  </>;
 }

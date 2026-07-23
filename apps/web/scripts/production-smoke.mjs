@@ -92,11 +92,11 @@ async function verifyViewport(browser, viewport, suffix) {
   await merchantSidebar.waitFor();
   const merchantLabels = await merchantSidebar.getByRole('button').allTextContents();
   assert(
-    merchantLabels.join('|') === '经营概览|渠道管理|模型报价|健康状态|结算账本|提现记录',
+    merchantLabels.join('|') === '经营概览|渠道管理|上架模型|调用记录|提现记录',
     `${suffix} merchant sidebar mismatch`,
   );
-  await merchantSidebar.getByRole('button', { name: '模型报价', exact: true }).click();
-  await page.getByRole('heading', { name: '模型报价' }).waitFor();
+  await merchantSidebar.getByRole('button', { name: '上架模型', exact: true }).click();
+  await page.getByRole('heading', { name: '上架模型' }).waitFor();
   let screenshot = path.join(outputDir, `merchant-${suffix}.png`);
   await page.screenshot({ path: screenshot, fullPage: true });
   assert((await stat(screenshot)).size > 15_000, `${suffix} merchant screenshot too small`);

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, Coins, Gauge, RefreshCw } from 'lucide-react';
 import { apiRequest, formatQuota } from '../api';
-import { Button, EmptyNotice, InlineNotice, Pagination, Section, Status } from '../ui';
+import { Button, EmptyNotice, InlineNotice, Pagination, Section } from '../ui';
 
 const numberFormatter = new Intl.NumberFormat('zh-CN');
 
@@ -20,26 +20,6 @@ function dayLabel(value) {
   return `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`;
 }
 
-function parsedOther(log) {
-  if (log?.other && typeof log.other === 'object') return log.other;
-  if (typeof log?.other !== 'string' || !log.other.trim()) return {};
-  try {
-    return JSON.parse(log.other);
-  } catch {
-    return {};
-  }
-}
-
-function cacheTokens(log) {
-  return Number(log?.cache_tokens ?? parsedOther(log).cache_tokens ?? 0);
-}
-
-function requestType(type) {
-  if (Number(type) === 6) return '已退款';
-  if (Number(type) === 2) return '已结算';
-  return `类型 ${type}`;
-}
-
 function normalizeTrend(items) {
   const points = new Map();
   for (const item of Array.isArray(items) ? items : []) {
@@ -50,6 +30,10 @@ function normalizeTrend(items) {
     points.set(key, current);
   }
   return [...points.values()].sort((left, right) => Number(left.created_at) - Number(right.created_at));
+}
+
+function tokenDetail(log) {
+  return <span className="usage-token-detail"><span>输入 {numberFormatter.format(Number(log.prompt_tokens || 0))}</span><span>输出 {numberFormatter.format(Number(log.completion_tokens || 0))}</span></span>;
 }
 
 export function useUsage(endpoint) {
@@ -63,7 +47,7 @@ export function useUsage(endpoint) {
     try {
       setData(await apiRequest(endpoint));
     } catch (requestError) {
-      setError(requestError.message || '读取用量数据失败');
+      setError(requestError.message || '读取调用数据失败');
     } finally {
       setLoading(false);
     }
@@ -79,13 +63,13 @@ export function UsageTrend({ data, loading, error, title = '用量趋势', actio
   const stats = data?.stats || {};
 
   return (
-    <Section title={title} description="最近 7 天最终结算额度" actions={actions}>
+    <Section title={title} description="最近 7 天调用额度" actions={actions}>
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}
-      {!error && !loading && points.length === 0 && <EmptyNotice title="暂无结算趋势" description="产生模型调用后将在这里显示。" />}
+      {!error && !loading && points.length === 0 && <EmptyNotice title="暂无用量趋势" description="产生模型调用后将在这里显示。" />}
       {loading && <div className="table-message">正在读取用量趋势</div>}
       {points.length > 0 && <>
         <div className="usage-summary-row">
-          <span><Coins size={15} />结算额度<strong>{formatQuota(stats.quota)}</strong></span>
+          <span><Coins size={15} />消费额度<strong>{formatQuota(stats.quota)}</strong></span>
           <span><Activity size={15} />当前 RPM<strong>{numberFormatter.format(Number(stats.rpm || 0))}</strong></span>
           <span><Gauge size={15} />当前 TPM<strong>{numberFormatter.format(Number(stats.tpm || 0))}</strong></span>
         </div>
@@ -104,33 +88,38 @@ export function UsageTrend({ data, loading, error, title = '用量趋势', actio
   );
 }
 
-export function UsageLogTable({ data, loading, error, admin = false, title = '最近调用', onRefresh, page, pageSize, total, onPageChange, onPageSizeChange }) {
+export function UsageLogTable({ data, loading, error, view = 'user', title = '调用记录', filters, onRefresh, page, pageSize, total, onPageChange, onPageSizeChange }) {
   const logs = data?.logs?.items || [];
   const pageInfo = data?.logs || {};
+  const isAdmin = view === 'admin';
+  const isMerchant = view === 'merchant';
+  const columnCount = isAdmin ? 11 : 9;
   return (
     <Section
       title={title}
-      description="金额、退款与缓存命中均来自最终消费日志"
+      description="仅展示成功消费记录，明细保留全部历史"
       actions={onRefresh && <Button icon={RefreshCw} onClick={onRefresh}>刷新</Button>}
     >
+      {filters}
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}
       <div className="table-wrap"><table className="data-table usage-log-table"><thead><tr>
-        <th>ID</th><th>时间</th>{admin && <th>用户</th>}<th>模型</th><th>密钥</th><th>Token</th><th>缓存</th><th>结算额度</th><th>请求编号</th><th>状态</th>
+        <th>ID</th><th>时间</th>{isAdmin && <th>用户 ID</th>}<th>模型</th>{!isMerchant && <th>商户</th>}{(isAdmin || isMerchant) && <th>渠道</th>}{!isAdmin && !isMerchant && <th>密钥</th>}<th>Token</th><th>缓存 Token</th><th>{isMerchant ? '自动入账' : '消费金额'}</th><th>请求编号</th>
       </tr></thead><tbody>
         {logs.map((log) => <tr key={log.id || log.request_id}>
           <td><code>{log.id || '-'}</code></td>
           <td>{logTime(log.created_at)}</td>
-          {admin && <td><strong>{log.username || `用户 ID ${log.user_id || '-'}`}</strong></td>}
+          {isAdmin && <td><code>{log.user_id || '-'}</code></td>}
           <td><strong>{log.model_name || '平台路由模型'}</strong></td>
-          <td>{log.token_name || (log.token_id ? `密钥 ${log.token_id}` : '-')}</td>
-          <td><strong>{numberFormatter.format(Number(log.prompt_tokens || 0) + Number(log.completion_tokens || 0))}</strong><small>输入 {numberFormatter.format(Number(log.prompt_tokens || 0))} · 输出 {numberFormatter.format(Number(log.completion_tokens || 0))}</small></td>
-          <td>{cacheTokens(log) > 0 ? `缓存 ${numberFormatter.format(cacheTokens(log))} Token` : '-'}</td>
-          <td>{formatQuota(Number(log.type) === 6 ? -Math.abs(Number(log.quota || 0)) : log.quota)}</td>
+          {!isMerchant && <td><strong>{log.merchant_name || '-'}</strong><small>用户 ID {log.merchant_user_id || '-'}</small></td>}
+          {(isAdmin || isMerchant) && <td><strong>{log.channel_name || '-'}</strong><small>渠道 ID {log.channel_id || '-'}</small></td>}
+          {!isAdmin && !isMerchant && <td>{log.token_id ? `密钥 ID ${log.token_id}` : '-'}</td>}
+          <td>{tokenDetail(log)}</td>
+          <td>{numberFormatter.format(Number(log.cache_tokens || 0))}</td>
+          <td>{formatQuota(isMerchant ? log.merchant_income_quota : log.quota)}</td>
           <td><code>{log.request_id || '-'}</code></td>
-          <td><Status>{requestType(log.type)}</Status></td>
         </tr>)}
-        {!loading && logs.length === 0 && <tr><td className="table-message" colSpan={admin ? 10 : 9}>{error || '暂无调用记录'}</td></tr>}
-        {loading && <tr><td className="table-message" colSpan={admin ? 10 : 9}>正在读取调用日志</td></tr>}
+        {!loading && logs.length === 0 && <tr><td className="table-message" colSpan={columnCount}>{error || '暂无调用记录'}</td></tr>}
+        {loading && <tr><td className="table-message" colSpan={columnCount}>正在读取调用记录</td></tr>}
       </tbody></table></div>
       <Pagination
         page={page ?? pageInfo.page ?? 1}

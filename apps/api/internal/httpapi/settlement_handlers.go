@@ -29,22 +29,6 @@ func (s *server) merchantBalance(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": balance})
 }
 
-func (s *server) merchantLedger(w http.ResponseWriter, r *http.Request) {
-	_, session, _, ok := s.requireMerchant(w, r)
-	if !ok || !s.settlementReady(w) {
-		return
-	}
-	page, pageSize := pagination(r)
-	items, total, err := s.services.Settlement.MerchantLedger(r.Context(), session.UserID, page, pageSize)
-	if err != nil {
-		s.writeSettlementError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{
-		"page": page, "page_size": pageSize, "total": total, "items": items,
-	}})
-}
-
 func (s *server) merchantWithdrawals(w http.ResponseWriter, r *http.Request) {
 	_, session, _, ok := s.requireMerchant(w, r)
 	if !ok || !s.settlementReady(w) {
@@ -133,55 +117,6 @@ func (s *server) adminWithdrawals(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{
 		"page": page, "page_size": pageSize, "total": total, "items": items,
 	}})
-}
-
-func (s *server) adminSettlementReconciliation(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := s.requireSession(w, r, roleAdmin); !ok || !s.settlementReady(w) {
-		return
-	}
-	status := strings.TrimSpace(r.URL.Query().Get("status"))
-	if status != "" && !map[string]bool{"open": true, "resolved": true, "ignored": true}[status] {
-		writeAPIError(w, http.StatusBadRequest, "invalid_reconciliation_status", "对账状态筛选无效")
-		return
-	}
-	page, pageSize := pagination(r)
-	items, total, err := s.services.Settlement.ListSettlementReconciliation(r.Context(), page, pageSize, status)
-	if err != nil {
-		s.writeSettlementError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{
-		"page": page, "page_size": pageSize, "total": total, "items": items,
-	}})
-}
-
-func (s *server) adminIgnoreSettlementReconciliation(w http.ResponseWriter, r *http.Request) {
-	_, session, ok := s.requireSession(w, r, roleAdmin)
-	if !ok || !s.requireSameOrigin(w, r) || !s.settlementReady(w) {
-		return
-	}
-	id, ok := withdrawalPathID(w, r)
-	if !ok {
-		return
-	}
-	var request struct {
-		Reason string `json:"reason"`
-	}
-	if err := decodeJSON(r, &request); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_reconciliation_resolution", "对账处置参数无效")
-		return
-	}
-	request.Reason = strings.TrimSpace(request.Reason)
-	if len(request.Reason) < 3 || len(request.Reason) > 500 {
-		writeAPIError(w, http.StatusBadRequest, "invalid_reconciliation_resolution", "对账处置原因长度无效")
-		return
-	}
-	item, err := s.services.Settlement.IgnoreSettlementReconciliation(r.Context(), id, session.UserID, request.Reason, time.Now().UTC())
-	if err != nil {
-		s.writeSettlementError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": item})
 }
 
 func (s *server) adminApproveWithdrawal(w http.ResponseWriter, r *http.Request) {

@@ -87,6 +87,37 @@ func TestCreateOfferRequiresOwnedActiveChannelAndCurrentOfficialPrice(t *testing
 	}
 }
 
+func TestOfferLifecycleKeepsInactiveVisibleAndDeletedHidden(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewSQLRoutingStore(database)
+
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE offer_versions offer")).
+		WithArgs(7, int64(61)).WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := store.RetireOffer(context.Background(), 7, 61); err != nil {
+		t.Fatalf("下架模型失败：%v", err)
+	}
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT offer.multiplier_bps, offer.status")).
+		WithArgs(7, int64(61)).WillReturnRows(sqlmock.NewRows([]string{"multiplier_bps", "status"}).AddRow(8500, "inactive"))
+	state, err := store.MerchantOfferState(context.Background(), 7, 61)
+	if err != nil || state.MultiplierBPS != 8500 || state.Status != "inactive" {
+		t.Fatalf("读取下架模型状态=%+v err=%v", state, err)
+	}
+
+	mock.ExpectExec(regexp.QuoteMeta("SET status = 'deleted'")).
+		WithArgs(7, int64(61)).WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := store.DeleteMerchantOffer(context.Background(), 7, 61); err != nil {
+		t.Fatalf("删除模型失败：%v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestActivateOfferRetiresPreviousVersionWithoutSchedulingHealthyProbe(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -99,8 +130,8 @@ func TestActivateOfferRetiresPreviousVersionWithoutSchedulingHealthyProbe(t *tes
 		WillReturnRows(sqlmock.NewRows([]string{"previous_offer_version_id", "merchant_channel_id", "canonical_model_id"}).AddRow(40, 51, 61))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE offer_versions SET status = 'inactive'")).
 		WithArgs(int64(40)).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE offer_versions SET status = 'active'")).
-		WithArgs(int64(42)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE offer_versions")).
+		WithArgs(int64(42), "active").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
 	store := NewSQLRoutingStore(database)

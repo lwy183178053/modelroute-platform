@@ -14,6 +14,8 @@ type routingRepositoryStub struct {
 	createModel   func(context.Context, CreateCanonicalModelCommand) (CanonicalModel, error)
 	createOffer   func(context.Context, CreateOfferCommand) (OfferVersion, error)
 	retireOffer   func(context.Context, int, int64) error
+	offerState    func(context.Context, int, int64) (MerchantOfferState, error)
+	deleteOffer   func(context.Context, int, int64) error
 	bindPolicy    func(context.Context, int, int, string) (RoutingPolicy, error)
 	updatePolicy  func(context.Context, int, int, RoutingPolicyInput) (RoutingPolicy, error)
 	revokeToken   func(context.Context, int, int) error
@@ -73,6 +75,20 @@ func (s *routingRepositoryStub) RetireOffer(ctx context.Context, userID int, mod
 	return s.retireOffer(ctx, userID, modelID)
 }
 
+func (s *routingRepositoryStub) MerchantOfferState(ctx context.Context, userID int, modelID int64) (MerchantOfferState, error) {
+	if s.offerState == nil {
+		return MerchantOfferState{}, ErrRoutingNotFound
+	}
+	return s.offerState(ctx, userID, modelID)
+}
+
+func (s *routingRepositoryStub) DeleteMerchantOffer(ctx context.Context, userID int, modelID int64) error {
+	if s.deleteOffer == nil {
+		return ErrRoutingNotFound
+	}
+	return s.deleteOffer(ctx, userID, modelID)
+}
+
 func (s *routingRepositoryStub) DeleteCanonicalModel(ctx context.Context, modelID int64) (string, error) {
 	if s.deleteModel == nil {
 		return "", ErrRoutingNotFound
@@ -81,11 +97,13 @@ func (s *routingRepositoryStub) DeleteCanonicalModel(ctx context.Context, modelI
 }
 
 type offerSynchronizerStub struct {
-	offerID int64
+	offerID  int64
+	activate bool
 }
 
-func (s *offerSynchronizerStub) SyncOffer(_ context.Context, offerID int64) error {
+func (s *offerSynchronizerStub) SyncOffer(_ context.Context, offerID int64, activate bool) error {
 	s.offerID = offerID
+	s.activate = activate
 	return nil
 }
 
@@ -216,30 +234,82 @@ func TestMerchantOfferActivatesOnlyAfterNewAPISync(t *testing.T) {
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusCreated || synchronizer.offerID != 42 {
+	if response.Code != http.StatusCreated || synchronizer.offerID != 42 || !synchronizer.activate {
 		t.Fatalf("报价响应=%d %s，同步=%+v", response.Code, response.Body.String(), synchronizer)
 	}
 }
 
-func TestMerchantCanRetireActiveOffer(t *testing.T) {
+func TestMerchantCanChangeInactiveOfferPriceWithoutListingIt(t *testing.T) {
 	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	repository := &routingRepositoryStub{}
+	repository.offerState = func(_ context.Context, userID int, modelID int64) (MerchantOfferState, error) {
+		return MerchantOfferState{MultiplierBPS: 8500, Status: "inactive"}, nil
+	}
+	repository.createOffer = func(_ context.Context, command CreateOfferCommand) (OfferVersion, error) {
+		return OfferVersion{ID: 43, CanonicalModelID: command.CanonicalModelID, MultiplierBPS: command.MultiplierBPS, Status: "syncing"}, nil
+	}
+	synchronizer := &offerSynchronizerStub{}
+	services.Routing = repository
+	services.OfferSync = synchronizer
+	token := createPlatformSession(t, services, 7, 1)
+	request := httptest.NewRequest(http.MethodPut, "/api/merchant/offers/61", strings.NewReader(`{"multiplier_bps":9000}`))
+	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
+	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
+	response := httptest.NewRecorder()
+	NewServerWithServices("test", Dependencies{}, services).ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || synchronizer.offerID != 43 || synchronizer.activate {
+		t.Fatalf("下架模型改价响应=%d %s，同步=%+v", response.Code, response.Body.String(), synchronizer)
+	}
+}
+
+func TestMerchantCanChangeOfferListingStateAndDeleteIt(t *testing.T) {
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	repository := &routingRepositoryStub{}
+	repository.offerState = func(_ context.Context, userID int, modelID int64) (MerchantOfferState, error) {
+		return MerchantOfferState{MultiplierBPS: 8500, Status: "inactive"}, nil
+	}
+	repository.createOffer = func(_ context.Context, command CreateOfferCommand) (OfferVersion, error) {
+		return OfferVersion{ID: 44, CanonicalModelID: command.CanonicalModelID, MultiplierBPS: command.MultiplierBPS, Status: "syncing"}, nil
+	}
 	repository.retireOffer = func(_ context.Context, userID int, modelID int64) error {
 		if userID != 7 || modelID != 61 {
 			t.Fatalf("取消报价参数 user=%d model=%d", userID, modelID)
 		}
 		return nil
 	}
+	repository.deleteOffer = func(_ context.Context, userID int, modelID int64) error {
+		if userID != 7 || modelID != 61 {
+			t.Fatalf("删除模型参数 user=%d model=%d", userID, modelID)
+		}
+		return nil
+	}
+	synchronizer := &offerSynchronizerStub{}
 	services.Routing = repository
+	services.OfferSync = synchronizer
 	token := createPlatformSession(t, services, 7, 1)
 	handler := NewServerWithServices("test", Dependencies{}, services)
-	request := httptest.NewRequest(http.MethodDelete, "/api/merchant/offers/61", nil)
-	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
-	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("取消报价响应=%d %s", response.Code, response.Body.String())
+
+	for _, testCase := range []struct {
+		method string
+		path   string
+		body   string
+		status string
+	}{
+		{method: http.MethodPost, path: "/api/merchant/offers/61/status", body: `{"enabled":true}`, status: "active"},
+		{method: http.MethodPost, path: "/api/merchant/offers/61/status", body: `{"enabled":false}`, status: "inactive"},
+		{method: http.MethodDelete, path: "/api/merchant/offers/61", status: "deleted"},
+	} {
+		request := httptest.NewRequest(testCase.method, testCase.path, strings.NewReader(testCase.body))
+		request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
+		request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"`+testCase.status+`"`) {
+			t.Fatalf("模型状态响应=%d %s", response.Code, response.Body.String())
+		}
+	}
+	if synchronizer.offerID != 44 || !synchronizer.activate {
+		t.Fatalf("重新上架没有同步最新报价：%+v", synchronizer)
 	}
 }
 

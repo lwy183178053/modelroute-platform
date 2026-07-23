@@ -110,7 +110,7 @@ function QuoteModal({ close, config, notify }) {
   };
   const submit = async () => {
     if (!Number.isInteger(multiplierBPS) || multiplierBPS < 0 || multiplierBPS > 50_000) {
-      setError('报价倍率必须在 0.00x 到 5.00x 之间');
+      setError('价格倍率必须在 0.00x 到 5.00x 之间');
       return;
     }
     setBusy(true);
@@ -118,24 +118,24 @@ function QuoteModal({ close, config, notify }) {
     try {
       await apiRequest(`/api/merchant/offers/${modelID}`, { method: 'PUT', body: { multiplier_bps: multiplierBPS } });
       await config.onSaved?.();
-      notify('新报价版本已生效');
+      notify('模型价格已生效');
       close();
     } catch (requestError) {
-      setError(requestError.message || '保存报价失败');
+      setError(requestError.message || '保存模型价格失败');
     } finally {
       setBusy(false);
     }
   };
   return (
-    <Modal title="设置模型报价" description="同一模型只保留一个在售报价，并自动应用到该模型的全部已审核渠道。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !modelID} icon={Check} variant="primary" onClick={submit}>{busy ? '同步中' : '保存报价'}</Button></>}>
+    <Modal title="设置模型价格" description="同一模型只保留一个价格，并自动应用到该模型的全部已审核渠道。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !modelID} icon={Check} variant="primary" onClick={submit}>{busy ? '同步中' : '保存模型价格'}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
       <div className="form-grid two-column">
         <Field label="模型厂商"><Select value={provider} onChange={(event) => { const nextProvider = event.target.value; setProvider(nextProvider); setModelID(String((config.models || []).find((model) => model.provider === nextProvider)?.id || '')); }}>{providers.map((item) => <option key={item} value={item}>{item}</option>)}</Select></Field>
         <Field label="模型型号"><Select value={modelID} onChange={(event) => setModelID(event.target.value)}>{providerModels.map((model) => <option key={model.id} value={model.id}>{model.public_name}</option>)}</Select></Field>
       </div>
       <div className="quote-summary"><div><span>价格版本</span><strong>v{selectedModel?.price?.version || '-'}</strong></div><div><span>首档基础价格</span><strong>{selectedTier ? `${formatPriceMicros(selectedTier.input_price_micros)} 输入${selectedTier.output_price_micros == null ? '' : ` / ${formatPriceMicros(selectedTier.output_price_micros)} 输出`}` : '图片价格矩阵'}</strong></div><div><span>倍率后价格</span><strong>{selectedTier ? `${formatAdjusted(selectedTier.input_price_micros)} 输入${selectedTier.output_price_micros == null ? '' : ` / ${formatAdjusted(selectedTier.output_price_micros)} 输出`}` : multiplierBPS === 0 ? '免费' : '按图片价格矩阵计算'}</strong></div></div>
-      <Field label="报价倍率" hint="允许范围 0.00x - 5.00x"><div className="suffix-input"><TextInput max="5" min="0" onChange={(event) => setMultiplier(event.target.value)} step="0.01" type="number" value={multiplier} /><span>x</span></div></Field>
-      <InlineNotice>调价将创建不可变的新报价版本；已进入请求的价格不会变化。</InlineNotice>
+      <Field label="价格倍率" hint="允许范围 0.00x - 5.00x"><div className="suffix-input"><TextInput max="5" min="0" onChange={(event) => setMultiplier(event.target.value)} step="0.01" type="number" value={multiplier} /><span>x</span></div></Field>
+      <InlineNotice>调价会生成新的价格版本；已进入请求的价格不会变化。</InlineNotice>
     </Modal>
   );
 }
@@ -431,7 +431,7 @@ function WithdrawalModal({ close, config, notify }) {
   );
 }
 
-function SettlementActionModal({ close, config, notify }) {
+function WithdrawalActionModal({ close, config, notify }) {
   const action = config.action;
   const [reason, setReason] = useState('');
   const [reference, setReference] = useState('');
@@ -442,17 +442,13 @@ function SettlementActionModal({ close, config, notify }) {
     approve: { title: '通过提现申请', submit: '确认通过', notice: '提现申请已通过，等待线下打款' },
     reject: { title: '驳回提现申请', submit: '确认驳回', notice: '提现申请已驳回并释放冻结余额' },
     paid: { title: '确认线下打款', submit: '确认已打款', notice: '线下打款凭证已登记' },
-    ignore: { title: '忽略对账异常', submit: '确认忽略', notice: '对账异常已标记为忽略' },
   };
   const definition = definitions[action];
   const submit = async () => {
     setBusy(true);
     setError('');
     try {
-      const reconciliation = action === 'ignore';
-      const path = reconciliation
-        ? `/api/admin/settlement-reconciliation/${config.item.id}/ignore`
-        : `/api/admin/withdrawals/${config.item.id}/${action}`;
+      const path = `/api/admin/withdrawals/${config.item.id}/${action}`;
       const body = action === 'paid'
         ? { payout_reference: reference.trim(), payout_proof: proof.trim() }
         : { reason: reason.trim() };
@@ -467,9 +463,9 @@ function SettlementActionModal({ close, config, notify }) {
     }
   };
   return (
-    <Modal title={definition.title} description={action === 'ignore' ? `消费日志 ID ${config.item.newapi_log_id}` : `${config.item.merchant_name} · ${config.item.withdrawal_no}`} onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy} icon={Check} onClick={submit} variant="primary">{busy ? '处理中' : definition.submit}</Button></>}>
+    <Modal title={definition.title} description={`${config.item.merchant_name} · ${config.item.withdrawal_no}`} onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy} icon={Check} onClick={submit} variant="primary">{busy ? '处理中' : definition.submit}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
-      {action === 'paid' ? <><Field label="打款流水号"><TextInput maxLength="200" onChange={(event) => setReference(event.target.value)} value={reference} /></Field><Field label="凭证说明"><textarea className="textarea" maxLength="2000" onChange={(event) => setProof(event.target.value)} rows="4" value={proof} /></Field></> : <Field label={action === 'ignore' ? '处置原因' : '审核原因'}><textarea className="textarea" maxLength="500" onChange={(event) => setReason(event.target.value)} rows="4" value={reason} /></Field>}
+      {action === 'paid' ? <><Field label="打款流水号"><TextInput maxLength="200" onChange={(event) => setReference(event.target.value)} value={reference} /></Field><Field label="凭证说明"><textarea className="textarea" maxLength="2000" onChange={(event) => setProof(event.target.value)} rows="4" value={proof} /></Field></> : <Field label="审核原因"><textarea className="textarea" maxLength="500" onChange={(event) => setReason(event.target.value)} rows="4" value={reason} /></Field>}
     </Modal>
   );
 }
@@ -568,6 +564,6 @@ export default function Modals({ modal, close, notify, onAuthenticated, setModal
   if (type === 'merchantApply') return <MerchantApplyModal close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
   if (type === 'channel') return <ChannelModal close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
   if (type === 'withdraw') return <WithdrawalModal close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
-  if (type === 'withdrawalAction' || type === 'reconciliationAction') return <SettlementActionModal close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
+  if (type === 'withdrawalAction') return <WithdrawalActionModal close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
   return null;
 }

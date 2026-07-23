@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   ArrowUpRight,
@@ -15,7 +15,7 @@ import {
   WalletCards,
 } from 'lucide-react';
 import { apiRequest, formatQuota } from '../api';
-import { ActionMenu, Button, CopyValue, Field, InlineNotice, Metric, PageHeader, Pagination, Section, Status, TextInput } from '../ui';
+import { ActionMenu, Button, CopyValue, Field, InlineNotice, Metric, PageHeader, Pagination, Section, Select, Status, TextInput } from '../ui';
 import { UsageLogTable, UsageTrend, useUsage } from './UsagePanels';
 
 const consoleSections = [
@@ -68,9 +68,18 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
   const [paymentTotal, setPaymentTotal] = useState(0);
   const [usagePage, setUsagePage] = useState(1);
   const [usagePageSize, setUsagePageSize] = useState(20);
+  const [usageModel, setUsageModel] = useState('all');
+  const [usageMerchant, setUsageMerchant] = useState('');
   const [redemptionCode, setRedemptionCode] = useState('');
   const [redeeming, setRedeeming] = useState(false);
-  const usage = useUsage(`/api/usage?p=${usagePage}&page_size=${usagePageSize}`);
+  const usageEndpoint = useMemo(() => {
+    const query = new URLSearchParams({ p: String(usagePage), page_size: String(usagePageSize) });
+    if (usageModel !== 'all') query.set('model_name', usageModel);
+    const merchantMatch = usageMerchant.trim().match(/(?:^|用户 ID\s*)(\d+)$/);
+    if (merchantMatch) query.set('merchant_user_id', merchantMatch[1]);
+    return `/api/usage?${query}`;
+  }, [usageMerchant, usageModel, usagePage, usagePageSize]);
+  const usage = useUsage(usageEndpoint);
   const displayName = account.display_name || account.username;
 
   const loadKeys = useCallback(async () => {
@@ -190,7 +199,7 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
           {section === 'overview' && <>
             <div className="metrics-grid">
               <Metric label="账户余额" value={formatQuota(account.quota)} hint={`用户 ID ${account.id}`} icon={WalletCards} />
-              <Metric label="累计消费" value={formatQuota(account.used_quota)} hint="含缓存计费与退款" icon={Coins} tone="blue" />
+              <Metric label="累计消费" value={formatQuota(account.used_quota)} hint="包含缓存计费" icon={Coins} tone="blue" />
               <Metric label="累计请求" value={String(account.request_count || 0)} hint="全部 API 密钥" icon={Activity} tone="green" />
               <Metric label="账号身份" value={accountTypeName} hint="当前有效身份" icon={Store} tone="amber" />
             </div>
@@ -216,7 +225,21 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
             </div>
           </Section>}
 
-          {section === 'usage' && <UsageLogTable data={usage.data} error={usage.error} loading={usage.loading} onRefresh={usage.load} page={usagePage} pageSize={usagePageSize} total={usage.data?.logs?.total} onPageChange={setUsagePage} onPageSizeChange={(nextPageSize) => { setUsagePageSize(nextPageSize); setUsagePage(1); }} />}
+          {section === 'usage' && <UsageLogTable
+            data={usage.data}
+            error={usage.error}
+            filters={<div className="filter-toolbar">
+              <Select aria-label="筛选模型" onChange={(event) => { setUsageModel(event.target.value); setUsagePage(1); }} value={usageModel}><option value="all">全部模型</option>{(usage.data?.filters?.models || []).map((model) => <option key={model} value={model}>{model}</option>)}</Select>
+              <div className="filter-search"><TextInput aria-label="搜索商户" list="usage-merchant-options" onChange={(event) => { setUsageMerchant(event.target.value); setUsagePage(1); }} placeholder="输入商户名称或用户 ID" value={usageMerchant} /><datalist id="usage-merchant-options">{(usage.data?.filters?.merchants || []).map((item) => <option key={item.user_id} value={`${item.name} · 用户 ID ${item.user_id}`} />)}</datalist></div>
+            </div>}
+            loading={usage.loading}
+            onRefresh={usage.load}
+            page={usagePage}
+            pageSize={usagePageSize}
+            total={usage.data?.logs?.total}
+            onPageChange={setUsagePage}
+            onPageSizeChange={(nextPageSize) => { setUsagePageSize(nextPageSize); setUsagePage(1); }}
+          />}
 
           {section === 'recharge' && <>
             <Section title="账户充值" actions={<Button icon={Plus} variant="primary" onClick={() => openModal({ type: 'recharge', onSaved: loadPaymentOrders })}>立即充值</Button>}>

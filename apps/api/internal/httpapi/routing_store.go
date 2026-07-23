@@ -72,6 +72,16 @@ type RoutingRepository interface {
 	ImagePriceItems(context.Context, int64) ([]ImagePriceItem, error)
 }
 
+type MerchantOfferState struct {
+	MultiplierBPS int    `json:"multiplier_bps"`
+	Status        string `json:"status"`
+}
+
+type OfferLifecycleRepository interface {
+	MerchantOfferState(context.Context, int, int64) (MerchantOfferState, error)
+	DeleteMerchantOffer(context.Context, int, int64) error
+}
+
 type MarketOffer struct {
 	OfferID         int64            `json:"offer_id"`
 	MerchantID      int64            `json:"merchant_id"`
@@ -178,7 +188,7 @@ type RoutingPolicy struct {
 }
 
 type OfferSynchronizer interface {
-	SyncOffer(context.Context, int64) error
+	SyncOffer(context.Context, int64, bool) error
 }
 
 type OfferVersion struct {
@@ -407,7 +417,61 @@ WHERE offer.merchant_profile_id = merchant.id
 	return nil
 }
 
+func (s *SQLRoutingStore) MerchantOfferState(ctx context.Context, userID int, modelID int64) (MerchantOfferState, error) {
+	if userID <= 0 || modelID <= 0 {
+		return MerchantOfferState{}, ErrRoutingInvalidState
+	}
+	var state MerchantOfferState
+	err := s.database.QueryRowContext(ctx, `
+SELECT offer.multiplier_bps, offer.status
+FROM offer_versions offer
+JOIN merchant_profiles merchant ON merchant.id = offer.merchant_profile_id
+WHERE merchant.newapi_user_id = $1 AND offer.canonical_model_id = $2
+ORDER BY offer.version DESC
+LIMIT 1
+`, userID, modelID).Scan(&state.MultiplierBPS, &state.Status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return MerchantOfferState{}, ErrRoutingNotFound
+	}
+	if err != nil {
+		return MerchantOfferState{}, fmt.Errorf("读取商户模型状态：%w", err)
+	}
+	return state, nil
+}
+
+func (s *SQLRoutingStore) DeleteMerchantOffer(ctx context.Context, userID int, modelID int64) error {
+	if userID <= 0 || modelID <= 0 {
+		return ErrRoutingInvalidState
+	}
+	result, err := s.database.ExecContext(ctx, `
+WITH latest AS (
+    SELECT offer.id
+    FROM offer_versions offer
+    JOIN merchant_profiles merchant ON merchant.id = offer.merchant_profile_id
+    WHERE merchant.newapi_user_id = $1 AND offer.canonical_model_id = $2
+      AND offer.status <> 'deleted'
+    ORDER BY offer.version DESC
+    LIMIT 1
+)
+UPDATE offer_versions
+SET status = 'deleted', retired_at = COALESCE(retired_at, now()), sync_error = NULL
+WHERE id = (SELECT id FROM latest)
+  AND status IN ('active', 'inactive', 'sync_failed')
+`, userID, modelID)
+	if err != nil {
+		return fmt.Errorf("删除商户上架模型：%w", err)
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return ErrRoutingNotFound
+	}
+	return nil
+}
+
 func (s *SQLRoutingStore) ActivateOffer(ctx context.Context, offerID int64) error {
+	return s.FinalizeOffer(ctx, offerID, true)
+}
+
+func (s *SQLRoutingStore) FinalizeOffer(ctx context.Context, offerID int64, activate bool) error {
 	tx, err := s.database.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("开始报价激活事务：%w", err)
@@ -432,7 +496,18 @@ FOR UPDATE
 			return fmt.Errorf("退役旧报价：%w", err)
 		}
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE offer_versions SET status = 'active', activated_at = now(), sync_error = NULL WHERE id = $1 AND status = 'syncing'`, offerID)
+	targetStatus := "inactive"
+	if activate {
+		targetStatus = "active"
+	}
+	result, err := tx.ExecContext(ctx, `
+UPDATE offer_versions
+SET status = $2,
+    activated_at = CASE WHEN $2 = 'active' THEN now() ELSE NULL END,
+    retired_at = CASE WHEN $2 = 'inactive' THEN now() ELSE NULL END,
+    sync_error = NULL
+WHERE id = $1 AND status = 'syncing'
+`, offerID, targetStatus)
 	if err != nil {
 		return fmt.Errorf("激活新报价：%w", err)
 	}
@@ -463,7 +538,7 @@ SELECT aliases.internal_alias, cm.protocol, o.multiplier_bps, o.official_price_v
 FROM offer_channel_aliases aliases
 JOIN offer_versions o ON o.id = aliases.offer_version_id
 JOIN canonical_models cm ON cm.id = o.canonical_model_id
-WHERE o.status <> 'sync_failed'
+WHERE o.status IN ('syncing', 'active', 'inactive')
 ORDER BY aliases.id
 `)
 	if err != nil {
@@ -1291,7 +1366,7 @@ JOIN canonical_models cm ON cm.id = o.canonical_model_id
 LEFT JOIN channel_health h ON h.merchant_channel_id = mc.id
 LEFT JOIN usage_stats stats ON stats.merchant_profile_id = o.merchant_profile_id
                            AND stats.canonical_model_id = o.canonical_model_id
-WHERE mp.newapi_user_id = $1
+WHERE mp.newapi_user_id = $1 AND o.status <> 'deleted'
 ORDER BY o.id DESC, mc.id
 `, userID)
 	if err != nil {

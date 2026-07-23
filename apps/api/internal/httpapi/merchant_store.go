@@ -943,6 +943,54 @@ func (s *SQLMerchantStore) DeleteChannel(ctx context.Context, channelID int64, m
 	return nil
 }
 
+func (s *SQLMerchantStore) DeleteChannelReview(ctx context.Context, reviewID int64, merchantID int64) (string, error) {
+	if reviewID <= 0 || merchantID <= 0 {
+		return "", ErrMerchantInvalidState
+	}
+	tx, err := s.database.BeginTx(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("开始删除渠道审核事务：%w", err)
+	}
+	defer tx.Rollback()
+	var status string
+	var applicationID sql.NullInt64
+	var channelTestID sql.NullInt64
+	err = tx.QueryRowContext(ctx, `
+SELECT r.status, r.application_id, r.channel_test_id
+FROM merchant_channel_reviews r
+WHERE r.id = $1 AND r.merchant_profile_id = $2
+FOR UPDATE
+`, reviewID, merchantID).Scan(&status, &applicationID, &channelTestID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrMerchantNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("锁定渠道审核记录：%w", err)
+	}
+	if applicationID.Valid || (status != "pending" && status != "verified" && status != "rejected") {
+		return "", ErrMerchantInvalidState
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM merchant_channel_reviews WHERE id = $1", reviewID); err != nil {
+		return "", fmt.Errorf("删除渠道审核记录：%w", err)
+	}
+	if channelTestID.Valid {
+		if _, err := tx.ExecContext(ctx, `
+DELETE FROM merchant_channel_tests test
+WHERE test.id = $1
+  AND NOT EXISTS (SELECT 1 FROM merchant_channel_reviews review WHERE review.channel_test_id = test.id)
+`, channelTestID.Int64); err != nil {
+			return "", fmt.Errorf("清理渠道检测凭证：%w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("提交删除渠道审核事务：%w", err)
+	}
+	if status == "rejected" {
+		return "deleted", nil
+	}
+	return "withdrawn", nil
+}
+
 const applicationSelect = `
 SELECT a.id, a.newapi_user_id, a.display_name, a.website_url, a.business_description,
        a.status, COALESCE(a.review_reason, ''), a.reviewed_at, a.created_at,
@@ -1097,8 +1145,8 @@ func boundedPagination(page int, pageSize int) (int, int) {
 	if pageSize < 1 {
 		pageSize = 20
 	}
-	if pageSize > 100 {
-		pageSize = 100
+	if pageSize > 200 {
+		pageSize = 200
 	}
 	return page, pageSize
 }

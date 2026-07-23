@@ -170,6 +170,18 @@ func (s *server) createMerchantOffer(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusServiceUnavailable, "routing_unavailable", "报价同步服务尚未就绪")
 		return
 	}
+	activate := true
+	if lifecycle, ready := s.services.Routing.(OfferLifecycleRepository); ready {
+		state, stateErr := lifecycle.MerchantOfferState(r.Context(), session.UserID, modelID)
+		switch {
+		case stateErr == nil && state.Status == "inactive":
+			activate = false
+		case stateErr == nil, errors.Is(stateErr, ErrRoutingNotFound):
+		case stateErr != nil:
+			writeAPIError(w, http.StatusInternalServerError, "offer_state_failed", "读取上架模型状态失败")
+			return
+		}
+	}
 	offer, err := s.services.Routing.CreateOffer(r.Context(), CreateOfferCommand{
 		UserID: session.UserID, CanonicalModelID: modelID, MultiplierBPS: request.MultiplierBPS,
 	})
@@ -183,16 +195,20 @@ func (s *server) createMerchantOffer(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, status, "offer_create_failed", message)
 		return
 	}
-	if err := s.services.OfferSync.SyncOffer(r.Context(), offer.ID); err != nil {
+	if err := s.services.OfferSync.SyncOffer(r.Context(), offer.ID, activate); err != nil {
 		_ = s.services.Routing.MarkOfferSyncFailed(r.Context(), offer.ID, "核心服务价格或渠道映射同步失败")
-		writeAPIError(w, http.StatusBadGateway, "offer_sync_failed", "报价未生效，New API 价格或渠道映射同步失败")
+		writeAPIError(w, http.StatusBadGateway, "offer_sync_failed", "模型价格和渠道映射同步失败")
 		return
 	}
-	offer.Status = "active"
+	if activate {
+		offer.Status = "active"
+	} else {
+		offer.Status = "inactive"
+	}
 	writeJSON(w, http.StatusCreated, map[string]any{"success": true, "data": offer})
 }
 
-func (s *server) retireMerchantOffer(w http.ResponseWriter, r *http.Request) {
+func (s *server) updateMerchantOfferStatus(w http.ResponseWriter, r *http.Request) {
 	_, session, ok := s.requireSession(w, r, roleCommon)
 	if !ok || !s.requireSameOrigin(w, r) || !s.routingReady(w, false) {
 		return
@@ -201,15 +217,75 @@ func (s *server) retireMerchantOffer(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := s.services.Routing.RetireOffer(r.Context(), session.UserID, modelID); err != nil {
-		if errors.Is(err, ErrRoutingNotFound) {
-			writeAPIError(w, http.StatusNotFound, "offer_not_found", "当前模型没有生效中的报价")
-			return
-		}
-		writeAPIError(w, http.StatusConflict, "offer_retire_failed", "当前报价状态不允许取消")
+	var request struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := decodeJSON(r, &request); err != nil || request.Enabled == nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_offer_status", "上架状态参数无效")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"model_id": modelID, "status": "inactive"}})
+	if !*request.Enabled {
+		if err := s.services.Routing.RetireOffer(r.Context(), session.UserID, modelID); err != nil {
+			if errors.Is(err, ErrRoutingNotFound) {
+				writeAPIError(w, http.StatusNotFound, "offer_not_found", "当前模型没有上架中的价格")
+				return
+			}
+			writeAPIError(w, http.StatusConflict, "offer_retire_failed", "当前模型状态不允许下架")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"model_id": modelID, "status": "inactive"}})
+		return
+	}
+	lifecycle, ready := s.services.Routing.(OfferLifecycleRepository)
+	if !ready || s.services.OfferSync == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "offer_lifecycle_unavailable", "上架模型服务尚未就绪")
+		return
+	}
+	state, err := lifecycle.MerchantOfferState(r.Context(), session.UserID, modelID)
+	if err != nil || state.Status != "inactive" {
+		if errors.Is(err, ErrRoutingNotFound) {
+			writeAPIError(w, http.StatusNotFound, "offer_not_found", "待上架模型不存在")
+			return
+		}
+		writeAPIError(w, http.StatusConflict, "offer_activate_failed", "当前模型状态不允许上架")
+		return
+	}
+	offer, err := s.services.Routing.CreateOffer(r.Context(), CreateOfferCommand{UserID: session.UserID, CanonicalModelID: modelID, MultiplierBPS: state.MultiplierBPS})
+	if err != nil {
+		writeAPIError(w, http.StatusConflict, "offer_activate_failed", "当前渠道状态不允许上架")
+		return
+	}
+	if err := s.services.OfferSync.SyncOffer(r.Context(), offer.ID, true); err != nil {
+		_ = s.services.Routing.MarkOfferSyncFailed(r.Context(), offer.ID, "核心服务价格或渠道映射同步失败")
+		writeAPIError(w, http.StatusBadGateway, "offer_sync_failed", "模型价格和渠道映射同步失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"model_id": modelID, "status": "active"}})
+}
+
+func (s *server) deleteMerchantOffer(w http.ResponseWriter, r *http.Request) {
+	_, session, ok := s.requireSession(w, r, roleCommon)
+	if !ok || !s.requireSameOrigin(w, r) || !s.routingReady(w, false) {
+		return
+	}
+	modelID, ok := pathInt64(w, r, "model_id", "标准模型编号无效")
+	if !ok {
+		return
+	}
+	lifecycle, ready := s.services.Routing.(OfferLifecycleRepository)
+	if !ready {
+		writeAPIError(w, http.StatusServiceUnavailable, "offer_lifecycle_unavailable", "上架模型服务尚未就绪")
+		return
+	}
+	if err := lifecycle.DeleteMerchantOffer(r.Context(), session.UserID, modelID); err != nil {
+		if errors.Is(err, ErrRoutingNotFound) {
+			writeAPIError(w, http.StatusNotFound, "offer_not_found", "待删除模型不存在")
+			return
+		}
+		writeAPIError(w, http.StatusConflict, "offer_delete_failed", "当前模型状态不允许删除")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"model_id": modelID, "status": "deleted"}})
 }
 
 func (s *server) routingPolicy(w http.ResponseWriter, r *http.Request) {
@@ -280,10 +356,6 @@ func (s *server) merchantOffers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": offers})
-}
-
-func (s *server) merchantHealth(w http.ResponseWriter, r *http.Request) {
-	s.merchantOffers(w, r)
 }
 
 func (s *server) adminResetChannelHealth(w http.ResponseWriter, r *http.Request) {

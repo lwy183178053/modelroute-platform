@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"time"
 )
@@ -73,35 +72,13 @@ type CreateMerchantWithdrawalCommand struct {
 	CreatedAt                 time.Time
 }
 
-type SettlementReconciliationItem struct {
-	ID               int64           `json:"id"`
-	SourceID         int64           `json:"source_id"`
-	NewAPILogID      int64           `json:"newapi_log_id"`
-	NewAPIUserID     int             `json:"newapi_user_id"`
-	SourceType       int             `json:"source_type"`
-	ModelName        string          `json:"model_name"`
-	ChannelID        int64           `json:"channel_id,omitempty"`
-	NewAPIChannelID  int             `json:"-"`
-	GrossQuota       int64           `json:"gross_quota"`
-	ReasonCode       string          `json:"reason_code"`
-	Details          json.RawMessage `json:"details"`
-	Status           string          `json:"status"`
-	ResolutionNote   string          `json:"resolution_note,omitempty"`
-	ResolvedByUserID int             `json:"resolved_by_user_id,omitempty"`
-	ResolvedAt       *time.Time      `json:"resolved_at,omitempty"`
-	CreatedAt        time.Time       `json:"created_at"`
-}
-
 type SettlementRepository interface {
 	SettlementLogRepository
 	MerchantBalance(context.Context, int) (MerchantBalance, error)
-	MerchantLedger(context.Context, int, int, int) ([]MerchantLedgerEntry, int, error)
 	MerchantWithdrawals(context.Context, int, int, int) ([]MerchantWithdrawal, int, error)
 	CreateMerchantWithdrawal(context.Context, CreateMerchantWithdrawalCommand) (MerchantWithdrawal, error)
 	ListMerchantWithdrawals(context.Context, int, int, string) ([]MerchantWithdrawal, int, error)
 	ApproveMerchantWithdrawal(context.Context, int64, int, string, time.Time) (MerchantWithdrawal, error)
 	RejectMerchantWithdrawal(context.Context, int64, int, string, time.Time) (MerchantWithdrawal, error)
 	PayMerchantWithdrawal(context.Context, int64, int, string, string, time.Time) (MerchantWithdrawal, error)
-	ListSettlementReconciliation(context.Context, int, int, string) ([]SettlementReconciliationItem, int, error)
-	IgnoreSettlementReconciliation(context.Context, int64, int, string, time.Time) (SettlementReconciliationItem, error)
 }

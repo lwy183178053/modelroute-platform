@@ -243,6 +243,10 @@ type MerchantChannelManagement interface {
 	DeleteChannel(context.Context, int64, int64) error
 }
 
+type MerchantChannelReviewManagement interface {
+	DeleteChannelReview(context.Context, int64, int64) (string, error)
+}
+
 type FilteredMerchantChannelRepository interface {
 	ListChannelsFiltered(context.Context, int, int, string, string, int) ([]MerchantChannel, int, error)
 }

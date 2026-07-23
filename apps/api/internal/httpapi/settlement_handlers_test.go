@@ -12,28 +12,14 @@ import (
 
 type settlementRepositoryStub struct {
 	SettlementRepository
-	balance        MerchantBalance
-	created        CreateMerchantWithdrawalCommand
-	withdrawals    []MerchantWithdrawal
-	reconciliation []SettlementReconciliationItem
-	action         string
-}
-
-func (s *settlementRepositoryStub) ListSettlementReconciliation(context.Context, int, int, string) ([]SettlementReconciliationItem, int, error) {
-	return s.reconciliation, len(s.reconciliation), nil
-}
-
-func (s *settlementRepositoryStub) IgnoreSettlementReconciliation(_ context.Context, id int64, adminID int, note string, now time.Time) (SettlementReconciliationItem, error) {
-	s.action = "ignore:" + note
-	return SettlementReconciliationItem{ID: id, Status: "ignored", ResolvedByUserID: adminID, ResolvedAt: &now}, nil
+	balance     MerchantBalance
+	created     CreateMerchantWithdrawalCommand
+	withdrawals []MerchantWithdrawal
+	action      string
 }
 
 func (s *settlementRepositoryStub) MerchantBalance(context.Context, int) (MerchantBalance, error) {
 	return s.balance, nil
-}
-
-func (s *settlementRepositoryStub) MerchantLedger(context.Context, int, int, int) ([]MerchantLedgerEntry, int, error) {
-	return []MerchantLedgerEntry{{ID: 1, EntryType: "earning", AvailableDelta: 90}}, 1, nil
 }
 
 func (s *settlementRepositoryStub) MerchantWithdrawals(context.Context, int, int, int) ([]MerchantWithdrawal, int, error) {
@@ -156,30 +142,19 @@ func TestRegularUserCannotReadAdminWithdrawals(t *testing.T) {
 	}
 }
 
-func TestAdminCanReadAndIgnoreSettlementReconciliation(t *testing.T) {
+func TestProductRoutesDoNotExposeLedgerOrSettlementReconciliation(t *testing.T) {
 	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	repository := &settlementRepositoryStub{reconciliation: []SettlementReconciliationItem{{
-		ID: 12, NewAPILogID: 1004, ChannelID: 51, NewAPIChannelID: 41, ReasonCode: "offer_mapping_missing", ModelName: "mkt-ov-missing", Status: "open",
-	}}}
-	services.Credentials = testCredentialBox(t)
-	services.Settlement = repository
-	token := createPlatformSession(t, services, 1, 100)
 	handler := NewServerWithServices("test", Dependencies{}, services)
-
-	listRequest := httptest.NewRequest(http.MethodGet, "/api/admin/settlement-reconciliation?status=open", nil)
-	listRequest.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
-	listResponse := httptest.NewRecorder()
-	handler.ServeHTTP(listResponse, listRequest)
-	if listResponse.Code != http.StatusOK || !strings.Contains(listResponse.Body.String(), `"newapi_log_id":1004`) || !strings.Contains(listResponse.Body.String(), `"channel_id":51`) || strings.Contains(listResponse.Body.String(), `"newapi_channel_id"`) {
-		t.Fatalf("对账队列=%d %s", listResponse.Code, listResponse.Body.String())
-	}
-
-	request := httptest.NewRequest(http.MethodPost, "/api/admin/settlement-reconciliation/12/ignore", strings.NewReader(`{"reason":"确认不是平台路由产生的日志"}`))
-	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
-	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || repository.action != "ignore:确认不是平台路由产生的日志" {
-		t.Fatalf("忽略对账项=%d %s action=%q", response.Code, response.Body.String(), repository.action)
+	for _, path := range []string{
+		"/api/merchant/ledger",
+		"/api/admin/settlement-reconciliation",
+		"/api/admin/settlement-reconciliation/12/ignore",
+	} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("旧产品接口 %s 仍然存在，状态码=%d", path, response.Code)
+		}
 	}
 }

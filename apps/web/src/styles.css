@@ -163,6 +163,12 @@ main { min-height: calc(100vh - 66px); }
 .market-metrics .metric { min-height: 92px; }
 .market-board { overflow: visible; }
 .filter-toolbar { padding: 14px 18px; display: flex; align-items: center; gap: 9px; }
+.filter-search { width: min(360px, 100%); min-width: 240px; }
+.usage-token-detail { display: grid; gap: 3px; }
+.offer-channel-detail > td { height: auto; padding: 0; background: #f8fbfa; }
+.offer-channel-detail .table-wrap { padding: 10px 14px 14px; }
+.compact-table { min-width: 620px; border: 1px solid var(--line); background: white; }
+.compact-table td { height: 44px; }
 .slim-toolbar { border-bottom: 1px solid var(--line); }
 .search-box { width: min(440px, 100%); height: 36px; padding-left: 11px; border: 1px solid var(--line-strong); border-radius: 6px; background: white; display: flex; align-items: center; gap: 6px; color: #879691; }
 .search-box:focus-within { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(11,159,134,0.1); }
@@ -410,6 +416,7 @@ main { min-height: calc(100vh - 66px); }
   .section-actions { justify-content: flex-end; }
   .section > :not(.section-header):not(.table-wrap):not(.filter-toolbar):not(.provider-pills):not(.pagination) { margin-left: 12px; margin-right: 12px; }
   .filter-toolbar { padding: 12px; display: grid; grid-template-columns: 1fr 1fr; }
+  .filter-search { width: 100%; min-width: 0; grid-column: 1 / -1; }
   .search-box { grid-column: 1 / -1; }
   .select-wrap { min-width: 0; width: 100%; }
   .filter-toolbar > .button { grid-column: 1 / -1; }

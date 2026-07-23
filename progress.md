@@ -1491,3 +1491,23 @@
 - `docs/部署运行手册.md`：增加 V2 数据重置完整操作与验收顺序。
 - `progress.md`：追加本阶段实现、验证、文件清单和回滚点。
 - 回滚点：前一提交为 `ea0318a`；执行 `git revert <本阶段提交>` 可回退部署工具和中文文档。103 仍运行 V1 数据，当前阶段回退不涉及生产恢复；V2 重置后使用脚本输出的完整备份目录回滚。
+
+## 2026-07-23 - Task: 完成 V2 生产发布前最终本地验收
+
+### What was done
+
+- 在三个 V2 功能提交后重新执行全量本地验收，确认最终 Git 状态对应的后端、前端、部署工具和固定 New API 契约一致。
+- 清理隔离契约容器与网络，并恢复截图中仅由动态时间产生的两处二进制噪声，工作树保持干净。
+
+### Testing
+
+- 使用真实 PostgreSQL 测试容器执行 `go test -p 1 -count=1 ./...`，全部包通过；随后执行 `go vet ./...` 和 `go build ./...` 通过。
+- 执行 `npm.cmd run test:ui`、`npm.cmd run build`、`npm.cmd run capture` 和 `npm.cmd audit --audit-level=high`，UI、构建、截图和依赖审计通过，漏洞数为 `0`。
+- 执行 22 个部署 Python 测试、完整 `tools` profile Compose 配置校验和脚本语法检查，全部通过。
+- 执行 `deploy/scripts/verify-newapi-contract.sh`，固定 New API `rc.21` 的初始化、账号、令牌、渠道、模型映射、分层表达式、Chat、Responses、原生 Embeddings、流式、缓存日志、退款和无渠道错误契约通过；临时容器与网络残留为 `0`。
+- 执行 `git diff --check` 和敏感信息模式扫描，工作树无空白错误且未命中已知凭据。
+
+### Notes
+
+- `progress.md`：追加提交后完整本地验收、隔离契约清理和回滚点。
+- 回滚点：代码与工具基线提交为 `7641ea9`；本条只追加验证证据，可随本轮提交执行 `git revert <本阶段提交>`。103 尚未执行 V2 重置。

@@ -103,10 +103,6 @@ func (s *server) createMerchantWithdrawal(w http.ResponseWriter, r *http.Request
 		s.writeSettlementError(w, err)
 		return
 	}
-	if err := s.recordAudit(r, session, "withdrawal.create", int(withdrawal.ID), "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "提现申请已提交，但审计记录失败")
-		return
-	}
 	writeJSON(w, http.StatusCreated, map[string]any{"success": true, "data": withdrawal})
 }
 
@@ -185,10 +181,6 @@ func (s *server) adminIgnoreSettlementReconciliation(w http.ResponseWriter, r *h
 		s.writeSettlementError(w, err)
 		return
 	}
-	if err := s.recordAudit(r, session, "settlement.reconciliation.ignore", int(id), "success", request.Reason); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "对账处置已生效，但审计记录失败")
-		return
-	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": item})
 }
 
@@ -232,10 +224,6 @@ func (s *server) adminReviewWithdrawal(w http.ResponseWriter, r *http.Request, a
 		s.writeSettlementError(w, err)
 		return
 	}
-	if err := s.recordAudit(r, session, "withdrawal."+action, int(id), "success", request.Reason); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "提现审核已生效，但审计记录失败")
-		return
-	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": withdrawal})
 }
 
@@ -267,10 +255,6 @@ func (s *server) adminPayWithdrawal(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		s.writeSettlementError(w, err)
-		return
-	}
-	if err := s.recordAudit(r, session, "withdrawal.paid", int(id), "success", request.PayoutReference); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "打款确认已生效，但审计记录失败")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": withdrawal})

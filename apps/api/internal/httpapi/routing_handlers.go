@@ -41,15 +41,11 @@ func (s *server) createCanonicalModel(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusConflict, "model_create_failed", "标准模型名称或价格版本冲突")
 		return
 	}
-	if err := s.recordAudit(r, session, "model.create", int(model.ID), "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "标准模型已创建，但审计记录失败")
-		return
-	}
 	writeJSON(w, http.StatusCreated, map[string]any{"success": true, "data": model})
 }
 
 func (s *server) detectCanonicalModel(w http.ResponseWriter, r *http.Request) {
-	_, session, ok := s.requireSession(w, r, roleAdmin)
+	_, _, ok := s.requireSession(w, r, roleAdmin)
 	if !ok || !s.requireSameOrigin(w, r) || !s.routingReady(w, false) {
 		return
 	}
@@ -83,15 +79,11 @@ func (s *server) detectCanonicalModel(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadGateway, "model_detect_failed", "模型 hi 检测失败")
 		return
 	}
-	if err := s.recordAudit(r, session, "model.detect", 0, "success", model.PublicName); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "模型检测成功，但审计记录失败")
-		return
-	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": outcome})
 }
 
 func (s *server) deleteCanonicalModel(w http.ResponseWriter, r *http.Request) {
-	_, session, ok := s.requireSession(w, r, roleAdmin)
+	_, _, ok := s.requireSession(w, r, roleAdmin)
 	if !ok || !s.requireSameOrigin(w, r) || !s.routingReady(w, false) {
 		return
 	}
@@ -106,10 +98,6 @@ func (s *server) deleteCanonicalModel(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		writeAPIError(w, http.StatusConflict, "model_delete_failed", "标准模型当前无法删除或归档")
-		return
-	}
-	if err := s.recordAudit(r, session, "model.delete", int(modelID), "success", result); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "标准模型已处理，但审计记录失败")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]string{"result": result}})
@@ -161,10 +149,6 @@ func (s *server) publishOfficialPrice(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusConflict, "price_publish_failed", "标准模型不存在或价格版本冲突")
 		return
 	}
-	if err := s.recordAudit(r, session, "model.price.publish", int(modelID), "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "官方价格已发布，但审计记录失败")
-		return
-	}
 	writeJSON(w, http.StatusCreated, map[string]any{"success": true, "data": published})
 }
 
@@ -202,16 +186,32 @@ func (s *server) createMerchantOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.services.OfferSync.SyncOffer(r.Context(), offer.ID); err != nil {
-		_ = s.services.Routing.MarkOfferSyncFailed(r.Context(), offer.ID, "New API 价格或渠道映射同步失败")
+		_ = s.services.Routing.MarkOfferSyncFailed(r.Context(), offer.ID, "核心服务价格或渠道映射同步失败")
 		writeAPIError(w, http.StatusBadGateway, "offer_sync_failed", "报价未生效，New API 价格或渠道映射同步失败")
 		return
 	}
 	offer.Status = "active"
-	if err := s.recordAudit(r, session, "offer.create", int(offer.ID), "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "报价已生效，但审计记录失败")
+	writeJSON(w, http.StatusCreated, map[string]any{"success": true, "data": offer})
+}
+
+func (s *server) retireMerchantOffer(w http.ResponseWriter, r *http.Request) {
+	_, session, ok := s.requireSession(w, r, roleCommon)
+	if !ok || !s.requireSameOrigin(w, r) || !s.routingReady(w, false) {
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"success": true, "data": offer})
+	modelID, ok := pathInt64(w, r, "model_id", "标准模型编号无效")
+	if !ok {
+		return
+	}
+	if err := s.services.Routing.RetireOffer(r.Context(), session.UserID, modelID); err != nil {
+		if errors.Is(err, ErrRoutingNotFound) {
+			writeAPIError(w, http.StatusNotFound, "offer_not_found", "当前模型没有生效中的报价")
+			return
+		}
+		writeAPIError(w, http.StatusConflict, "offer_retire_failed", "当前报价状态不允许取消")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"model_id": modelID, "status": "inactive"}})
 }
 
 func (s *server) routingPolicy(w http.ResponseWriter, r *http.Request) {
@@ -256,10 +256,6 @@ func (s *server) updateRoutingPolicy(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusConflict, "routing_policy_update_failed", "路由策略或固定商户状态已变化")
 		return
 	}
-	if err := s.recordAudit(r, session, "routing_policy.update", tokenID, "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "路由策略已更新，但审计记录失败")
-		return
-	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": policy})
 }
 
@@ -293,7 +289,7 @@ func (s *server) merchantHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) adminResetChannelHealth(w http.ResponseWriter, r *http.Request) {
-	_, session, ok := s.requireSession(w, r, roleAdmin)
+	_, _, ok := s.requireSession(w, r, roleAdmin)
 	if !ok || !s.requireSameOrigin(w, r) || !s.routingReady(w, false) || s.services.AdminNewAPI == nil {
 		return
 	}
@@ -315,10 +311,6 @@ func (s *server) adminResetChannelHealth(w http.ResponseWriter, r *http.Request)
 		writeAPIError(w, http.StatusInternalServerError, "channel_reset_failed", "恢复平台渠道失败")
 		return
 	}
-	if err := s.recordAudit(r, session, "channel.health.reset", int(channelID), "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "渠道已恢复，但审计记录失败")
-		return
-	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"channel_id": channelID, "health_state": "pending"}})
 }
 
@@ -336,7 +328,7 @@ func (s *server) bindTokenPolicy(w http.ResponseWriter, r *http.Request, userID 
 		Key string `json:"key"`
 	}
 	if err := json.Unmarshal(data, &revealed); err != nil || strings.TrimSpace(revealed.Key) == "" {
-		writeAPIError(w, http.StatusBadGateway, "token_reveal_failed", "New API 未返回有效密钥")
+		writeAPIError(w, http.StatusBadGateway, "token_reveal_failed", "核心服务未返回有效密钥")
 		return RoutingPolicy{}, false
 	}
 	policy, err := s.services.Routing.BindTokenAndDefaultPolicy(r.Context(), userID, tokenID, s.services.Credentials.Fingerprint([]byte(strings.TrimSpace(revealed.Key))))

@@ -279,7 +279,6 @@ func (s *server) adminTestReviewModel(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "merchant_store_error", "保存模型检测结果失败")
 		return
 	}
-	_ = s.recordAudit(r, session, "merchant.channel.model_test", int(binding.ID), status, message)
 	if testErr != nil {
 		writeAPIError(w, http.StatusUnprocessableEntity, "channel_model_test_failed", "模型 hi 检查失败")
 		return

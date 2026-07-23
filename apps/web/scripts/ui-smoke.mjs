@@ -13,6 +13,8 @@ function assert(condition, message) {
 
 const browser = await chromium.launch({ executablePath, headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+const pageErrors = [];
+page.on('pageerror', (error) => pageErrors.push(error.message));
 page.setDefaultTimeout(10000);
 
 async function mockAdminAPI(targetPage, state, account = null) {
@@ -25,7 +27,7 @@ async function mockAdminAPI(targetPage, state, account = null) {
       body: JSON.stringify(data),
     });
     if (url.pathname === '/api/me') {
-      return json({ success: true, data: account || { id: 1, username: 'modelroute', display_name: '平台管理员', role: 100, status: 1, group: 'default', quota: 128642000, used_quota: 4268000, is_merchant: true, merchant_id: 31, merchant_status: 'active' } });
+      return json({ success: true, data: account || { id: 1, username: 'modelroute', display_name: '平台管理员', role: 100, status: 1, group: 'default', quota: 128642000, used_quota: 4268000, account_type: 'admin', is_merchant: true, merchant_name: 'ModelRoute 官方', merchant_status: 'active' } });
     }
     if (url.pathname === '/api/announcements' && request.method() === 'GET') {
       return json({ success: true, data: { unread_count: state.announcementReadCalls ? 0 : 1, items: [{ id: 9, title: '商户结算安排', body: '本周五统一处理人工提现。', audiences: ['admin'], pinned: true, status: 'published', is_read: state.announcementReadCalls > 0, publish_at: '2026-07-22T08:00:00Z' }] } });
@@ -52,7 +54,7 @@ async function mockAdminAPI(targetPage, state, account = null) {
       ] });
     }
     if (url.pathname === '/api/keys' && request.method() === 'GET') {
-      return json({ success: true, data: { page: 1, page_size: 20, total: 1, items: [{ id: 9, name: '真实主密钥', key: 'abcd**********wxyz', status: 1, created_time: 1784690000, accessed_time: 1784692000, expired_time: -1, unlimited_quota: true }] } });
+      return json({ success: true, data: { page: 1, page_size: 20, total: 1, items: [{ id: 9, name: '真实主密钥', key: 'full-secret-key', status: 1, created_time: 1784690000, accessed_time: 1784692000, expired_time: -1, unlimited_quota: true }] } });
     }
     if (url.pathname === '/api/routing-policies/9' && request.method() === 'GET') {
       return json({ success: true, data: { id: 71, newapi_token_id: 9, mode: 'smart', priority: 'stability', minimum_multiplier_bps: 4000, maximum_multiplier_bps: 8000, merchant_ids: [] } });
@@ -109,6 +111,10 @@ async function mockAdminAPI(targetPage, state, account = null) {
       state.offerCreateBody = request.postDataJSON();
       return json({ success: true, data: { id: 203, status: 'active', ...state.offerCreateBody } }, 201);
     }
+    if (url.pathname === '/api/merchant/offers/101' && request.method() === 'DELETE') {
+      state.offerRetireCalls += 1;
+      return json({ success: true, data: null });
+    }
     if (url.pathname === '/api/admin/models' && request.method() === 'GET') {
       return json({ success: true, data: [{ id: 101, public_name: 'gpt-4o-mini', provider: 'OpenAI', protocol: 'chat_completions', status: 'active', adapter_hint: 'openai_compatible', price: { id: 501, version: 2, price_kind: 'text', tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 150000, output_price_micros: 600000, cache_read_price_micros: 75000, cache_write_price_micros: 200000 }] } }] });
     }
@@ -132,13 +138,14 @@ async function mockAdminAPI(targetPage, state, account = null) {
       return json({ success: true, data: { result: 'archived' } });
     }
     if (url.pathname === '/api/admin/users') {
-      return json({ success: true, data: { page: 1, page_size: 20, total: 2, items: [
-        { id: 1, username: 'modelroute', display_name: '平台管理员', email: '', role: 100, status: 1, quota: 128642000, used_quota: 4268000, request_count: 2846 },
-        { id: 7, username: 'alice', display_name: 'Alice', email: 'alice@example.com', role: 1, status: 1, quota: 500000, used_quota: 120000, request_count: 18 },
-      ] } });
-    }
-    if (url.pathname === '/api/admin/audit-logs') {
-      return json({ success: true, data: { page: 1, page_size: 20, total: 1, items: [{ id: 3, actor_user_id: 1, actor_role: '100', action: 'user.disable', object_type: 'user', object_id: '7', result: 'success', source_ip: '127.0.0.1', created_at: '2026-07-22T12:00:00Z' }] } });
+      const allUsers = [
+        { id: 1, username: 'modelroute', display_name: '平台管理员', email: '', role: 100, status: 1, quota: 128642000, used_quota: 4268000, request_count: 2846, account_type: 'admin' },
+        { id: 7, username: 'alice', display_name: 'Alice', email: 'alice@example.com', role: 1, status: 1, quota: 500000, used_quota: 120000, request_count: 18, account_type: 'user' },
+        { id: 8, username: 'merchant', display_name: '北辰云智', email: 'merchant@example.com', role: 1, status: 1, quota: 800000, used_quota: 320000, request_count: 35, account_type: 'merchant', merchant_status: 'active' },
+      ];
+      const type = url.searchParams.get('type');
+      const items = type ? allUsers.filter((user) => user.account_type === type) : allUsers;
+      return json({ success: true, data: { page: 1, page_size: 50, total: items.length, items } });
     }
     if (url.pathname === '/api/admin/overview' && request.method() === 'GET') {
       return json({ success: true, data: {
@@ -158,7 +165,7 @@ async function mockAdminAPI(targetPage, state, account = null) {
         },
       } });
     }
-    if ((url.pathname === '/api/admin/usage' || url.pathname === '/api/admin/channel-logs') && request.method() === 'GET') {
+    if (url.pathname === '/api/admin/channel-logs' && request.method() === 'GET') {
       return json({ success: true, data: {
         start_timestamp: 1784131200, end_timestamp: 1784736000,
         stats: { quota: 4750000, rpm: 7, tpm: 9200 },
@@ -207,57 +214,45 @@ async function mockAdminAPI(targetPage, state, account = null) {
       state.redemptionCleanupCalls += 1;
       return json({ success: true, data: 1 });
     }
-    if (url.pathname === '/api/admin/system-tasks' && request.method() === 'GET') {
-      return json({ success: true, data: [
-        { task_id: 'systask_1', type: 'log_cleanup', status: 'succeeded', created_at: 1784649600, updated_at: 1784649660 },
-      ] });
-    }
-    if (url.pathname === '/api/admin/system-tasks/systask_1' && request.method() === 'GET') {
-      return json({ success: true, data: { task_id: 'systask_1', type: 'log_cleanup', status: 'succeeded', progress: 100, result: { deleted: 286 }, created_at: 1784649600, updated_at: 1784649660 } });
-    }
-    if (url.pathname === '/api/admin/system-tasks/log-cleanup' && request.method() === 'POST') {
-      state.logCleanupCalls += 1;
-      state.logCleanupBody = request.postDataJSON();
-      return json({ success: true, data: { task_id: 'systask_2', type: 'log_cleanup', status: 'pending' } }, 202);
-    }
     if (url.pathname === '/api/merchant/channel-tests' && request.method() === 'POST') {
       state.merchantChannelTestCalls += 1;
       state.merchantChannelTestBody = request.postDataJSON();
       return json({ success: true, data: { id: 91, canonical_model_id: 101, adapter_type: 'openai_compatible', capabilities: ['chat_completions'], latency_ms: 328, test_receipt: 'receipt-for-channel-test-123456', expires_at: '2026-07-22T16:15:00Z' } }, 201);
     }
-    if (url.pathname === '/api/merchant/channels') {
-      return json({ success: true, data: { merchant: { merchant_id: 31, user_id: 1, merchant_status: 'active', is_merchant: true }, reviews: [{ id: 21, user_id: 1, canonical_model_id: 101, model: 'gpt-4o-mini', provider: 'OpenAI', protocol: 'chat_completions', adapter_type: 'openai_compatible', channel_name: 'OpenAI 主线路', base_url: 'https://api.merchant.example', status: 'approved', credential_configured: false, created_at: '2026-07-22T14:00:00Z' }], items: [{ id: 51, merchant_id: 31, review_id: 21, canonical_model_id: 101, model: 'gpt-4o-mini', provider: 'OpenAI', protocol: 'chat_completions', adapter_type: 'openai_compatible', newapi_channel_id: 41, channel_name: 'OpenAI 主线路', base_url: 'https://api.merchant.example', credential_fingerprint: 'a1b2c3...d4e5f6', status: 'active', created_at: '2026-07-22T14:00:00Z' }] } });
+    if (url.pathname === '/api/merchant/channel-models/sync' && request.method() === 'POST') {
+      state.channelModelSyncCalls += 1;
+      state.channelModelSyncBody = request.postDataJSON();
+      return json({ success: true, data: { synced_at: '2026-07-23T08:00:00Z', items: [
+        { upstream_model_name: 'gpt-4o-mini', canonical_model_id: 101, public_name: 'gpt-4o-mini', provider: 'OpenAI', match_status: 'matched' },
+        { upstream_model_name: 'unlisted-chat-model', canonical_model_id: null, match_status: 'unmatched' },
+      ] } });
+    }
+    if (url.pathname === '/api/merchant/channels' && request.method() === 'POST') {
+      state.channelSubmitCalls += 1;
+      state.channelSubmitBody = request.postDataJSON();
+      return json({ success: true, data: { id: 25, status: 'pending' } }, 201);
+    }
+    if (url.pathname === '/api/merchant/channels' && request.method() === 'GET') {
+      return json({ success: true, data: { merchant: { user_id: 1, merchant_name: 'ModelRoute 官方', merchant_status: 'active', is_merchant: true }, reviews: [
+        { id: 21, user_id: 1, channel_name: 'OpenAI 主线路', base_url: 'https://api.merchant.example', status: 'approved', credential_configured: false, created_at: '2026-07-22T14:00:00Z' },
+        { id: 24, user_id: 1, channel_name: 'Gemini 测试线路', base_url: 'https://api.gemini.example', status: 'rejected', credential_configured: false, review_reason: '模型响应异常', created_at: '2026-07-22T15:00:00Z' },
+      ], items: [{ id: 51, user_id: 1, merchant_name: 'ModelRoute 官方', review_id: 21, canonical_model_id: 101, model: 'gpt-4o-mini', matched_models: ['gpt-4o-mini'], provider: 'OpenAI', protocol: 'chat_completions', adapter_type: 'openai_compatible', channel_name: 'OpenAI 主线路', base_url: 'https://api.merchant.example', credential_fingerprint: 'a1b2c3...d4e5f6', status: 'active', health_state: 'healthy', created_at: '2026-07-22T14:00:00Z' }] } });
     }
     if (url.pathname === '/api/admin/merchant-applications') {
       return json({ success: true, data: { page: 1, page_size: 20, total: 1, items: [{ id: 11, user_id: 7, display_name: '东海模型服务', website_url: 'https://merchant.example', business_description: '企业模型 API 服务', status: 'pending', created_at: '2026-07-22T14:00:00Z', initial_channel: { id: 21, user_id: 7, application_id: 11, canonical_model_id: 101, model: 'gpt-4o-mini', adapter_type: 'openai_compatible', channel_name: '主线路', base_url: 'https://api.merchant.example', status: 'pending', credential_configured: true, created_at: '2026-07-22T14:00:00Z' } }] } });
     }
-    if (url.pathname === '/api/admin/merchants') {
-      return json({ success: true, data: { page: 1, page_size: 20, total: 1, items: [{ id: 31, user_id: 8, display_name: '北辰云智', website_url: 'https://beichen.example', status: 'active', approved_at: '2026-07-21T14:00:00Z' }] } });
-    }
     if (url.pathname === '/api/admin/channel-reviews' && request.method() === 'GET') {
-      return json({ success: true, data: { page: 1, page_size: 100, total: 1, items: [{ id: 22, user_id: 8, canonical_model_id: 102, model: 'claude-sonnet-4-5', adapter_type: 'anthropic', channel_name: 'Anthropic 备用线路', base_url: 'https://api.anthropic.example', status: 'pending', credential_configured: true, created_at: '2026-07-22T15:00:00Z' }] } });
+      return json({ success: true, data: { page: 1, page_size: 100, total: 1, items: [{ id: 22, user_id: 8, canonical_model_id: 102, model: 'claude-sonnet-4-5', adapter_type: 'anthropic', channel_name: 'Anthropic 备用线路', base_url: 'https://api.anthropic.example', status: 'pending', credential_configured: true, models: [{ id: 221, upstream_model_name: 'claude-sonnet-4-5', match_status: 'matched', test_status: 'pending' }], created_at: '2026-07-22T15:00:00Z' }] } });
     }
     if (url.pathname === '/api/admin/channels' && request.method() === 'GET') {
       return json({ success: true, data: { page: 1, page_size: 100, total: 2, items: [
-        { id: 51, merchant_id: 31, review_id: 21, canonical_model_id: 101, model: 'gpt-4o-mini', adapter_type: 'openai_compatible', newapi_channel_id: 41, channel_name: 'OpenAI 主线路', base_url: 'https://api.merchant.example', credential_fingerprint: 'a1b2c3...d4e5f6', status: 'active', created_at: '2026-07-22T14:00:00Z' },
-        { id: 52, merchant_id: 32, review_id: 23, canonical_model_id: 101, model: 'gpt-4o-mini', adapter_type: 'openai_compatible', newapi_channel_id: 42, channel_name: 'OpenAI 备用线路', base_url: 'https://api.backup.example', credential_fingerprint: 'd7e8f9...a0b1c2', status: 'disabled', created_at: '2026-07-22T14:10:00Z' },
+        { id: 51, user_id: 8, merchant_name: '北辰云智', review_id: 21, canonical_model_id: 101, model: 'gpt-4o-mini', matched_models: ['gpt-4o-mini'], adapter_type: 'openai_compatible', channel_name: 'OpenAI 主线路', base_url: 'https://api.merchant.example', credential_fingerprint: 'a1b2c3...d4e5f6', status: 'active', health_state: 'healthy', created_at: '2026-07-22T14:00:00Z' },
+        { id: 52, user_id: 9, merchant_name: '矩阵算力', review_id: 23, canonical_model_id: 101, model: 'gpt-4o-mini', matched_models: ['gpt-4o-mini'], adapter_type: 'openai_compatible', channel_name: 'OpenAI 备用线路', base_url: 'https://api.backup.example', credential_fingerprint: 'd7e8f9...a0b1c2', status: 'disabled', health_state: 'cooling', created_at: '2026-07-22T14:10:00Z' },
       ] } });
     }
     if (url.pathname === '/api/admin/channels/52/health/reset' && request.method() === 'POST') {
       state.healthResetCalls += 1;
       return json({ success: true, data: { channel_id: 52, health_state: 'pending' } });
-    }
-    if (/^\/api\/admin\/channels\/\d+\/runtime$/.test(url.pathname) && request.method() === 'GET') {
-      const channelID = Number(url.pathname.split('/')[4]);
-      return json({ success: true, data: { newapi_channel_id: channelID === 51 ? 41 : 42, status: channelID === 51 ? 1 : 2, balance_usd_micros: channelID === 51 ? 12500000 : 3200000, balance_updated_time: 1784649600, response_time_ms: channelID === 51 ? 420 : 910, test_time: 1784649500 } });
-    }
-    if (/^\/api\/admin\/channels\/\d+\/test$/.test(url.pathname) && request.method() === 'POST') {
-      state.channelTestCalls += 1;
-      return json({ success: true, data: { status: 'succeeded', result: { time: 420 } } });
-    }
-    if (/^\/api\/admin\/channels\/\d+\/balance\/refresh$/.test(url.pathname) && request.method() === 'POST') {
-      state.channelBalanceCalls += 1;
-      return json({ success: true, data: { status: 'succeeded', result: { balance: 12.5 } } });
     }
     if (url.pathname === '/api/admin/payment-settings' && request.method() === 'GET') {
       return json({ success: true, data: { id: 11, version: 3, gateway_url: 'https://zpayz.cn', merchant_pid_masked: '202***********878', key_configured: true, payment_methods: ['alipay', 'wxpay'], minimum_cny_cents: 100, maximum_cny_cents: 2000000, enabled: true, notify_url: 'https://aggregate.lwylink.xyz/api/payments/easypay/notify', return_url: 'https://aggregate.lwylink.xyz/payments/return', created_at: '2026-07-22T09:00:00Z' } });
@@ -290,7 +285,7 @@ async function mockAdminAPI(targetPage, state, account = null) {
       return json({ success: true, data: { id: Number(url.pathname.split('/')[4]), status: url.pathname.endsWith('/paid') ? 'paid' : url.pathname.endsWith('/reject') ? 'rejected' : 'approved' } });
     }
     if (url.pathname === '/api/admin/settlement-reconciliation' && request.method() === 'GET') {
-      return json({ success: true, data: { page: 1, page_size: 50, total: 1, items: [{ id: 12, source_id: 14, newapi_log_id: 1004, newapi_user_id: 18, source_type: 2, model_name: 'mkt-ov-missing', newapi_channel_id: 99, gross_quota: 50, reason_code: 'offer_mapping_missing', details: { newapi_channel_id: 99 }, status: 'open', created_at: '2026-07-22T15:30:00Z' }] } });
+      return json({ success: true, data: { page: 1, page_size: 50, total: 1, items: [{ id: 12, source_id: 14, newapi_log_id: 1004, source_type: 2, model_name: 'mkt-ov-missing', channel_id: 51, gross_quota: 50, reason_code: 'offer_mapping_missing', status: 'open', created_at: '2026-07-22T15:30:00Z' }] } });
     }
     if (url.pathname === '/api/admin/settlement-reconciliation/12/ignore' && request.method() === 'POST') {
       state.reconciliationIgnoreCalls += 1;
@@ -305,10 +300,6 @@ async function mockAdminAPI(targetPage, state, account = null) {
       state.merchantVerifyCalls += 1;
       return json({ success: true, data: { review_id: 21, adapter_type: 'openai_compatible', capabilities: ['chat_completions'], latency_ms: 280 } });
     }
-    if (url.pathname === '/api/keys/9/reveal') {
-      state.revealCalls += 1;
-      return json({ success: true, data: { key: 'sk-full-secret-key' } });
-    }
     if (url.pathname.startsWith('/api/admin/users/') || url.pathname.startsWith('/api/keys')) {
       return json({ success: true, data: null });
     }
@@ -318,9 +309,10 @@ async function mockAdminAPI(targetPage, state, account = null) {
 
 try {
   const adminMockState = {
-    revealCalls: 0, merchantVerifyCalls: 0, channelVerifyCalls: 0,
-    routeSaveCalls: 0, routeSaveBody: null, offerCreateCalls: 0, offerCreateBody: null,
+    merchantVerifyCalls: 0, channelVerifyCalls: 0,
+    routeSaveCalls: 0, routeSaveBody: null, offerCreateCalls: 0, offerCreateBody: null, offerRetireCalls: 0,
     merchantChannelTestCalls: 0, merchantChannelTestBody: null,
+    channelModelSyncCalls: 0, channelModelSyncBody: null, channelSubmitCalls: 0, channelSubmitBody: null,
     modelCreateCalls: 0, modelCreateBody: null, modelDetectCalls: 0, modelDetectBody: null,
     modelDeleteCalls: 0, pricePublishCalls: 0, pricePublishBody: null,
     healthResetCalls: 0, paymentSettingCalls: 0, paymentSettingBody: null, paymentRetryCalls: 0,
@@ -330,7 +322,6 @@ try {
     platformSettingCalls: 0, platformSettingBody: null,
     redemptionCreateCalls: 0, redemptionCreateBody: null, redemptionUpdateCalls: 0, redemptionUpdateBody: null,
     redemptionStatusCalls: 0, redemptionStatusBody: null, redemptionDeleteCalls: 0, redemptionCleanupCalls: 0,
-    logCleanupCalls: 0, logCleanupBody: null, channelTestCalls: 0, channelBalanceCalls: 0,
     announcementReadCalls: 0, announcementCreateCalls: 0, announcementCreateBody: null,
   };
   await mockAdminAPI(page, adminMockState);
@@ -340,6 +331,7 @@ try {
   await page.getByText('gpt-4o-mini').first().waitFor();
   await page.getByText('北辰云智').first().waitFor();
   assert(await page.getByText('GPT-5.2').count() === 0, '模型市场仍展示演示报价');
+  assert(await page.getByRole('button', { name: '接入文档', exact: true }).count() === 0, '模型市场仍显示无效接入文档按钮');
   assert(await page.getByRole('button', { name: '帮助中心' }).count() === 0, '顶部仍保留无行为帮助按钮');
   await page.getByRole('button', { name: '公告', exact: true }).click();
   await page.getByRole('heading', { name: '公告中心' }).waitFor();
@@ -384,7 +376,6 @@ try {
   assert(await page.getByRole('checkbox', { name: '启用真实主密钥' }).isChecked(), '有效密钥的启用开关未选中');
   await page.getByRole('button', { name: '复制' }).first().click();
   await page.getByText('密钥已复制').waitFor();
-  assert(adminMockState.revealCalls === 1, '复制掩码密钥时未读取完整密钥');
   await page.getByRole('button', { name: '编辑路由策略' }).first().click();
   await page.getByRole('dialog', { name: '编辑路由策略' }).waitFor();
   assert(await page.getByLabel('最低成交倍率').inputValue() === '0.4', '路由弹窗未读取当前最低倍率');
@@ -403,9 +394,26 @@ try {
   assert(!(await page.locator('body').innerText()).includes('管理员账号当前未绑定商户资料'), '管理员仍显示专用商户缺失提示');
   await merchantSidebar.getByRole('button', { name: '渠道管理', exact: true }).click();
   await page.getByText('OpenAI 主线路').last().waitFor();
-  await page.getByText('41', { exact: true }).waitFor();
-  const importedChannels = page.getByRole('heading', { name: '已导入渠道' }).locator('xpath=ancestor::section');
-  await importedChannels.getByText('正常', { exact: true }).waitFor();
+  await page.getByRole('heading', { name: '渠道管理' }).waitFor();
+  await page.getByText('51', { exact: true }).waitFor();
+  await page.getByText('已审核', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '提交新渠道' }).click();
+  const channelDialog = page.getByRole('dialog', { name: '提交新渠道' });
+  await channelDialog.getByLabel('渠道名称').fill('企业多模型线路');
+  await channelDialog.getByLabel('上游基础地址').fill('https://api.upstream.example/v1');
+  await channelDialog.getByLabel('上游 API 密钥').fill('sk-local-test-key');
+  const channelPageURL = page.url();
+  await channelDialog.getByRole('button', { name: '一键同步模型' }).click();
+  await page.waitForTimeout(200);
+  assert(adminMockState.channelModelSyncCalls === 1, '一键同步模型没有调用接口');
+  const channelDialogVisible = await channelDialog.isVisible().catch(() => false);
+  const channelDialogText = channelDialogVisible ? await channelDialog.innerText() : await page.locator('body').innerText();
+  assert(channelDialogVisible && page.url() === channelPageURL, `同步上游模型后离开了渠道弹窗：${page.url()} ${pageErrors.join('; ')} ${channelDialogText}`);
+  assert(channelDialogText.includes('已匹配 1 个模型') && channelDialogText.includes('平台未收录'), `同步结果没有显示在渠道弹窗：${channelDialogText}`);
+  assert(adminMockState.channelModelSyncCalls === 1 && adminMockState.channelModelSyncBody.channel_type === 'openai_compatible', '同步模型没有提交密钥类型');
+  await channelDialog.getByRole('button', { name: '提交渠道审核' }).click();
+  await page.getByText('渠道已提交审核').waitFor();
+  assert(adminMockState.channelSubmitCalls === 1 && adminMockState.channelSubmitBody.channel_name === '企业多模型线路', '渠道审核没有提交真实表单');
   await merchantSidebar.getByRole('button', { name: '模型报价', exact: true }).click();
   await page.getByText('0.72x').waitFor();
   await page.getByText('0.108 输入 / 0.432 输出 / 百万 Token').waitFor();
@@ -418,19 +426,25 @@ try {
   await withdrawalDialog.getByLabel('收款账户').fill('13800132621');
   await withdrawalDialog.getByRole('button', { name: '提交提现申请' }).click();
   assert(adminMockState.withdrawalCreateCalls === 1, '商户提现没有调用真实接口');
-  assert(adminMockState.withdrawalCreateBody.amount_quota === 2500000, '提现人民币金额没有转换为 New API 整数额度');
+  assert(adminMockState.withdrawalCreateBody.amount_quota === 2500000, '提现人民币金额没有转换为平台整数额度');
   await merchantSidebar.getByRole('button', { name: '模型报价', exact: true }).click();
   await page.getByRole('button', { name: '设置报价' }).click();
   const quoteDialog = page.getByRole('dialog', { name: '设置模型报价' });
-  await quoteDialog.getByLabel('标准模型').selectOption('101');
+  assert(await quoteDialog.getByLabel('模型厂商').inputValue() === 'OpenAI', '模型报价没有按厂商分组选择');
+  await quoteDialog.getByLabel('模型型号').selectOption('101');
   assert(await quoteDialog.getByLabel('商户渠道').count() === 0, '模型报价仍要求选择单个渠道');
   await quoteDialog.getByLabel('报价倍率').fill('0.65');
   await quoteDialog.getByRole('button', { name: '保存报价' }).click();
   assert(adminMockState.offerCreateCalls === 1, '创建报价没有调用真实接口');
   assert(adminMockState.offerCreateBody.multiplier_bps === 6500, '报价倍率没有转换为整数基点');
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: '取消报价' }).first().click();
+  assert(adminMockState.offerRetireCalls === 1, '取消报价没有调用真实接口');
 
   await page.getByRole('button', { name: '管理后台', exact: true }).click();
   await page.getByText('¥18.00', { exact: true }).first().waitFor();
+  assert(await page.getByRole('button', { name: '审计日志', exact: true }).count() === 0, '管理后台仍显示操作记录入口');
+  assert(await page.getByRole('button', { name: '系统任务', exact: true }).count() === 0, '管理后台仍显示系统任务入口');
   await page.getByText('126 / 128').waitFor();
   assert(await page.getByRole('button', { name: /商户审核/ }).getByText('1', { exact: true }).count() === 1, '管理员侧栏未显示真实商户待办数量');
   await page.getByRole('button', { name: '公告管理' }).click();
@@ -446,8 +460,9 @@ try {
   await page.getByRole('button', { name: '渠道调用日志' }).click();
   await page.getByText('req-admin-9001').waitFor();
   await page.getByText('alice', { exact: true }).waitFor();
+  assert(await page.getByText('渠道 41', { exact: true }).count() === 0, '渠道日志仍显示内部渠道编号');
   await page.getByRole('button', { name: '模型与定价' }).click();
-  await page.getByText('价格版本 v2').waitFor();
+  await page.getByText('v2', { exact: true }).waitFor();
   await page.getByRole('button', { name: '新增标准模型' }).click();
   const modelDialog = page.getByRole('dialog', { name: '新增标准模型' });
   await modelDialog.getByLabel('模型名称').fill('gpt-custom-chat');
@@ -483,8 +498,6 @@ try {
   assert(adminMockState.modelDeleteCalls === 1, '模型删除或归档接口没有调用');
   await page.getByRole('button', { name: '用户管理' }).click();
   await page.getByText('alice@example.com').waitFor();
-  await page.getByRole('button', { name: '审计日志' }).click();
-  await page.getByText('user.disable').waitFor();
   await page.getByRole('button', { name: '商户审核' }).click();
   await page.getByText('东海模型服务').waitFor();
   await page.getByRole('button', { name: '验证' }).click();
@@ -492,17 +505,17 @@ try {
   assert(adminMockState.merchantVerifyCalls === 1, '管理员验证没有调用真实商户审核接口');
   await page.getByRole('button', { name: '渠道与探活' }).click();
   await page.getByText('Anthropic 备用线路').waitFor();
-  await page.getByText('New API 41').waitFor();
-  await page.getByText('已停用').waitFor();
-  const importedAdminChannels = page.getByRole('heading', { name: '已导入渠道' }).locator('xpath=ancestor::section');
-  await importedAdminChannels.getByText('¥12.50', { exact: true }).waitFor();
-  assert(await importedAdminChannels.getByRole('button', { name: '测试渠道' }).count() === 0, '已导入渠道仍显示行内测试按钮');
-  assert(await importedAdminChannels.getByRole('button', { name: '刷新余额' }).count() === 0, '已导入渠道仍显示刷新余额按钮');
+  await page.getByText('51', { exact: true }).waitFor();
+  await page.getByText('已下架').waitFor();
+  assert(await page.getByRole('heading', { name: '已导入渠道' }).count() === 0, '渠道管理仍拆成独立的已导入渠道表');
+  assert(!(await page.locator('body').innerText()).includes('¥12.50'), '渠道管理仍显示上游运行余额');
+  assert(await page.getByRole('button', { name: '测试渠道' }).count() === 0, '渠道管理仍显示行内测试按钮');
+  assert(await page.getByRole('button', { name: '刷新余额' }).count() === 0, '渠道管理仍显示刷新余额按钮');
   await page.getByRole('button', { name: '恢复渠道' }).click();
-  await page.getByText('渠道已进入恢复探测').waitFor();
+  await page.getByText('渠道已进入恢复检测').waitFor();
   assert(adminMockState.healthResetCalls === 1, '恢复渠道没有调用真实健康接口');
   await page.getByRole('button', { name: '验证' }).click();
-  await page.getByText('渠道验证通过').waitFor();
+  await page.getByText('渠道验证完成').waitFor();
   assert(adminMockState.channelVerifyCalls === 1, '管理员渠道页验证没有调用真实渠道审核接口');
   await page.getByRole('button', { name: '平台设置' }).click();
   await page.getByRole('heading', { name: '邮件与注册' }).waitFor();
@@ -539,18 +552,6 @@ try {
   await page.getByRole('button', { name: '清理失效' }).click();
   await page.getByText('已清理 1 条失效兑换码').waitFor();
   assert(adminMockState.redemptionCleanupCalls === 1, '清理失效兑换码没有调用真实接口');
-  await page.getByRole('button', { name: '系统任务' }).click();
-  await page.getByText('systask_1').waitFor();
-  await page.getByRole('button', { name: '查看详情' }).click();
-  const taskDetailDialog = page.getByRole('dialog', { name: '系统任务详情' });
-  await taskDetailDialog.getByText('已删除日志 286 条').waitFor();
-  await taskDetailDialog.getByRole('button', { name: '关闭' }).last().click();
-  await page.getByRole('button', { name: '创建日志清理任务' }).click();
-  const cleanupDialog = page.getByRole('dialog', { name: '创建日志清理任务' });
-  await cleanupDialog.getByLabel('清理截止时间').fill('2026-07-20T00:00');
-  await cleanupDialog.getByRole('button', { name: '创建任务' }).click();
-  await page.getByText('日志清理任务已创建').waitFor();
-  assert(adminMockState.logCleanupCalls === 1 && Number.isInteger(adminMockState.logCleanupBody.before_timestamp), '日志清理任务没有提交整数时间戳');
   await page.getByRole('button', { name: '支付与充值' }).click();
   await page.getByRole('heading', { name: '易支付设置' }).waitFor();
   assert(
@@ -656,7 +657,7 @@ try {
   assert(await anonymousPage.getByRole('button', { name: '商户中心', exact: true }).count() === 0, '普通用户显示了商户中心入口');
   const anonymousConsoleSidebar = anonymousPage.getByRole('complementary', { name: '控制台功能' });
   await anonymousConsoleSidebar.getByRole('button', { name: '账户设置', exact: true }).click();
-  await anonymousPage.getByText('UID 7 · 普通账号').waitFor();
+  await anonymousPage.getByText('用户 ID 7 · 普通用户').waitFor();
   await anonymousPage.getByRole('button', { name: '申请成为商户' }).click();
   const merchantDialog = anonymousPage.getByRole('dialog', { name: '申请成为商户' });
   await merchantDialog.getByLabel('商户名称').fill('北辰云智');
@@ -670,6 +671,7 @@ try {
   await anonymousPage.getByText('商户申请已提交').waitFor();
   assert(merchantApplicationCalls === 1, '商户申请没有调用平台接口');
   await anonymousPage.getByText('等待管理员审核').waitFor();
+  await anonymousConsoleSidebar.getByRole('button', { name: '充值中心', exact: true }).click();
   await anonymousPage.getByRole('button', { name: '立即充值' }).click();
   const rechargeDialog = anonymousPage.getByRole('dialog', { name: '账户充值' });
   await rechargeDialog.getByLabel('充值金额（人民币）').fill('100');

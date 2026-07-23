@@ -5,11 +5,9 @@ import {
   Building2,
   ClipboardCheck,
   CreditCard,
-  FileClock,
   FileText,
   HeartPulse,
   Landmark,
-  ListChecks,
   Megaphone,
   Settings2,
   ShieldCheck,
@@ -24,31 +22,27 @@ import AdminPayment from './admin/AdminPayment';
 import AdminModels from './admin/AdminModels';
 import AdminWithdrawals from './admin/AdminWithdrawals';
 import AdminUsers from './admin/AdminUsers';
-import AdminAudit from './admin/AdminAudit';
 import AdminRedemptions from './admin/AdminRedemptions';
 import AdminSettings from './admin/AdminSettings';
-import AdminTasks from './admin/AdminTasks';
 import AdminUsage from './admin/AdminUsage';
 import AdminAnnouncements from './admin/AdminAnnouncements';
 
 const baseSections = [
   { id: 'overview', label: '运营总览', icon: Activity },
-  { id: 'usage', label: '渠道调用日志', icon: FileText },
   { id: 'users', label: '用户管理', icon: UserRoundCog },
   { id: 'merchants', label: '商户审核', icon: Building2 },
   { id: 'models', label: '模型与定价', icon: BadgeDollarSign },
   { id: 'channels', label: '渠道与探活', icon: HeartPulse },
+  { id: 'usage', label: '渠道调用日志', icon: FileText },
   { id: 'payment', label: '支付与充值', icon: CreditCard },
   { id: 'redemptions', label: '兑换码管理', icon: TicketCheck },
   { id: 'withdrawals', label: '提现审核', icon: Landmark },
-  { id: 'tasks', label: '系统任务', icon: ListChecks },
   { id: 'announcements', label: '公告管理', icon: Megaphone },
   { id: 'settings', label: '平台设置', icon: Settings2 },
-  { id: 'audit', label: '审计日志', icon: FileClock },
 ];
 
 function serviceName(key) {
-  return { database: '平台数据库', redis: 'Redis 会话服务', new_api: 'New API 内部服务' }[key] || key;
+  return { database: '平台数据库', redis: 'Redis 会话服务', new_api: '模型计费服务' }[key] || key;
 }
 
 function serviceStatus(status) {
@@ -80,7 +74,7 @@ function AdminOverview({ data, error, loading, reload, setSection }) {
         <Metric label="今日平台成交" value={formatQuota(summary.today_gross_quota)} hint={`平台收入 ${formatQuota(summary.today_platform_quota)}`} icon={BadgeDollarSign} />
         <Metric label="活跃渠道" value={`${summary.active_channels || 0} / ${summary.total_channels || 0}`} hint={`${summary.cooling_channels || 0} 个冷却 · ${summary.disabled_channels || 0} 个停用`} icon={HeartPulse} tone="green" />
         <Metric label="待处理事项" value={String(pendingCount)} hint="商户、渠道、提现与对账" icon={ClipboardCheck} tone="amber" />
-        <Metric label="New API 同步" value={syncHealthy ? '正常' : '异常'} hint={`日志延迟 ${Number(data?.sync_delay_seconds || 0)} 秒`} icon={ShieldCheck} tone="blue" />
+        <Metric label="计费同步" value={syncHealthy ? '正常' : '异常'} hint={`日志延迟 ${Number(data?.sync_delay_seconds || 0)} 秒`} icon={ShieldCheck} tone="blue" />
       </div>
 
       <div className="dashboard-grid admin-overview-grid">
@@ -101,7 +95,7 @@ function AdminOverview({ data, error, loading, reload, setSection }) {
         </Section>
       </div>
 
-      <Section title="实时交易概况" description="数据以 New API 最终结算日志为准" actions={<Button onClick={() => setSection('usage')} variant="ghost">查看完整报表</Button>}>
+      <Section title="实时交易概况" description="数据以最终结算日志为准" actions={<Button onClick={() => setSection('usage')} variant="ghost">查看完整报表</Button>}>
         <div className="transaction-band">
           <div><span>请求总数</span><strong>{summary.today_request_count || 0}</strong><small>今日路由请求</small></div>
           <div><span>成功请求</span><strong>{summary.today_successful_requests || 0} / {summary.today_request_count || 0}</strong><small>{successRate(summary.today_successful_requests, summary.today_request_count)}</small></div>
@@ -145,7 +139,7 @@ export default function AdminView({ section, setSection, openModal, notify }) {
 
   return (
     <div className="view-shell admin-view">
-      <PageHeader eyebrow="平台管理" title="运营管理" description="处理平台外围业务；模型转发、原生计费和余额扣减继续交由 New API。" actions={<Button icon={ShieldCheck}>管理员权限</Button>} />
+      <PageHeader eyebrow="平台管理" title="运营管理" description="统一处理用户、商户、渠道、模型、支付和结算业务。" />
       <div className="admin-layout">
         <aside className="admin-sidebar" aria-label="管理员功能">
           {sections.map(({ id, label, icon: Icon, count }) => <button className={section === id ? 'active' : ''} key={id} onClick={() => setSection(id)} type="button"><Icon size={17} /><span>{label}</span>{count > 0 && <b>{count}</b>}</button>)}
@@ -160,10 +154,8 @@ export default function AdminView({ section, setSection, openModal, notify }) {
           {section === 'payment' && <AdminPayment notify={notify} openModal={openModal} />}
           {section === 'redemptions' && <AdminRedemptions notify={notify} />}
           {section === 'withdrawals' && <AdminWithdrawals notify={notify} openModal={openModal} />}
-          {section === 'tasks' && <AdminTasks notify={notify} />}
           {section === 'announcements' && <AdminAnnouncements notify={notify} />}
           {section === 'settings' && <AdminSettings notify={notify} />}
-          {section === 'audit' && <AdminAudit />}
         </div>
       </div>
     </div>

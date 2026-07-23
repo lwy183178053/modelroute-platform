@@ -1727,3 +1727,136 @@
 - `docs/部署环境审计.md`：更新当前提交、两份迁移、20 个模型、直接覆盖边界和生产验收证据。
 - `progress.md`：追加 103 直接覆盖、修复发布、数据清理、隔离和验收记录。
 - 生产发布目录：`/opt/modelroute-platform/releases/60f310080980`；代码回滚可把 `current` 切回 `/opt/modelroute-platform/releases/138eee35b89e` 后执行部署脚本。旧开发数据已直接覆盖，不存在本轮数据回滚点。
+
+## 2026-07-23 - Task: 精简后台并统一用户、渠道与数据标识
+
+### What was done
+
+- 删除操作记录、系统任务、密钥查看、渠道余额刷新和正式渠道行内测试的页面、接口、存储及验收逻辑；模型调用、消费、退款、渠道调用日志和结算账本继续保留。
+- 用户统一返回普通用户、商户、管理员三种账号类型；商户权限撤销与恢复并入用户管理，支持按账号类型筛选，不再显示独立商户权限列表。
+- 管理端渠道审核记录与已审核渠道合并为同一生命周期表，统一显示审核中、已审核、不通过和已下架；商户和管理员均可下架或删除有权限的渠道。
+- 商户模型设置支持按厂商再选型号、发布零至五倍价格以及取消当前价格；取消后对应模型退出市场和新路由候选。
+- 控制台删除无行为按钮，账户设置改为账号资料与有效工作区；模型市场删除接入文档入口；主要数据表统一以数字 ID 作为首列。
+- 前端不再展示内部核心名称、内部商户资料编号和内部渠道编号；运营总览保留全平台成交数据，渠道调用日志支持按商户用户 ID 与平台渠道 ID 筛选。
+- 修复渠道模型同步弹窗因缺少状态组件导入而跳回页面的问题；修正截图脚本的旧价格版本断言和商户验收脚本对已删除操作记录表的残留清理语句。
+
+### Testing
+
+- `go test -count=1 ./...` 通过。
+- `go vet ./...` 通过。
+- `go build ./...` 通过。
+- `npm.cmd run test:ui` 通过，覆盖统一渠道表、渠道同步不跳页、取消价格、账号类型、人民币支付和已删除入口。
+- `npm.cmd run capture` 通过，桌面与移动端截图全部生成且根页面无横向溢出。
+- `python -m unittest discover -s deploy/tests -p "test_*.py"` 通过，27 项部署测试成功。
+- `docker compose --env-file .env.example --profile tools -f compose.yaml config` 通过。
+- `git diff --check` 通过；静态扫描确认前端无操作记录、系统任务、刷新余额、查看密钥、分组倍率和接入文档入口，仓库未写入上游或支付密钥正文。
+- 对提供的上游地址执行只读 `/v1/models` 验证，返回 OpenAI 兼容数据结构、20 个模型且无重复；密钥未写入仓库、文档或测试输出。
+
+### Notes
+
+- `apps/api/internal/bootstrap/resources.go`：移除操作记录存储初始化。
+- `apps/api/internal/bootstrap/resources_test.go`：更新资源初始化断言。
+- `apps/api/internal/httpapi/absolute_pricing.go`：统一价格记录的外部 ID 字段。
+- `apps/api/internal/httpapi/account_handlers.go`：删除密钥查看接口和操作记录写入。
+- `apps/api/internal/httpapi/account_test.go`：更新密钥与用户管理接口回归。
+- `apps/api/internal/httpapi/announcement_handlers.go`：移除公告操作记录写入。
+- `apps/api/internal/httpapi/announcement_handlers_test.go`：更新公告处理测试依赖。
+- `apps/api/internal/httpapi/audit_store.go`：删除独立操作记录存储。
+- `apps/api/internal/httpapi/audit_store_test.go`：删除独立操作记录存储测试。
+- `apps/api/internal/httpapi/auth_handlers.go`：增加账号类型和用户列表商户状态映射。
+- `apps/api/internal/httpapi/auth_test.go`：覆盖账号类型与筛选结果。
+- `apps/api/internal/httpapi/channel_models_handlers.go`：清理渠道模型响应中的内部字段。
+- `apps/api/internal/httpapi/health_runner.go`：统一健康任务使用的渠道标识。
+- `apps/api/internal/httpapi/merchant_handlers.go`：合并商户权限入口并清理内部名称与操作记录写入。
+- `apps/api/internal/httpapi/merchant_handlers_test.go`：覆盖用户维度商户权限和渠道生命周期。
+- `apps/api/internal/httpapi/merchant_store.go`：按用户筛选渠道并统一外部渠道 ID。
+- `apps/api/internal/httpapi/merchant_store_test.go`：覆盖渠道筛选与映射。
+- `apps/api/internal/httpapi/merchant_types.go`：隐藏内部商户和渠道编号，精简仓储接口。
+- `apps/api/internal/httpapi/operations_handlers.go`：删除系统任务、渠道余额和行内测试处理器。
+- `apps/api/internal/httpapi/operations_handlers_test.go`：保留运营、渠道日志和兑换码测试并删除旧入口测试。
+- `apps/api/internal/httpapi/payment_domain.go`：统一人民币额度字段。
+- `apps/api/internal/httpapi/payment_handlers.go`：清理支付操作记录依赖。
+- `apps/api/internal/httpapi/payment_handlers_test.go`：更新支付服务测试装配。
+- `apps/api/internal/httpapi/pricing_sync.go`：统一价格同步渠道标识。
+- `apps/api/internal/httpapi/routing_handlers.go`：增加取消价格并隐藏内部路由字段。
+- `apps/api/internal/httpapi/routing_handlers_test.go`：覆盖取消价格和密钥路由响应。
+- `apps/api/internal/httpapi/routing_proxy.go`：统一代理请求中的渠道 ID。
+- `apps/api/internal/httpapi/routing_store.go`：增加价格停用和平台渠道映射。
+- `apps/api/internal/httpapi/server.go`：注销旧接口并注册用户商户状态与取消价格接口。
+- `apps/api/internal/httpapi/server_test.go`：确认已删除路由不再注册。
+- `apps/api/internal/httpapi/services.go`：删除操作记录服务契约。
+- `apps/api/internal/httpapi/settlement_handlers.go`：清理结算操作记录写入。
+- `apps/api/internal/httpapi/settlement_handlers_test.go`：更新结算处理器测试装配。
+- `apps/api/internal/httpapi/settlement_reconciliation.go`：对账响应改用平台渠道 ID。
+- `apps/api/internal/httpapi/settlement_sync.go`：结算同步统一渠道标识。
+- `apps/api/internal/httpapi/settlement_types.go`：隐藏内部渠道编号。
+- `apps/api/internal/httpapi/usage_handlers.go`：增加按商户用户与平台渠道筛选的渠道日志。
+- `apps/api/internal/migrations/sql/000001_v2_baseline.sql`：从开发基线删除操作记录表。
+- `apps/web/artifacts/admin-announcements-desktop.png`：更新桌面公告管理截图。
+- `apps/web/artifacts/admin-announcements-mobile.png`：更新移动端公告管理截图。
+- `apps/web/artifacts/admin-channels-desktop.png`：更新桌面统一渠道管理截图。
+- `apps/web/artifacts/admin-channels-mobile.png`：更新移动端统一渠道管理截图。
+- `apps/web/artifacts/admin-desktop.png`：更新桌面运营总览截图。
+- `apps/web/artifacts/admin-image-price-desktop.png`：更新桌面图片价格截图。
+- `apps/web/artifacts/admin-mobile.png`：更新移动端运营总览截图。
+- `apps/web/artifacts/admin-model-price-desktop.png`：更新桌面文本价格截图。
+- `apps/web/artifacts/admin-model-price-mobile.png`：更新移动端文本价格截图。
+- `apps/web/artifacts/admin-models-desktop.png`：更新桌面模型管理截图。
+- `apps/web/artifacts/admin-models-mobile.png`：更新移动端模型管理截图。
+- `apps/web/artifacts/admin-redemptions-desktop.png`：更新桌面兑换码截图。
+- `apps/web/artifacts/admin-redemptions-mobile.png`：更新移动端兑换码截图。
+- `apps/web/artifacts/admin-settings-desktop.png`：更新桌面平台设置截图。
+- `apps/web/artifacts/admin-settings-mobile.png`：更新移动端平台设置截图。
+- `apps/web/artifacts/admin-usage-desktop.png`：更新桌面渠道调用日志截图。
+- `apps/web/artifacts/admin-usage-mobile.png`：更新移动端渠道调用日志截图。
+- `apps/web/artifacts/admin-withdrawals-desktop.png`：更新桌面提现审核截图。
+- `apps/web/artifacts/admin-withdrawals-mobile.png`：更新移动端提现审核截图。
+- `apps/web/artifacts/announcement-panel-desktop.png`：更新桌面公告面板截图。
+- `apps/web/artifacts/announcement-panel-mobile.png`：更新移动端公告面板截图。
+- `apps/web/artifacts/console-desktop.png`：更新桌面控制台截图。
+- `apps/web/artifacts/console-mobile.png`：更新移动端控制台截图。
+- `apps/web/artifacts/market-desktop.png`：更新桌面模型市场截图。
+- `apps/web/artifacts/market-mobile.png`：更新移动端模型市场截图。
+- `apps/web/artifacts/merchant-desktop.png`：更新桌面商户中心截图。
+- `apps/web/artifacts/merchant-mobile.png`：更新移动端商户中心截图。
+- `apps/web/artifacts/merchant-offers-desktop.png`：更新桌面商户价格截图。
+- `apps/web/artifacts/merchant-offers-mobile.png`：更新移动端商户价格截图。
+- `apps/web/artifacts/payment-config-desktop.png`：更新桌面支付配置截图。
+- `apps/web/artifacts/payment-config-mobile.png`：更新移动端支付配置截图。
+- `apps/web/artifacts/route-modal-desktop.png`：更新桌面密钥路由弹窗截图。
+- `apps/web/artifacts/route-modal-mobile.png`：更新移动端密钥路由弹窗截图。
+- `apps/web/artifacts/withdrawal-modal-desktop.png`：更新桌面提现弹窗截图。
+- `apps/web/artifacts/withdrawal-modal-mobile.png`：更新移动端提现弹窗截图。
+- `apps/web/scripts/capture.mjs`：更新截图数据、旧入口和价格版本断言。
+- `apps/web/scripts/ui-smoke.mjs`：覆盖账号类型、统一渠道、同步不跳页、取消价格和删除入口。
+- `apps/web/src/Modals.jsx`：修复渠道同步弹窗并将价格选择拆为厂商与型号。
+- `apps/web/src/styles.css`：补充账户设置和统一表格布局样式。
+- `apps/web/src/views/AdminView.jsx`：删除操作记录和系统任务导航，调整渠道日志位置。
+- `apps/web/src/views/ConsoleView.jsx`：重做侧栏控制台、密钥路由和账户设置。
+- `apps/web/src/views/MarketView.jsx`：删除接入文档入口并增加 ID 首列。
+- `apps/web/src/views/MerchantView.jsx`：统一渠道生命周期、取消价格和数据 ID 展示。
+- `apps/web/src/views/UsagePanels.jsx`：保留用户调用消费日志并增加日志 ID。
+- `apps/web/src/views/admin/AdminAnnouncements.jsx`：统一公告 ID 展示。
+- `apps/web/src/views/admin/AdminAudit.jsx`：删除操作记录页面。
+- `apps/web/src/views/admin/AdminChannels.jsx`：合并审核与正式渠道表并增加状态操作和筛选。
+- `apps/web/src/views/admin/AdminMerchants.jsx`：只保留商户申请审核，移除独立权限表。
+- `apps/web/src/views/admin/AdminModels.jsx`：统一模型和价格版本 ID 展示。
+- `apps/web/src/views/admin/AdminPayment.jsx`：统一支付订单 ID 与人民币额度展示。
+- `apps/web/src/views/admin/AdminRedemptions.jsx`：统一兑换码 ID 展示。
+- `apps/web/src/views/admin/AdminSettings.jsx`：精简平台设置说明。
+- `apps/web/src/views/admin/AdminTasks.jsx`：删除系统任务页面。
+- `apps/web/src/views/admin/AdminUsage.jsx`：改为渠道调用日志并增加商户和渠道筛选。
+- `apps/web/src/views/admin/AdminUsers.jsx`：增加用户 ID、账号类型筛选和商户权限操作。
+- `apps/web/src/views/admin/AdminWithdrawals.jsx`：统一提现与对账渠道 ID 展示。
+- `deploy/scripts/verify-accounts.sh`：移除密钥查看和操作记录验收。
+- `deploy/scripts/verify-merchants.sh`：更新商户渠道验收并删除已移除表的清理语句。
+- `deploy/scripts/verify-operations.sh`：改用运营总览与渠道日志并删除旧操作入口。
+- `deploy/scripts/verify-routing.sh`：从密钥列表读取新密钥并更新路由断言。
+- `deploy/tests/test_release_tools.py`：锁定旧接口、旧表和旧验收动作不得回归。
+- `docs/公告管理.md`：更新公告状态留存与已读规则。
+- `docs/商户与渠道审核接口.md`：更新用户维度商户权限和渠道记录边界。
+- `docs/多模型渠道运营升级.md`：记录统一渠道生命周期与平台渠道 ID。
+- `docs/账号与管理员接口.md`：记录账号类型、密钥复制和已删除接口。
+- `docs/运营管理与升级验收.md`：记录精简后的运营总览与渠道日志范围。
+- `progress.md`：追加本轮改动、测试、文件清单和回滚点。
+- 回滚点：本轮前的本地基线为 `08eb7fedb3e0`；提交后执行 `git revert <本阶段提交>` 可回退本轮代码、文档与截图。当前改动未推送、未部署到 103，服务器运行状态未改变。

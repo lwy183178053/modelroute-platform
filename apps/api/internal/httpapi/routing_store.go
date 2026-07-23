@@ -53,6 +53,7 @@ type CanonicalModel struct {
 type RoutingRepository interface {
 	CreateCanonicalModel(context.Context, CreateCanonicalModelCommand) (CanonicalModel, error)
 	CreateOffer(context.Context, CreateOfferCommand) (OfferVersion, error)
+	RetireOffer(context.Context, int, int64) error
 	MarkOfferSyncFailed(context.Context, int64, string) error
 	BindTokenAndDefaultPolicy(context.Context, int, int, string) (RoutingPolicy, error)
 	UpdatePolicy(context.Context, int, int, RoutingPolicyInput) (RoutingPolicy, error)
@@ -375,6 +376,28 @@ RETURNING id
 		return OfferVersion{}, fmt.Errorf("提交报价事务：%w", err)
 	}
 	return offer, nil
+}
+
+func (s *SQLRoutingStore) RetireOffer(ctx context.Context, userID int, modelID int64) error {
+	if userID <= 0 || modelID <= 0 {
+		return ErrRoutingInvalidState
+	}
+	result, err := s.database.ExecContext(ctx, `
+UPDATE offer_versions offer
+SET status = 'inactive', retired_at = now()
+FROM merchant_profiles merchant
+WHERE offer.merchant_profile_id = merchant.id
+  AND merchant.newapi_user_id = $1
+  AND offer.canonical_model_id = $2
+  AND offer.status = 'active'
+`, userID, modelID)
+	if err != nil {
+		return fmt.Errorf("取消商户报价：%w", err)
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return ErrRoutingNotFound
+	}
+	return nil
 }
 
 func (s *SQLRoutingStore) ActivateOffer(ctx context.Context, offerID int64) error {

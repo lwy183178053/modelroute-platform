@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Activity, BookOpen, Boxes, Clock3, Gauge, Search, Store } from 'lucide-react';
+import { Activity, Boxes, Clock3, Gauge, Search, Store } from 'lucide-react';
 import { apiRequest, formatImagePrice, formatOfferPrice } from '../api';
 import { Button, InlineNotice, Metric, PageHeader, ProviderLogo, Section, Select, Status, TextInput } from '../ui';
 
@@ -91,7 +91,7 @@ export default function MarketView({ navigate }) {
         eyebrow="实时市场"
         title="模型服务市场"
         description="同一模型按商户报价、稳定性和实际运行数据透明比较。"
-        actions={(<><Button icon={BookOpen}>接入文档</Button><Button icon={Gauge} variant="primary" onClick={() => navigate('console')}>进入控制台</Button></>)}
+        actions={<Button icon={Gauge} variant="primary" onClick={() => navigate('console')}>进入控制台</Button>}
       />
 
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}
@@ -126,11 +126,12 @@ export default function MarketView({ navigate }) {
 
         <div className="table-wrap market-table-wrap">
           <table className="data-table market-table">
-            <thead><tr><th>排名</th><th>模型与商户</th><th>协议</th><th>状态</th><th>可用率</th><th>P95 首字</th><th>当前价格</th><th>倍率</th><th>渠道</th></tr></thead>
+            <thead><tr><th>ID</th><th>排名</th><th>模型与商户</th><th>协议</th><th>状态</th><th>可用率</th><th>P95 首字</th><th>当前价格</th><th>倍率</th><th>渠道</th></tr></thead>
             <tbody>
               {offers.map((offer, index) => {
                 const model = modelMap.get(offer.model);
                 return <tr key={offer.offer_id}>
+                  <td><code>{offer.offer_id}</code></td>
                   <td><span className={`rank rank-${Math.min(index + 1, 5)}`}>{index + 1}</span></td>
                   <td><div className="model-cell"><ProviderLogo provider={model?.provider || ''} size={23} /><div><strong>{offer.model}</strong><span>{offer.merchant_name}</span></div></div></td>
                   <td>{protocolNames[offer.protocol] || offer.protocol}</td>

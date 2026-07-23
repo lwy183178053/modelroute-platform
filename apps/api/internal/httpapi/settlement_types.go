@@ -80,7 +80,8 @@ type SettlementReconciliationItem struct {
 	NewAPIUserID     int             `json:"newapi_user_id"`
 	SourceType       int             `json:"source_type"`
 	ModelName        string          `json:"model_name"`
-	NewAPIChannelID  int             `json:"newapi_channel_id"`
+	ChannelID        int64           `json:"channel_id,omitempty"`
+	NewAPIChannelID  int             `json:"-"`
 	GrossQuota       int64           `json:"gross_quota"`
 	ReasonCode       string          `json:"reason_code"`
 	Details          json.RawMessage `json:"details"`

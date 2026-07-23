@@ -3,7 +3,6 @@ package httpapi
 import (
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -86,10 +85,6 @@ func (s *server) createAdminAnnouncement(w http.ResponseWriter, r *http.Request)
 		writeAPIError(w, http.StatusInternalServerError, "announcement_store_error", "创建公告失败")
 		return
 	}
-	if err := s.recordAnnouncementAudit(r, session, "announcement.create", item.ID); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "公告已创建，但审计记录失败")
-		return
-	}
 	writeJSON(w, http.StatusCreated, map[string]any{"success": true, "data": item})
 }
 
@@ -109,10 +104,6 @@ func (s *server) updateAdminAnnouncement(w http.ResponseWriter, r *http.Request)
 	item, err := s.services.Announcements.Update(r.Context(), command)
 	if err != nil {
 		s.writeAnnouncementError(w, err, "更新公告失败")
-		return
-	}
-	if err := s.recordAnnouncementAudit(r, session, "announcement.update", item.ID); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "公告已更新，但审计记录失败")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": item})
@@ -137,19 +128,13 @@ func (s *server) changeAnnouncementStatus(w http.ResponseWriter, r *http.Request
 	}
 	var item Announcement
 	var err error
-	action := "withdraw"
 	if publish {
-		action = "publish"
 		item, err = s.services.Announcements.Publish(r.Context(), id, session.UserID, time.Now().UTC())
 	} else {
 		item, err = s.services.Announcements.Withdraw(r.Context(), id, session.UserID)
 	}
 	if err != nil {
 		s.writeAnnouncementError(w, err, "更新公告状态失败")
-		return
-	}
-	if err := s.recordAnnouncementAudit(r, session, "announcement."+action, item.ID); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "公告状态已更新，但审计记录失败")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": item})
@@ -250,20 +235,4 @@ func (s *server) writeAnnouncementError(w http.ResponseWriter, err error, fallba
 	default:
 		writeAPIError(w, http.StatusInternalServerError, "announcement_store_error", fallback)
 	}
-}
-
-func (s *server) recordAnnouncementAudit(r *http.Request, actor platformauth.Session, action string, announcementID int64) error {
-	if s.services.Audit == nil {
-		return nil
-	}
-	return s.services.Audit.Record(r.Context(), AuditEntry{
-		ActorUserID: actor.UserID,
-		ActorRole:   strconv.Itoa(actor.Role),
-		Action:      action,
-		ObjectType:  "announcement",
-		ObjectID:    strconv.FormatInt(announcementID, 10),
-		Result:      "success",
-		RequestID:   r.Header.Get("X-Request-ID"),
-		SourceIP:    clientIP(r),
-	})
 }

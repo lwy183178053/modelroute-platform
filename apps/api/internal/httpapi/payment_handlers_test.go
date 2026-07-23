@@ -336,7 +336,7 @@ func TestPaymentReadAPIsRespectUserOwnershipAndAdminRole(t *testing.T) {
 }
 
 func TestAdminRetriesFailedCreditAndResolvesUnknownCredit(t *testing.T) {
-	services, _, audit := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	repository := &paymentRepositoryStub{}
 	retryCalls := make([]string, 0)
 	repository.retryCredit = func(_ context.Context, orderID int64, allowUnknown bool) error {
@@ -375,8 +375,5 @@ func TestAdminRetriesFailedCreditAndResolvesUnknownCredit(t *testing.T) {
 	}
 	if strings.Join(retryCalls, "|") != "21:false|22:true" || confirmed != 23 {
 		t.Fatalf("重试=%v，确认=%d", retryCalls, confirmed)
-	}
-	if len(audit.entries) != 3 || audit.entries[0].Action != "payment.credit.retry" || audit.entries[1].Action != "payment.credit.resolve.retry" || audit.entries[2].Action != "payment.credit.resolve.credited" {
-		t.Fatalf("支付审计=%+v", audit.entries)
 	}
 }

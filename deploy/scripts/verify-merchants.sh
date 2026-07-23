@@ -22,7 +22,6 @@ ADMIN_COOKIE_JAR="$WORK_DIR/admin-cookies.txt"
 USER_COOKIE_JAR="$WORK_DIR/user-cookies.txt"
 NEW_API_COOKIE_JAR="$WORK_DIR/new-api-cookies.txt"
 APPLICATION_ID=""
-TEST_APPLICATION_ID=""
 TEST_USER_ID=""
 NEW_API_ADMIN_ID=""
 NEW_API_BASE_URL=""
@@ -30,11 +29,6 @@ NEW_API_BASE_URL=""
 cleanup_platform_fixture() {
   case "$TEST_USER_ID" in
     ''|*[!0-9]*) return 0 ;;
-  esac
-  application_id=0
-  case "$TEST_APPLICATION_ID" in
-    ''|*[!0-9]*) ;;
-    *) application_id="$TEST_APPLICATION_ID" ;;
   esac
   docker compose --env-file .env exec -T postgres \
     psql -v ON_ERROR_STOP=1 -U "$POSTGRES_SUPERUSER" -d "$PLATFORM_DB_NAME" <<SQL
@@ -45,9 +39,6 @@ WHERE newapi_user_id = $TEST_USER_ID;
 DELETE FROM merchant_channel_reviews WHERE merchant_newapi_user_id = $TEST_USER_ID;
 DELETE FROM merchant_applications WHERE newapi_user_id = $TEST_USER_ID;
 DELETE FROM merchant_channel_tests WHERE newapi_user_id = $TEST_USER_ID;
-DELETE FROM platform_audit_logs
-WHERE actor_newapi_user_id = $TEST_USER_ID
-   OR (object_id = '$application_id' AND action LIKE 'merchant.%');
 COMMIT;
 SQL
 }
@@ -300,7 +291,6 @@ assert int(data["data"]["initial_channel"]["canonical_model_id"]) == int(request
 print(data["data"]["id"])
 PY
 )"
-TEST_APPLICATION_ID="$APPLICATION_ID"
 
 curl -fsS -b "$USER_COOKIE_JAR" "$BASE_URL/api/merchant/application" >"$WORK_DIR/application-state.json"
 python3 - "$WORK_DIR/application-state.json" "$APPLICATION_ID" <<'PY'

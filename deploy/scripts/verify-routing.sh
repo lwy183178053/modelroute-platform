@@ -63,15 +63,20 @@ printf '{"name":"%s","expired_time":-1,"remain_quota":0,"unlimited_quota":true,"
 curl -fsS -b "$COOKIE_JAR" -H "Origin: $BASE_URL" -H 'Content-Type: application/json' --data-binary @- "$BASE_URL/api/keys" >"$WORK_DIR/create-key.json"
 
 curl -fsS -b "$COOKIE_JAR" "$BASE_URL/api/keys?p=1&page_size=100" >"$WORK_DIR/keys.json"
-KEY_ID="$(python3 - "$WORK_DIR/keys.json" "$KEY_NAME" <<'PY'
+KEY_VALUES="$(python3 - "$WORK_DIR/keys.json" "$KEY_NAME" <<'PY'
 import json
 import sys
 
 data = json.load(open(sys.argv[1], encoding="utf-8"))
 match = next(item for item in data["data"]["items"] if item["name"] == sys.argv[2])
-print(match["id"])
+key = str(match.get("key", ""))
+raw_key = key[3:] if key.startswith("sk-") else key
+assert len(raw_key) >= 32 and "*" not in raw_key
+print(f'{match["id"]}|{key if key.startswith("sk-") else "sk-" + key}')
 PY
 )"
+KEY_ID="${KEY_VALUES%%|*}"
+MODELROUTE_KEY="${KEY_VALUES#*|}"
 
 curl -fsS -b "$COOKIE_JAR" "$BASE_URL/api/routing-policies/$KEY_ID" >"$WORK_DIR/policy.json"
 python3 - "$WORK_DIR/policy.json" "$KEY_ID" <<'PY'
@@ -97,16 +102,6 @@ fi
 printf '{"mode":"smart","priority":"price","minimum_multiplier_bps":0,"maximum_multiplier_bps":50000,"merchant_ids":[]}' |
 curl -fsS -b "$COOKIE_JAR" -H "Origin: $BASE_URL" -H 'Content-Type: application/json' --data-binary @- -X PUT "$BASE_URL/api/routing-policies/$KEY_ID" >"$WORK_DIR/saved-policy.json"
 
-curl -fsS -b "$COOKIE_JAR" -H "Origin: $BASE_URL" -X POST "$BASE_URL/api/keys/$KEY_ID/reveal" >"$WORK_DIR/key.json"
-MODELROUTE_KEY="$(python3 - "$WORK_DIR/key.json" <<'PY'
-import json
-import sys
-
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-key = data["data"]["key"]
-print(key if key.startswith("sk-") else "sk-" + key)
-PY
-)"
 status="$(printf '{"model":"modelroute-contract-missing","messages":[{"role":"user","content":"ping"}]}' |
   curl -sS -o "$WORK_DIR/model-error.json" -w '%{http_code}' -H "Authorization: Bearer $MODELROUTE_KEY" -H 'Content-Type: application/json' --data-binary @- "$BASE_URL/v1/chat/completions")"
 if [ "$status" != "503" ]; then

@@ -59,7 +59,6 @@ function merchantOptions(offers) {
 export default function ConsoleView({ account, openModal, notify, navigate, onAccountRefresh }) {
   const [section, setSection] = useState('overview');
   const [keys, setKeys] = useState([]);
-  const [revealed, setRevealed] = useState({});
   const [keyLoading, setKeyLoading] = useState(true);
   const [keyError, setKeyError] = useState('');
   const [merchants, setMerchants] = useState([]);
@@ -133,14 +132,6 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
     }
   };
 
-  const fetchFullKey = async (key) => {
-    if (revealed[key.id]) return revealed[key.id];
-    const data = await apiRequest(`/api/keys/${key.id}/reveal`, { method: 'POST' });
-    const value = data?.key || data;
-    setRevealed((values) => ({ ...values, [key.id]: value }));
-    return value;
-  };
-
   const deleteKey = async (key) => {
     if (!window.confirm(`确认删除密钥“${key.name}”吗？`)) return;
     try {
@@ -164,8 +155,7 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
 
   const copyKey = async (key) => {
     try {
-      const value = await fetchFullKey(key);
-      await navigator.clipboard.writeText(displayKey(value));
+      await navigator.clipboard.writeText(displayKey(key.key));
       notify('密钥已复制');
     } catch (error) {
       notify(error.message || '复制密钥失败');
@@ -173,6 +163,8 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
   };
 
   const currentSection = consoleSections.find((item) => item.id === section) || consoleSections[0];
+  const accountTypeName = { user: '普通用户', merchant: '商户', admin: '管理员' }[account.account_type]
+    || (Number(account.role) >= 10 ? '管理员' : account.is_merchant ? '商户' : '普通用户');
 
   return (
     <div className="view-shell console-view">
@@ -180,7 +172,6 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
         eyebrow="用户工作台"
         title={currentSection.label}
         description="管理账户、API 密钥、调用记录与充值。"
-        actions={<><Button icon={Settings2} onClick={() => setSection('settings')}>账户设置</Button><Button icon={Plus} variant="primary" onClick={() => openModal({ type: 'recharge', onSaved: loadPaymentOrders })}>立即充值</Button></>}
       />
 
       <div className="admin-layout console-layout">
@@ -193,10 +184,10 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
         <div className="admin-content">
           {section === 'overview' && <>
             <div className="metrics-grid">
-              <Metric label="账户余额" value={formatQuota(account.quota)} hint={`UID ${account.id}`} icon={WalletCards} />
+              <Metric label="账户余额" value={formatQuota(account.quota)} hint={`用户 ID ${account.id}`} icon={WalletCards} />
               <Metric label="累计消费" value={formatQuota(account.used_quota)} hint="含缓存计费与退款" icon={Coins} tone="blue" />
               <Metric label="累计请求" value={String(account.request_count || 0)} hint="全部 API 密钥" icon={Activity} tone="green" />
-              <Metric label="账号身份" value={Number(account.role) >= 10 ? '管理员' : account.is_merchant ? '商户' : '普通用户'} hint="当前有效身份" icon={Store} tone="amber" />
+              <Metric label="账号身份" value={accountTypeName} hint="当前有效身份" icon={Store} tone="amber" />
             </div>
             <UsageTrend data={usage.data} error={usage.error} loading={usage.loading} />
           </>}
@@ -204,9 +195,9 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
           {section === 'keys' && <Section title="API 密钥与路由" description="每个 API 密钥独立设置路由策略" actions={<Button icon={KeyRound} variant="primary" onClick={() => openModal({ type: 'key', onSaved: loadKeys })}>创建密钥</Button>}>
             <div className="table-wrap">
               <table className="data-table">
-                <thead><tr><th>名称 / 密钥</th><th>路由方式</th><th>倍率区间</th><th>优先规则</th><th>固定商户</th><th>状态</th><th></th></tr></thead>
+                <thead><tr><th>ID</th><th>名称 / 密钥</th><th>路由方式</th><th>倍率区间</th><th>优先规则</th><th>固定商户</th><th>状态</th><th>操作</th></tr></thead>
                 <tbody>{keys.map((key) => <tr key={key.id}>
-                  <td><strong>{key.name}</strong><CopyValue onCopy={() => copyKey(key)}>{displayKey(revealed[key.id] || key.key)}</CopyValue></td>
+                  <td><code>{key.id}</code></td><td><strong>{key.name}</strong><CopyValue onCopy={() => copyKey(key)}>{displayKey(key.key)}</CopyValue></td>
                   <td><span className="route-kind"><Route size={15} /> {key.routing_policy?.mode === 'fixed' ? '固定商户' : key.routing_policy ? '智能路由' : '未绑定'}</span></td>
                   <td>{key.routing_policy ? `${formatMultiplier(key.routing_policy.minimum_multiplier_bps)} - ${formatMultiplier(key.routing_policy.maximum_multiplier_bps)}` : '-'}</td>
                   <td>{key.routing_policy?.priority === 'price' ? '价格优先' : key.routing_policy ? '稳定性优先' : '-'}</td>
@@ -214,8 +205,8 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
                   <td><div className="status-control"><Status>{Number(key.status) === 1 ? '正常' : '停用'}</Status><label className="compact-switch" title={Number(key.status) === 1 ? '停用密钥' : '启用密钥'}><input aria-label={`启用${key.name}`} checked={Number(key.status) === 1} onChange={(event) => setKeyStatus(key, event.target.checked)} type="checkbox" /><span /></label></div></td>
                   <td><div className="row-actions"><Button icon={Pencil} onClick={() => openModal({ type: 'key', key, onSaved: loadKeys })} variant="ghost">编辑</Button><Button onClick={() => openModal({ type: 'route', key, policy: key.routing_policy, merchants, onSaved: loadKeys })} variant="ghost">编辑路由策略</Button><Button icon={Trash2} onClick={() => deleteKey(key)} variant="danger">删除</Button></div></td>
                 </tr>)}
-                {!keyLoading && keys.length === 0 && <tr><td className="table-message" colSpan="7">{keyError || '尚未创建 API 密钥'}</td></tr>}
-                {keyLoading && <tr><td className="table-message" colSpan="7">正在读取 API 密钥</td></tr>}</tbody>
+                {!keyLoading && keys.length === 0 && <tr><td className="table-message" colSpan="8">{keyError || '尚未创建 API 密钥'}</td></tr>}
+                {keyLoading && <tr><td className="table-message" colSpan="8">正在读取 API 密钥</td></tr>}</tbody>
               </table>
             </div>
           </Section>}
@@ -230,27 +221,22 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
               </form>
             </Section>
             <Section title="充值记录">
-              <div className="table-wrap"><table className="data-table"><thead><tr><th>订单号</th><th>人民币金额</th><th>入账额度</th><th>支付状态</th><th>额度入账</th><th>创建时间</th></tr></thead><tbody>
-                {paymentOrders.map((order) => <tr key={order.id}><td><code>{order.order_no}</code></td><td>¥{(Number(order.amount_cny_cents || 0) / 100).toFixed(2)}</td><td>{formatQuota(order.newapi_quota)}</td><td><Status>{{ pending: '待支付', paid: '已支付', closed: '已关闭' }[order.payment_status] || order.payment_status}</Status></td><td><Status>{{ pending: '等待入账', processing: '入账中', succeeded: '已入账', failed: '入账异常', unknown: '结果未知' }[order.credit_status] || order.credit_status}</Status></td><td>{order.created_at ? new Date(order.created_at).toLocaleString('zh-CN', { hour12: false }) : '-'}</td></tr>)}
-                {paymentOrders.length === 0 && <tr><td className="table-message" colSpan="6">暂无充值订单</td></tr>}
+              <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>订单号</th><th>人民币金额</th><th>入账额度</th><th>支付状态</th><th>额度入账</th><th>创建时间</th></tr></thead><tbody>
+                {paymentOrders.map((order) => <tr key={order.id}><td><code>{order.id}</code></td><td><code>{order.order_no}</code></td><td>¥{(Number(order.amount_cny_cents || 0) / 100).toFixed(2)}</td><td>{formatQuota(order.newapi_quota)}</td><td><Status>{{ pending: '待支付', paid: '已支付', closed: '已关闭' }[order.payment_status] || order.payment_status}</Status></td><td><Status>{{ pending: '等待入账', processing: '入账中', succeeded: '已入账', failed: '入账异常', unknown: '结果未知' }[order.credit_status] || order.credit_status}</Status></td><td>{order.created_at ? new Date(order.created_at).toLocaleString('zh-CN', { hour12: false }) : '-'}</td></tr>)}
+                {paymentOrders.length === 0 && <tr><td className="table-message" colSpan="7">暂无充值订单</td></tr>}
               </tbody></table></div>
             </Section>
           </>}
 
-          {section === 'settings' && <Section title="账户设置">
-            <div className="account-summary">
-              <div className="account-avatar">{displayName.slice(0, 1).toUpperCase()}</div>
-              <div><strong>{displayName}</strong><span>UID {account.id} · {Number(account.role) >= 10 ? '管理员账号' : '普通账号'}</span></div>
-              <Status>正常</Status>
+          {section === 'settings' && <Section title="账户设置" description="查看当前账号资料和已开通的工作区">
+            <div className="account-settings-layout">
+              <div className="account-summary"><div className="account-avatar">{displayName.slice(0, 1).toUpperCase()}</div><div><strong>{displayName}</strong><span>用户 ID {account.id} · {accountTypeName}</span></div><Status>正常</Status></div>
+              <div className="account-rows"><div><span>登录账号</span><strong>{account.username}</strong></div><div><span>邮箱</span><strong>{account.email || '-'}</strong></div><div><span>用户类型</span><strong>{accountTypeName}</strong></div></div>
             </div>
-            <div className="account-rows">
-              <div><span>账号</span><strong>{account.username}</strong></div>
-              <div><span>账号角色</span><strong>{Number(account.role) >= 10 ? '管理员' : account.is_merchant ? '商户' : '普通用户'}</strong></div>
-            </div>
-            {(account.is_merchant || Number(account.role) >= 10) && <Button className="full-button" icon={ArrowUpRight} onClick={() => navigate('merchant')}>进入商户中心</Button>}
-            {!account.is_merchant && Number(account.role) < 10 && merchantApplication && ['pending', 'verifying', 'verified', 'approving'].includes(merchantApplication.status) && <InlineNotice tone="warning">等待管理员审核 · 申请编号 {merchantApplication.id}</InlineNotice>}
-            {!account.is_merchant && Number(account.role) < 10 && (!merchantApplication || merchantApplication.status === 'rejected') && <Button className="full-button" icon={ArrowUpRight} onClick={() => openModal({ type: 'merchantApply', models, onSaved: loadMerchantApplication })}>{merchantApplication?.status === 'rejected' ? '重新提交商户申请' : '申请成为商户'}</Button>}
-            {merchantApplication?.status === 'rejected' && <InlineNotice tone="warning">上次申请已驳回：{merchantApplication.review_reason || '请核对资料后重新提交'}</InlineNotice>}
+            <div className="account-actions">{(account.is_merchant || Number(account.role) >= 10) && <Button icon={ArrowUpRight} onClick={() => navigate('merchant')} variant="primary">进入商户中心</Button>}
+            {!account.is_merchant && Number(account.role) < 10 && merchantApplication && ['pending', 'verifying', 'verified', 'approving'].includes(merchantApplication.status) && <InlineNotice tone="warning">等待管理员审核 · 申请 ID {merchantApplication.id}</InlineNotice>}
+            {!account.is_merchant && Number(account.role) < 10 && (!merchantApplication || merchantApplication.status === 'rejected') && <Button icon={ArrowUpRight} onClick={() => openModal({ type: 'merchantApply', models, onSaved: loadMerchantApplication })}>{merchantApplication?.status === 'rejected' ? '重新提交商户申请' : '申请成为商户'}</Button>}
+            {merchantApplication?.status === 'rejected' && <InlineNotice tone="warning">上次申请未通过：{merchantApplication.review_reason || '请核对资料后重新提交'}</InlineNotice>}</div>
           </Section>}
         </div>
       </div>

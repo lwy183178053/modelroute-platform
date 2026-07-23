@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"math"
 	"net/http"
 	"net/mail"
 	"net/url"
@@ -51,7 +50,7 @@ func (s *server) adminPlatformSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) updateAdminPlatformSettings(w http.ResponseWriter, r *http.Request) {
-	_, session, ok := s.requireSession(w, r, roleAdmin)
+	_, _, ok := s.requireSession(w, r, roleAdmin)
 	if !ok || !s.requireSameOrigin(w, r) || !s.adminOperationsReady(w) {
 		return
 	}
@@ -93,14 +92,9 @@ func (s *server) updateAdminPlatformSettings(w http.ResponseWriter, r *http.Requ
 			continue
 		}
 		if _, err := s.services.AdminNewAPI.Do(r.Context(), http.MethodPut, "/api/option/", map[string]any{"key": update.key, "value": update.value}); err != nil {
-			s.recordAudit(r, session, "platform_settings.update", 0, "failed", err.Error())
 			writeUpstreamError(w, err, http.StatusBadGateway)
 			return
 		}
-	}
-	if err := s.recordAudit(r, session, "platform_settings.update", 0, "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "平台设置已保存，但审计记录失败")
-		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": platformSettingsFromRequest(request)})
 }
@@ -195,7 +189,7 @@ func (s *server) adminRedemptions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) createAdminRedemption(w http.ResponseWriter, r *http.Request) {
-	_, session, ok := s.requireSession(w, r, roleAdmin)
+	_, _, ok := s.requireSession(w, r, roleAdmin)
 	if !ok || !s.requireSameOrigin(w, r) || !s.adminOperationsReady(w) {
 		return
 	}
@@ -205,19 +199,14 @@ func (s *server) createAdminRedemption(w http.ResponseWriter, r *http.Request) {
 	}
 	data, err := s.services.AdminNewAPI.Do(r.Context(), http.MethodPost, "/api/redemption/", request)
 	if err != nil {
-		s.recordAudit(r, session, "redemption.create", 0, "failed", err.Error())
 		writeUpstreamError(w, err, http.StatusBadRequest)
-		return
-	}
-	if err := s.recordAudit(r, session, "redemption.create", 0, "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "兑换码已创建，但审计记录失败")
 		return
 	}
 	writeRawDataStatus(w, http.StatusCreated, data)
 }
 
 func (s *server) updateAdminRedemption(w http.ResponseWriter, r *http.Request) {
-	_, session, ok := s.requireSession(w, r, roleAdmin)
+	_, _, ok := s.requireSession(w, r, roleAdmin)
 	if !ok || !s.requireSameOrigin(w, r) || !s.adminOperationsReady(w) {
 		return
 	}
@@ -232,19 +221,14 @@ func (s *server) updateAdminRedemption(w http.ResponseWriter, r *http.Request) {
 	request["id"] = id
 	data, err := s.services.AdminNewAPI.Do(r.Context(), http.MethodPut, "/api/redemption/", request)
 	if err != nil {
-		s.recordAudit(r, session, "redemption.update", id, "failed", err.Error())
 		writeUpstreamError(w, err, http.StatusBadRequest)
-		return
-	}
-	if err := s.recordAudit(r, session, "redemption.update", id, "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "兑换码已更新，但审计记录失败")
 		return
 	}
 	writeRawData(w, data)
 }
 
 func (s *server) updateAdminRedemptionStatus(w http.ResponseWriter, r *http.Request) {
-	_, session, ok := s.requireSession(w, r, roleAdmin)
+	_, _, ok := s.requireSession(w, r, roleAdmin)
 	if !ok || !s.requireSameOrigin(w, r) || !s.adminOperationsReady(w) {
 		return
 	}
@@ -265,19 +249,14 @@ func (s *server) updateAdminRedemptionStatus(w http.ResponseWriter, r *http.Requ
 	}
 	data, err := s.services.AdminNewAPI.Do(r.Context(), http.MethodPut, "/api/redemption/?status_only=true", map[string]any{"id": id, "status": status})
 	if err != nil {
-		s.recordAudit(r, session, "redemption.status.update", id, "failed", err.Error())
 		writeUpstreamError(w, err, http.StatusBadRequest)
-		return
-	}
-	if err := s.recordAudit(r, session, "redemption.status.update", id, "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "兑换码状态已更新，但审计记录失败")
 		return
 	}
 	writeRawData(w, data)
 }
 
 func (s *server) deleteAdminRedemption(w http.ResponseWriter, r *http.Request) {
-	_, session, ok := s.requireSession(w, r, roleAdmin)
+	_, _, ok := s.requireSession(w, r, roleAdmin)
 	if !ok || !s.requireSameOrigin(w, r) || !s.adminOperationsReady(w) {
 		return
 	}
@@ -287,30 +266,20 @@ func (s *server) deleteAdminRedemption(w http.ResponseWriter, r *http.Request) {
 	}
 	data, err := s.services.AdminNewAPI.Do(r.Context(), http.MethodDelete, "/api/redemption/"+strconv.Itoa(id), nil)
 	if err != nil {
-		s.recordAudit(r, session, "redemption.delete", id, "failed", err.Error())
 		writeUpstreamError(w, err, http.StatusBadRequest)
-		return
-	}
-	if err := s.recordAudit(r, session, "redemption.delete", id, "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "兑换码已删除，但审计记录失败")
 		return
 	}
 	writeRawData(w, data)
 }
 
 func (s *server) deleteInvalidAdminRedemptions(w http.ResponseWriter, r *http.Request) {
-	_, session, ok := s.requireSession(w, r, roleAdmin)
+	_, _, ok := s.requireSession(w, r, roleAdmin)
 	if !ok || !s.requireSameOrigin(w, r) || !s.adminOperationsReady(w) {
 		return
 	}
 	data, err := s.services.AdminNewAPI.Do(r.Context(), http.MethodDelete, "/api/redemption/invalid", nil)
 	if err != nil {
-		s.recordAudit(r, session, "redemption.invalid.delete", 0, "failed", err.Error())
 		writeUpstreamError(w, err, http.StatusBadRequest)
-		return
-	}
-	if err := s.recordAudit(r, session, "redemption.invalid.delete", 0, "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "失效兑换码已清理，但审计记录失败")
 		return
 	}
 	writeRawData(w, data)
@@ -368,168 +337,18 @@ func (s *server) redeemCode(w http.ResponseWriter, r *http.Request) {
 	request.Key = strings.TrimSpace(request.Key)
 	data, err := s.services.NewAPI.Do(r.Context(), http.MethodPost, "/api/user/topup", map[string]string{"key": request.Key}, upstreamAuth(session))
 	if err != nil {
-		s.recordAudit(r, session, "redemption.redeem", 0, "failed", "兑换失败")
 		writeUpstreamError(w, err, http.StatusBadRequest)
 		return
 	}
-	if err := s.recordAudit(r, session, "redemption.redeem", 0, "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "兑换成功，但审计记录失败")
-		return
-	}
 	writeRawData(w, data)
-}
-
-func (s *server) adminSystemTasks(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := s.requireSession(w, r, roleAdmin); !ok || !s.adminOperationsReady(w) {
-		return
-	}
-	limit := positiveQueryInt(r, "limit", 20)
-	if limit > 100 {
-		limit = 100
-	}
-	data, err := s.services.AdminNewAPI.Do(r.Context(), http.MethodGet, "/api/system-task/list?limit="+strconv.Itoa(limit), nil)
-	if err != nil {
-		writeUpstreamError(w, err, http.StatusBadGateway)
-		return
-	}
-	writeRawData(w, data)
-}
-
-func (s *server) adminSystemTask(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := s.requireSession(w, r, roleAdmin); !ok || !s.adminOperationsReady(w) {
-		return
-	}
-	taskID := strings.TrimSpace(r.PathValue("task_id"))
-	if len(taskID) < 1 || len(taskID) > 100 || strings.ContainsAny(taskID, "/\\") {
-		writeAPIError(w, http.StatusBadRequest, "invalid_system_task", "系统任务编号无效")
-		return
-	}
-	data, err := s.services.AdminNewAPI.Do(r.Context(), http.MethodGet, "/api/system-task/"+url.PathEscape(taskID), nil)
-	if err != nil {
-		writeUpstreamError(w, err, http.StatusBadGateway)
-		return
-	}
-	writeRawData(w, data)
-}
-
-func (s *server) createAdminLogCleanupTask(w http.ResponseWriter, r *http.Request) {
-	_, session, ok := s.requireSession(w, r, roleAdmin)
-	if !ok || !s.requireSameOrigin(w, r) || !s.adminOperationsReady(w) {
-		return
-	}
-	var request struct {
-		BeforeTimestamp int64 `json:"before_timestamp"`
-	}
-	if err := decodeJSON(r, &request); err != nil || request.BeforeTimestamp <= 0 || request.BeforeTimestamp >= time.Now().Unix() {
-		writeAPIError(w, http.StatusBadRequest, "invalid_log_cleanup", "日志清理截止时间必须早于当前时间")
-		return
-	}
-	query := url.Values{"target_timestamp": []string{strconv.FormatInt(request.BeforeTimestamp, 10)}}
-	data, err := s.services.AdminNewAPI.Do(r.Context(), http.MethodPost, "/api/system-task/log-cleanup?"+query.Encode(), nil)
-	if err != nil {
-		s.recordAudit(r, session, "system_task.log_cleanup.create", 0, "failed", err.Error())
-		writeUpstreamError(w, err, http.StatusBadRequest)
-		return
-	}
-	if err := s.recordAudit(r, session, "system_task.log_cleanup.create", 0, "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "日志清理任务已创建，但审计记录失败")
-		return
-	}
-	writeRawDataStatus(w, http.StatusAccepted, data)
-}
-
-func (s *server) adminChannelRuntime(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := s.requireSession(w, r, roleAdmin); !ok || !s.channelOperationsReady(w) {
-		return
-	}
-	channelID, ok := pathInt64(w, r, "id", "渠道编号无效")
-	if !ok {
-		return
-	}
-	newAPIChannelID, err := s.services.Routing.ChannelForHealthReset(r.Context(), channelID)
-	if err != nil {
-		writeAPIError(w, http.StatusNotFound, "channel_not_found", "渠道不存在")
-		return
-	}
-	data, err := s.services.AdminNewAPI.Do(r.Context(), http.MethodGet, "/api/channel/"+strconv.Itoa(newAPIChannelID), nil)
-	if err != nil {
-		writeUpstreamError(w, err, http.StatusBadGateway)
-		return
-	}
-	var runtime struct {
-		ID                 int     `json:"id"`
-		Status             int     `json:"status"`
-		Balance            float64 `json:"balance"`
-		BalanceUpdatedTime int64   `json:"balance_updated_time"`
-		ResponseTime       int     `json:"response_time"`
-		TestTime           int64   `json:"test_time"`
-	}
-	if err := json.Unmarshal(data, &runtime); err != nil || runtime.ID != newAPIChannelID {
-		writeAPIError(w, http.StatusBadGateway, "new_api_contract_error", "New API 渠道状态格式无效")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{
-		"newapi_channel_id": runtime.ID, "status": runtime.Status,
-		"balance_usd_micros": int64(math.Round(runtime.Balance * 1_000_000)), "balance_updated_time": runtime.BalanceUpdatedTime,
-		"response_time_ms": runtime.ResponseTime, "test_time": runtime.TestTime,
-	}})
-}
-
-func (s *server) adminTestChannel(w http.ResponseWriter, r *http.Request) {
-	s.adminChannelOperation(w, r, "test")
-}
-
-func (s *server) adminRefreshChannelBalance(w http.ResponseWriter, r *http.Request) {
-	s.adminChannelOperation(w, r, "balance.refresh")
-}
-
-func (s *server) adminChannelOperation(w http.ResponseWriter, r *http.Request, operation string) {
-	_, session, ok := s.requireSession(w, r, roleAdmin)
-	if !ok || !s.requireSameOrigin(w, r) || !s.channelOperationsReady(w) {
-		return
-	}
-	channelID, ok := pathInt64(w, r, "id", "渠道编号无效")
-	if !ok {
-		return
-	}
-	newAPIChannelID, err := s.services.Routing.ChannelForHealthReset(r.Context(), channelID)
-	if err != nil {
-		writeAPIError(w, http.StatusNotFound, "channel_not_found", "渠道不存在")
-		return
-	}
-	path := "/api/channel/test/" + strconv.Itoa(newAPIChannelID)
-	action := "channel.test"
-	if operation == "balance.refresh" {
-		path = "/api/channel/update_balance/" + strconv.Itoa(newAPIChannelID)
-		action = "channel.balance.refresh"
-	}
-	data, err := s.services.AdminNewAPI.Do(r.Context(), http.MethodGet, path, nil)
-	if err != nil {
-		s.recordAudit(r, session, action, int(channelID), "failed", err.Error())
-		writeUpstreamError(w, err, http.StatusBadGateway)
-		return
-	}
-	if err := s.recordAudit(r, session, action, int(channelID), "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "渠道操作已完成，但审计记录失败")
-		return
-	}
-	value, err := sanitizedJSONValue(data)
-	if err != nil {
-		value = nil
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"status": "succeeded", "result": value}})
 }
 
 func (s *server) adminOperationsReady(w http.ResponseWriter) bool {
 	if s.services.AdminNewAPI == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "admin_operations_unavailable", "New API 管理服务尚未就绪")
+		writeAPIError(w, http.StatusServiceUnavailable, "admin_operations_unavailable", "核心管理服务尚未就绪")
 		return false
 	}
 	return true
-}
-
-func (s *server) channelOperationsReady(w http.ResponseWriter) bool {
-	return s.adminOperationsReady(w) && s.routingReady(w, false)
 }
 
 func writeRawDataStatus(w http.ResponseWriter, status int, data []byte) {
@@ -537,7 +356,7 @@ func writeRawDataStatus(w http.ResponseWriter, status int, data []byte) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
 	if err := decoder.Decode(&value); err != nil {
-		writeAPIError(w, http.StatusBadGateway, "new_api_contract_error", "New API 响应格式无效")
+		writeAPIError(w, http.StatusBadGateway, "new_api_contract_error", "核心服务响应格式无效")
 		return
 	}
 	writeJSON(w, status, map[string]any{"success": true, "data": value})

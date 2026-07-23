@@ -44,10 +44,9 @@ test "$status" = "401"
 for entry in \
   "usage|/api/usage?p=1&page_size=5" \
   "overview|/api/admin/overview" \
-  "admin-usage|/api/admin/usage?p=1&page_size=5" \
+  "channel-logs|/api/admin/channel-logs?p=1&page_size=5" \
   "settings|/api/admin/platform-settings" \
   "redemptions|/api/admin/redemptions?p=1&page_size=5" \
-  "tasks|/api/admin/system-tasks?p=1&page_size=5" \
   "channels|/api/admin/channels?p=1&page_size=5"
 do
   name=${entry%%|*}

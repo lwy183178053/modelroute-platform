@@ -159,3 +159,23 @@ func TestModelListProxyForwardsUserAPIKeyToNewAPI(t *testing.T) {
 		t.Fatalf("模型列表响应=%d %s", response.Code, response.Body.String())
 	}
 }
+
+func TestOperationRecordsAndSystemTasksAreRemovedButUsageRoutesRemain(t *testing.T) {
+	handler := NewServerWithServices("test", Dependencies{}, Services{})
+	for _, path := range []string{"/api/admin/audit-logs", "/api/admin/system-tasks", "/api/admin/usage"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("已删除入口 %s 状态码=%d，响应=%s", path, response.Code, response.Body.String())
+		}
+	}
+	for _, path := range []string{"/api/usage", "/api/admin/channel-logs"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code == http.StatusNotFound {
+			t.Fatalf("消费日志入口 %s 被误删", path)
+		}
+	}
+}

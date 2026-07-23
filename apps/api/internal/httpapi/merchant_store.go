@@ -551,39 +551,6 @@ LIMIT $2 OFFSET $3
 	return items, total, nil
 }
 
-func (s *SQLMerchantStore) ListMerchants(ctx context.Context, page int, pageSize int, status string) ([]MerchantProfile, int, error) {
-	page, pageSize = boundedPagination(page, pageSize)
-	status = strings.TrimSpace(status)
-	var total int
-	if err := s.database.QueryRowContext(ctx, "SELECT count(*) FROM merchant_profiles WHERE ($1 = '' OR status = $1)", status).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("统计商户：%w", err)
-	}
-	rows, err := s.database.QueryContext(ctx, `
-SELECT id, newapi_user_id, display_name, website_url, status,
-       COALESCE(status_reason, ''), approved_at
-FROM merchant_profiles
-WHERE ($1 = '' OR status = $1)
-ORDER BY id DESC
-LIMIT $2 OFFSET $3
-`, status, pageSize, (page-1)*pageSize)
-	if err != nil {
-		return nil, 0, fmt.Errorf("查询商户：%w", err)
-	}
-	defer rows.Close()
-	items := make([]MerchantProfile, 0)
-	for rows.Next() {
-		var profile MerchantProfile
-		if err := rows.Scan(&profile.ID, &profile.UserID, &profile.DisplayName, &profile.WebsiteURL, &profile.Status, &profile.StatusReason, &profile.ApprovedAt); err != nil {
-			return nil, 0, fmt.Errorf("解析商户：%w", err)
-		}
-		items = append(items, profile)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("遍历商户：%w", err)
-	}
-	return items, total, nil
-}
-
 func (s *SQLMerchantStore) ListChannels(ctx context.Context, page int, pageSize int, status string) ([]MerchantChannel, int, error) {
 	page, pageSize = boundedPagination(page, pageSize)
 	status = strings.TrimSpace(status)
@@ -606,7 +573,15 @@ LIMIT $2 OFFSET $3
 	return returnChannels, total, nil
 }
 
-func (s *SQLMerchantStore) ListChannelsFiltered(ctx context.Context, page int, pageSize int, status, keyword string, merchantID int64) ([]MerchantChannel, int, error) {
+func (s *SQLMerchantStore) Channel(ctx context.Context, channelID int64) (MerchantChannel, error) {
+	channel, err := scanMerchantChannel(s.database.QueryRowContext(ctx, channelSelect+"WHERE c.id = $1", channelID))
+	if err != nil {
+		return MerchantChannel{}, merchantStoreError(err)
+	}
+	return channel, nil
+}
+
+func (s *SQLMerchantStore) ListChannelsFiltered(ctx context.Context, page int, pageSize int, status, keyword string, userID int) ([]MerchantChannel, int, error) {
 	items, _, err := s.ListChannels(ctx, 1, 100, status)
 	if err != nil {
 		return nil, 0, err
@@ -614,10 +589,10 @@ func (s *SQLMerchantStore) ListChannelsFiltered(ctx context.Context, page int, p
 	keyword = strings.ToLower(strings.TrimSpace(keyword))
 	filtered := make([]MerchantChannel, 0, len(items))
 	for _, item := range items {
-		if merchantID > 0 && item.MerchantID != merchantID {
+		if userID > 0 && item.UserID != userID {
 			continue
 		}
-		if keyword != "" && !strings.Contains(strings.ToLower(item.ChannelName), keyword) && !strings.Contains(strings.ToLower(item.Model), keyword) && !strings.Contains(strconv.FormatInt(item.MerchantID, 10), keyword) {
+		if keyword != "" && !strings.Contains(strings.ToLower(item.ChannelName), keyword) && !strings.Contains(strings.ToLower(item.Model), keyword) && !strings.Contains(strings.ToLower(item.MerchantName), keyword) && !strings.Contains(strconv.Itoa(item.UserID), keyword) {
 			continue
 		}
 		filtered = append(filtered, item)
@@ -992,7 +967,7 @@ JOIN canonical_models cm ON cm.id = r.canonical_model_id
 `
 
 const channelSelect = `
-SELECT c.id, c.merchant_profile_id, c.review_id, c.newapi_channel_id,
+SELECT c.id, c.merchant_profile_id, p.newapi_user_id, p.display_name, c.review_id, c.newapi_channel_id,
 	   c.channel_name, c.canonical_model_id, cm.public_name, cm.provider, cm.protocol,
 	   c.adapter_type, c.base_url,
 	   c.credential_fingerprint, c.status, c.created_at,
@@ -1059,24 +1034,33 @@ func scanMerchantChannels(rows *sql.Rows) ([]MerchantChannel, error) {
 	defer rows.Close()
 	items := make([]MerchantChannel, 0)
 	for rows.Next() {
-		var channel MerchantChannel
-		var fingerprint string
-		var cooldownUntil sql.NullTime
-		if err := rows.Scan(&channel.ID, &channel.MerchantID, &channel.ReviewID, &channel.NewAPIChannelID,
-			&channel.ChannelName, &channel.CanonicalModelID, &channel.Model, &channel.Provider,
-			&channel.Protocol, &channel.AdapterType, &channel.BaseURL, &fingerprint,
-			&channel.Status, &channel.CreatedAt, &channel.HealthState, &channel.AvailabilityPPM,
-			&channel.TTFTP95MS, &channel.ConsecutiveFailures, &cooldownUntil); err != nil {
+		channel, err := scanMerchantChannel(rows)
+		if err != nil {
 			return nil, fmt.Errorf("解析商户渠道：%w", err)
 		}
-		channel.CredentialFingerprint = shortFingerprint(fingerprint)
-		channel.CooldownUntil = nullableTime(cooldownUntil)
 		items = append(items, channel)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("遍历商户渠道：%w", err)
 	}
 	return items, nil
+}
+
+func scanMerchantChannel(scanner rowScanner) (MerchantChannel, error) {
+	var channel MerchantChannel
+	var fingerprint string
+	var cooldownUntil sql.NullTime
+	err := scanner.Scan(&channel.ID, &channel.MerchantID, &channel.UserID, &channel.MerchantName, &channel.ReviewID, &channel.NewAPIChannelID,
+		&channel.ChannelName, &channel.CanonicalModelID, &channel.Model, &channel.Provider,
+		&channel.Protocol, &channel.AdapterType, &channel.BaseURL, &fingerprint,
+		&channel.Status, &channel.CreatedAt, &channel.HealthState, &channel.AvailabilityPPM,
+		&channel.TTFTP95MS, &channel.ConsecutiveFailures, &cooldownUntil)
+	if err != nil {
+		return MerchantChannel{}, err
+	}
+	channel.CredentialFingerprint = shortFingerprint(fingerprint)
+	channel.CooldownUntil = nullableTime(cooldownUntil)
+	return channel, nil
 }
 
 func merchantStoreError(err error) error {

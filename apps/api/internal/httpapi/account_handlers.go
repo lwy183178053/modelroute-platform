@@ -86,7 +86,7 @@ func (s *server) createKey(w http.ResponseWriter, r *http.Request) {
 			bound++
 		}
 		if bound == 0 {
-			writeAPIError(w, http.StatusBadGateway, "token_bind_failed", "New API 已创建密钥，但未返回新增令牌编号")
+			writeAPIError(w, http.StatusBadGateway, "token_bind_failed", "核心服务已创建密钥，但未返回新增令牌编号")
 			return
 		}
 	}
@@ -149,23 +149,6 @@ func (s *server) updateKeyStatus(w http.ResponseWriter, r *http.Request) {
 	data, err := s.services.NewAPI.Do(r.Context(), http.MethodPut, "/api/token/?status_only=true", map[string]int{
 		"id": id, "status": status,
 	}, upstreamAuth(session))
-	if err != nil {
-		writeUpstreamError(w, err, http.StatusBadRequest)
-		return
-	}
-	writeRawData(w, data)
-}
-
-func (s *server) revealKey(w http.ResponseWriter, r *http.Request) {
-	_, session, ok := s.requireSession(w, r, roleCommon)
-	if !ok || !s.requireSameOrigin(w, r) {
-		return
-	}
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	data, err := s.services.NewAPI.Do(r.Context(), http.MethodPost, "/api/token/"+strconv.Itoa(id)+"/key", nil, upstreamAuth(session))
 	if err != nil {
 		writeUpstreamError(w, err, http.StatusBadRequest)
 		return
@@ -256,12 +239,7 @@ func (s *server) adminUserQuota(w http.ResponseWriter, r *http.Request) {
 		"id": id, "action": "add_quota", "mode": request.Mode, "value": request.Value,
 	}, upstreamAuth(session))
 	if err != nil {
-		s.recordAudit(r, session, "user.quota."+request.Mode, id, "failed", err.Error())
 		writeUpstreamError(w, err, http.StatusBadGateway)
-		return
-	}
-	if err := s.recordAudit(r, session, "user.quota."+request.Mode, id, "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "额度已调整，但审计记录失败")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": nil})
@@ -298,7 +276,6 @@ func (s *server) adminUserPassword(w http.ResponseWriter, r *http.Request) {
 		"group": target.Group, "remark": target.Remark, "password": request.Password,
 	}, upstreamAuth(session))
 	if err != nil {
-		s.recordAudit(r, session, "user.password.reset", id, "failed", err.Error())
 		writeUpstreamError(w, err, http.StatusBadGateway)
 		return
 	}
@@ -306,38 +283,7 @@ func (s *server) adminUserPassword(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "session_cleanup_failed", "密码已修改，但会话清理失败")
 		return
 	}
-	if err := s.recordAudit(r, session, "user.password.reset", id, "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "密码已修改，但审计记录失败")
-		return
-	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": nil})
-}
-
-func (s *server) adminAuditLogs(w http.ResponseWriter, r *http.Request) {
-	_, _, ok := s.requireSession(w, r, roleAdmin)
-	if !ok {
-		return
-	}
-	if s.services.Audit == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "audit_not_ready", "审计服务正在初始化")
-		return
-	}
-	page := positiveQueryInt(r, "p", 1)
-	pageSize := positiveQueryInt(r, "page_size", 20)
-	if pageSize > 100 {
-		pageSize = 100
-	}
-	entries, total, err := s.services.Audit.List(r.Context(), page, pageSize)
-	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_query_failed", "读取审计日志失败")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"data": map[string]any{
-			"page": page, "page_size": pageSize, "total": total, "items": entries,
-		},
-	})
 }
 
 func decodeKeyRequest(w http.ResponseWriter, r *http.Request) (keyRequest, bool) {

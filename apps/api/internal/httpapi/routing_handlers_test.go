@@ -13,6 +13,7 @@ type routingRepositoryStub struct {
 	RoutingRepository
 	createModel   func(context.Context, CreateCanonicalModelCommand) (CanonicalModel, error)
 	createOffer   func(context.Context, CreateOfferCommand) (OfferVersion, error)
+	retireOffer   func(context.Context, int, int64) error
 	bindPolicy    func(context.Context, int, int, string) (RoutingPolicy, error)
 	updatePolicy  func(context.Context, int, int, RoutingPolicyInput) (RoutingPolicy, error)
 	revokeToken   func(context.Context, int, int) error
@@ -63,6 +64,13 @@ func (s *routingRepositoryStub) CreateCanonicalModel(ctx context.Context, comman
 
 func (s *routingRepositoryStub) CreateOffer(ctx context.Context, command CreateOfferCommand) (OfferVersion, error) {
 	return s.createOffer(ctx, command)
+}
+
+func (s *routingRepositoryStub) RetireOffer(ctx context.Context, userID int, modelID int64) error {
+	if s.retireOffer == nil {
+		return ErrRoutingNotFound
+	}
+	return s.retireOffer(ctx, userID, modelID)
 }
 
 func (s *routingRepositoryStub) DeleteCanonicalModel(ctx context.Context, modelID int64) (string, error) {
@@ -137,7 +145,7 @@ func TestAdminDetectsCustomModelWithoutPersistingCredentials(t *testing.T) {
 }
 
 func TestAdminDeletesOrArchivesCanonicalModel(t *testing.T) {
-	services, _, audit := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	repository := &routingRepositoryStub{}
 	repository.deleteModel = func(_ context.Context, modelID int64) (string, error) {
 		if modelID != 61 {
@@ -165,9 +173,6 @@ func TestAdminDeletesOrArchivesCanonicalModel(t *testing.T) {
 		if response.Code != test.want || test.want == http.StatusOK && !strings.Contains(response.Body.String(), `"result":"archived"`) {
 			t.Fatalf("删除响应=%d %s", response.Code, response.Body.String())
 		}
-	}
-	if len(audit.entries) != 1 || audit.entries[0].Action != "model.delete" {
-		t.Fatalf("删除审计=%+v", audit.entries)
 	}
 }
 
@@ -213,6 +218,28 @@ func TestMerchantOfferActivatesOnlyAfterNewAPISync(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusCreated || synchronizer.offerID != 42 {
 		t.Fatalf("报价响应=%d %s，同步=%+v", response.Code, response.Body.String(), synchronizer)
+	}
+}
+
+func TestMerchantCanRetireActiveOffer(t *testing.T) {
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	repository := &routingRepositoryStub{}
+	repository.retireOffer = func(_ context.Context, userID int, modelID int64) error {
+		if userID != 7 || modelID != 61 {
+			t.Fatalf("取消报价参数 user=%d model=%d", userID, modelID)
+		}
+		return nil
+	}
+	services.Routing = repository
+	token := createPlatformSession(t, services, 7, 1)
+	handler := NewServerWithServices("test", Dependencies{}, services)
+	request := httptest.NewRequest(http.MethodDelete, "/api/merchant/offers/61", nil)
+	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
+	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("取消报价响应=%d %s", response.Code, response.Body.String())
 	}
 }
 

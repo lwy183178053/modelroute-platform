@@ -79,7 +79,7 @@ export function UsageTrend({ data, loading, error, title = '用量趋势', actio
   const stats = data?.stats || {};
 
   return (
-    <Section title={title} description="最近 7 天 New API 最终结算额度" actions={actions}>
+    <Section title={title} description="最近 7 天最终结算额度" actions={actions}>
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}
       {!error && !loading && points.length === 0 && <EmptyNotice title="暂无结算趋势" description="产生模型调用后将在这里显示。" />}
       {loading && <div className="table-message">正在读取用量趋势</div>}
@@ -109,16 +109,17 @@ export function UsageLogTable({ data, loading, error, admin = false, title = '�
   return (
     <Section
       title={title}
-      description="金额、退款与缓存命中均来自 New API 最终日志"
+      description="金额、退款与缓存命中均来自最终消费日志"
       actions={onRefresh && <Button icon={RefreshCw} onClick={onRefresh}>刷新</Button>}
     >
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}
       <div className="table-wrap"><table className="data-table usage-log-table"><thead><tr>
-        <th>时间</th>{admin && <th>用户</th>}<th>模型</th><th>密钥</th><th>Token</th><th>缓存</th><th>结算额度</th><th>请求编号</th><th>状态</th>
+        <th>ID</th><th>时间</th>{admin && <th>用户</th>}<th>模型</th><th>密钥</th><th>Token</th><th>缓存</th><th>结算额度</th><th>请求编号</th><th>状态</th>
       </tr></thead><tbody>
         {logs.map((log) => <tr key={log.id || log.request_id}>
+          <td><code>{log.id || '-'}</code></td>
           <td>{logTime(log.created_at)}</td>
-          {admin && <td><strong>{log.username || `UID ${log.user_id || '-'}`}</strong><small>{log.channel ? `渠道 ${log.channel}` : ''}</small></td>}
+          {admin && <td><strong>{log.username || `用户 ID ${log.user_id || '-'}`}</strong></td>}
           <td><strong>{log.model_name || '平台路由模型'}</strong></td>
           <td>{log.token_name || (log.token_id ? `密钥 ${log.token_id}` : '-')}</td>
           <td><strong>{numberFormatter.format(Number(log.prompt_tokens || 0) + Number(log.completion_tokens || 0))}</strong><small>输入 {numberFormatter.format(Number(log.prompt_tokens || 0))} · 输出 {numberFormatter.format(Number(log.completion_tokens || 0))}</small></td>
@@ -127,8 +128,8 @@ export function UsageLogTable({ data, loading, error, admin = false, title = '�
           <td><code>{log.request_id || '-'}</code></td>
           <td><Status>{requestType(log.type)}</Status></td>
         </tr>)}
-        {!loading && logs.length === 0 && <tr><td className="table-message" colSpan={admin ? 9 : 8}>{error || '暂无调用记录'}</td></tr>}
-        {loading && <tr><td className="table-message" colSpan={admin ? 9 : 8}>正在读取调用日志</td></tr>}
+        {!loading && logs.length === 0 && <tr><td className="table-message" colSpan={admin ? 10 : 9}>{error || '暂无调用记录'}</td></tr>}
+        {loading && <tr><td className="table-message" colSpan={admin ? 10 : 9}>正在读取调用日志</td></tr>}
       </tbody></table></div>
     </Section>
   );

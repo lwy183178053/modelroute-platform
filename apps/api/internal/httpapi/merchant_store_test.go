@@ -91,10 +91,10 @@ func TestSQLMerchantStoreListsChannelHealthForAdministrator(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT c.id, c.merchant_profile_id")).
 		WithArgs("", 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "merchant_profile_id", "review_id", "newapi_channel_id", "channel_name", "canonical_model_id",
+			"id", "merchant_profile_id", "merchant_user_id", "merchant_name", "review_id", "newapi_channel_id", "channel_name", "canonical_model_id",
 			"public_name", "provider", "protocol", "adapter_type", "base_url", "credential_fingerprint", "status", "created_at",
 			"health_state", "availability_ppm", "ttft_p95_ms", "consecutive_failures", "cooldown_until",
-		}).AddRow(51, 31, 21, 41, "主线路", 61, "gpt-5.6", "OpenAI", "responses", "openai_compatible",
+		}).AddRow(51, 31, 7, "北辰云智", 21, 41, "主线路", 61, "gpt-5.6", "OpenAI", "responses", "openai_compatible",
 			"https://api.merchant.example", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "active", createdAt,
 			"cooling", 975000, 680, 3, cooldownUntil))
 
@@ -102,8 +102,32 @@ func TestSQLMerchantStoreListsChannelHealthForAdministrator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("查询管理员渠道失败：%v", err)
 	}
-	if total != 1 || len(channels) != 1 || channels[0].HealthState != "cooling" || channels[0].AvailabilityPPM != 975000 || channels[0].TTFTP95MS != 680 || channels[0].ConsecutiveFailures != 3 || channels[0].CooldownUntil == nil {
+	if total != 1 || len(channels) != 1 || channels[0].UserID != 7 || channels[0].MerchantName != "北辰云智" || channels[0].HealthState != "cooling" || channels[0].AvailabilityPPM != 975000 || channels[0].TTFTP95MS != 680 || channels[0].ConsecutiveFailures != 3 || channels[0].CooldownUntil == nil {
 		t.Fatalf("渠道健康字段=%+v total=%d", channels, total)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSQLMerchantStoreFindsPlatformChannelByID(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewSQLMerchantStore(database)
+	createdAt := time.Date(2026, 7, 22, 14, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(regexp.QuoteMeta("WHERE c.id = $1")).WithArgs(int64(51)).WillReturnRows(sqlmock.NewRows([]string{
+		"id", "merchant_profile_id", "merchant_user_id", "merchant_name", "review_id", "newapi_channel_id", "channel_name", "canonical_model_id",
+		"public_name", "provider", "protocol", "adapter_type", "base_url", "credential_fingerprint", "status", "created_at",
+		"health_state", "availability_ppm", "ttft_p95_ms", "consecutive_failures", "cooldown_until",
+	}).AddRow(51, 31, 7, "北辰云智", 21, 41, "主线路", 61, "gpt-5.6", "OpenAI", "responses", "openai_compatible",
+		"https://api.merchant.example", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "active", createdAt,
+		"healthy", 999000, 520, 0, nil))
+	channel, err := store.Channel(context.Background(), 51)
+	if err != nil || channel.ID != 51 || channel.UserID != 7 || channel.NewAPIChannelID != 41 {
+		t.Fatalf("渠道=%+v err=%v", channel, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

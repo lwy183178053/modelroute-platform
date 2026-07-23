@@ -82,37 +82,18 @@ import sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
 matches = [item for item in data["data"].get("items", []) if item.get("name") == sys.argv[2]]
 assert len(matches) == 1
-print(matches[0]["id"])
-PY
-)"
-
-curl -fsS -b "$COOKIE_JAR" -H "Origin: $BASE_URL" -X POST "$BASE_URL/api/keys/$KEY_ID/reveal" >"$WORK_DIR/reveal-key.json"
-python3 - "$WORK_DIR/reveal-key.json" <<'PY'
-import json
-import sys
-
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-assert data.get("success") is True
-key = str(data["data"].get("key", ""))
+key = str(matches[0].get("key", ""))
 raw_key = key[3:] if key.startswith("sk-") else key
 assert len(raw_key) >= 32
 assert "*" not in raw_key
+print(matches[0]["id"])
 PY
+)"
 
 printf '{"enabled":false}' |
 curl -fsS -b "$COOKIE_JAR" -H "Origin: $BASE_URL" -H 'Content-Type: application/json' --data-binary @- -X POST "$BASE_URL/api/keys/$KEY_ID/status" >"$WORK_DIR/key-status.json"
 
 curl -fsS -b "$COOKIE_JAR" -H "Origin: $BASE_URL" -X DELETE "$BASE_URL/api/keys/$KEY_ID" >"$WORK_DIR/delete-key.json"
 KEY_ID=""
-
-curl -fsS -b "$COOKIE_JAR" "$BASE_URL/api/admin/audit-logs?p=1&page_size=5" >"$WORK_DIR/audit.json"
-python3 - "$WORK_DIR/audit.json" <<'PY'
-import json
-import sys
-
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-assert data.get("success") is True
-assert isinstance(data["data"].get("items"), list)
-PY
 
 echo "账号契约验证通过"

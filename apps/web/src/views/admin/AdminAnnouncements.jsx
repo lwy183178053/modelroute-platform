@@ -111,8 +111,9 @@ export default function AdminAnnouncements({ notify }) {
   return <>
     <Section title="公告管理" description="面向普通用户、商户和管理员发布站内公告" actions={<Button icon={Plus} onClick={() => setDialog({})} variant="primary">新建公告</Button>}>
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}
-      <div className="table-wrap"><table className="data-table announcement-table"><thead><tr><th>公告</th><th>受众</th><th>发布时间</th><th>下架时间</th><th>状态</th><th>操作</th></tr></thead><tbody>
+      <div className="table-wrap"><table className="data-table announcement-table"><thead><tr><th>ID</th><th>公告</th><th>受众</th><th>发布时间</th><th>下架时间</th><th>状态</th><th>操作</th></tr></thead><tbody>
         {items.map((item) => <tr key={item.id}>
+          <td><code>{item.id}</code></td>
           <td><strong>{item.pinned && <Pin size={13} />} {item.title}</strong><small>{item.body}</small></td>
           <td>{(item.audiences || []).map((audience) => audienceLabels[audience] || audience).join('、')}</td>
           <td>{item.publish_at ? new Date(item.publish_at).toLocaleString('zh-CN', { hour12: false }) : '尚未设置'}</td>
@@ -124,8 +125,8 @@ export default function AdminAnnouncements({ notify }) {
             {['scheduled', 'published'].includes(item.status) && <Button onClick={() => changeStatus(item, 'withdraw')} variant="danger">下架</Button>}
           </div></td>
         </tr>)}
-        {!loading && items.length === 0 && <tr><td className="table-message" colSpan="6">暂无公告</td></tr>}
-        {loading && <tr><td className="table-message" colSpan="6">正在读取公告</td></tr>}
+        {!loading && items.length === 0 && <tr><td className="table-message" colSpan="7">暂无公告</td></tr>}
+        {loading && <tr><td className="table-message" colSpan="7">正在读取公告</td></tr>}
       </tbody></table></div>
     </Section>
     {dialog && <AnnouncementDialog close={() => setDialog(null)} config={{ ...dialog, onSaved: load }} notify={notify} />}

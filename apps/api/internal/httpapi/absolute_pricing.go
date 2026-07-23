@@ -224,15 +224,15 @@ func smokeTestTieredExpression(expression string) error {
 		}
 		program, err := expr.Compile(body, expr.Env(environment), expr.AsFloat64())
 		if err != nil {
-			return fmt.Errorf("New API 计费表达式编译失败：%w", err)
+			return fmt.Errorf("核心服务计费表达式编译失败：%w", err)
 		}
 		output, err := expr.Run(program, environment)
 		if err != nil {
-			return fmt.Errorf("New API 计费表达式执行失败：%w", err)
+			return fmt.Errorf("核心服务计费表达式执行失败：%w", err)
 		}
 		cost, ok := output.(float64)
 		if !ok || cost < 0 || math.IsNaN(cost) || math.IsInf(cost, 0) {
-			return errors.New("New API 计费表达式返回无效金额")
+			return errors.New("核心服务计费表达式返回无效金额")
 		}
 	}
 	return nil
@@ -313,15 +313,15 @@ func smokeTestImageExpression(expression string) error {
 		}
 		program, err := expr.Compile(body, expr.Env(environment), expr.AsFloat64())
 		if err != nil {
-			return fmt.Errorf("New API 图片计费表达式编译失败：%w", err)
+			return fmt.Errorf("核心服务图片计费表达式编译失败：%w", err)
 		}
 		output, err := expr.Run(program, environment)
 		if err != nil {
-			return fmt.Errorf("New API 图片计费表达式执行失败：%w", err)
+			return fmt.Errorf("核心服务图片计费表达式执行失败：%w", err)
 		}
 		cost, ok := output.(float64)
 		if !ok || cost < 0 || math.IsNaN(cost) || math.IsInf(cost, 0) {
-			return errors.New("New API 图片计费表达式返回无效金额")
+			return errors.New("核心服务图片计费表达式返回无效金额")
 		}
 	}
 	return nil

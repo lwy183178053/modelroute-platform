@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -18,33 +17,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-type auditRecorder struct {
-	mu      sync.Mutex
-	entries []AuditEntry
-}
-
-func (a *auditRecorder) Record(_ context.Context, entry AuditEntry) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.entries = append(a.entries, entry)
-	return nil
-}
-
-func (a *auditRecorder) List(_ context.Context, page int, pageSize int) ([]AuditEntry, int, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	start := (page - 1) * pageSize
-	if start >= len(a.entries) {
-		return []AuditEntry{}, len(a.entries), nil
-	}
-	end := start + pageSize
-	if end > len(a.entries) {
-		end = len(a.entries)
-	}
-	return append([]AuditEntry(nil), a.entries[start:end]...), len(a.entries), nil
-}
-
-func newHTTPTestServices(t *testing.T, upstream http.Handler) (Services, *platformauth.Store, *auditRecorder) {
+func newHTTPTestServices(t *testing.T, upstream http.Handler) (Services, *platformauth.Store, struct{}) {
 	t.Helper()
 	redisServer := miniredis.RunT(t)
 	redisClient := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
@@ -52,18 +25,16 @@ func newHTTPTestServices(t *testing.T, upstream http.Handler) (Services, *platfo
 	upstreamServer := httptest.NewServer(upstream)
 	t.Cleanup(upstreamServer.Close)
 	store := platformauth.NewStore(redisClient, time.Hour)
-	audit := &auditRecorder{}
 	return Services{
 		Sessions: store,
 		NewAPI:   newapi.NewClient(upstreamServer.URL, time.Second),
-		Audit:    audit,
 		Cookie: CookieConfig{
 			Name:         "modelroute_session",
 			Secure:       true,
 			PublicOrigin: "https://aggregate.lwylink.xyz",
 			MaxAge:       time.Hour,
 		},
-	}, store, audit
+	}, store, struct{}{}
 }
 
 func TestLoginReturnsPlatformCookieAndHidesUpstreamCookie(t *testing.T) {
@@ -175,8 +146,47 @@ func TestRegularUserCannotCallAdminUsers(t *testing.T) {
 	}
 }
 
-func TestAdminDisableClearsTargetSessionsAndWritesAudit(t *testing.T) {
-	services, store, audit := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestAdminUsersAnnotatesAndFiltersMerchantAccountType(t *testing.T) {
+	services, store, _ := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/user/" {
+			t.Fatalf("用户列表路径=%s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{
+			"page": 1, "page_size": 50, "total": 3,
+			"items": []any{
+				map[string]any{"id": 1, "username": "3180615598@qq.com", "role": 100, "status": 1},
+				map[string]any{"id": 7, "username": "merchant@example.com", "role": 1, "status": 1},
+				map[string]any{"id": 8, "username": "user@example.com", "role": 1, "status": 1},
+			},
+		}})
+	}))
+	services.AdminUsername = "3180615598@qq.com"
+	services.Merchants = &merchantRepositoryStub{identity: func(_ context.Context, userID int) (MerchantIdentity, error) {
+		if userID == 7 {
+			return MerchantIdentity{MerchantID: 31, UserID: 7, Status: "active", IsMerchant: true}, nil
+		}
+		return MerchantIdentity{}, ErrMerchantNotFound
+	}}
+	token, err := store.Create(context.Background(), platformauth.Session{
+		UserID: 1, Username: "3180615598@qq.com", Role: 100, Status: 1, UpstreamCookie: "session=root",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/users?p=1&page_size=50&type=merchant", nil)
+	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
+	response := httptest.NewRecorder()
+	NewServerWithServices("test", Dependencies{}, services).ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("用户类型筛选响应=%d %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"account_type":"merchant"`) || !strings.Contains(response.Body.String(), `"id":7`) || strings.Contains(response.Body.String(), `"id":8`) || strings.Contains(response.Body.String(), `"id":1`) {
+		t.Fatalf("商户类型筛选结果=%s", response.Body.String())
+	}
+}
+
+func TestAdminDisableClearsTargetSessions(t *testing.T) {
+	services, store, _ := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/user/manage" || r.Method != http.MethodPost {
 			t.Fatalf("上游请求 = %s %s", r.Method, r.URL.Path)
 		}
@@ -218,9 +228,6 @@ func TestAdminDisableClearsTargetSessionsAndWritesAudit(t *testing.T) {
 	}
 	if _, err := store.Get(context.Background(), targetToken); !errors.Is(err, platformauth.ErrSessionNotFound) {
 		t.Fatalf("目标用户会话仍有效：%v", err)
-	}
-	if len(audit.entries) != 1 || audit.entries[0].ActorUserID != 1 || audit.entries[0].ObjectID != "7" || audit.entries[0].Action != "user.disable" {
-		t.Fatalf("审计记录不符合预期：%+v", audit.entries)
 	}
 }
 

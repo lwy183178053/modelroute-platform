@@ -132,7 +132,7 @@ func (s *server) adminPaymentOrders(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) adminRetryPaymentCredit(w http.ResponseWriter, r *http.Request) {
-	_, session, ok := s.requireSession(w, r, roleAdmin)
+	_, _, ok := s.requireSession(w, r, roleAdmin)
 	if !ok || !s.requireSameOrigin(w, r) {
 		return
 	}
@@ -144,15 +144,11 @@ func (s *server) adminRetryPaymentCredit(w http.ResponseWriter, r *http.Request)
 		writePaymentCreditActionError(w, err)
 		return
 	}
-	if err := s.recordAudit(r, session, "payment.credit.retry", int(orderID), "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "入账已重新排队，但审计记录失败")
-		return
-	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": nil})
 }
 
 func (s *server) adminResolvePaymentCredit(w http.ResponseWriter, r *http.Request) {
-	_, session, ok := s.requireSession(w, r, roleAdmin)
+	_, _, ok := s.requireSession(w, r, roleAdmin)
 	if !ok || !s.requireSameOrigin(w, r) {
 		return
 	}
@@ -182,10 +178,6 @@ func (s *server) adminResolvePaymentCredit(w http.ResponseWriter, r *http.Reques
 	}
 	if err != nil {
 		writePaymentCreditActionError(w, err)
-		return
-	}
-	if err := s.recordAudit(r, session, "payment.credit.resolve."+request.Action, int(orderID), "success", request.Reason); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "核对处置已完成，但审计记录失败")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": nil})
@@ -288,10 +280,6 @@ func (s *server) adminCreatePaymentSetting(w http.ResponseWriter, r *http.Reques
 	})
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "payment_setting_save_failed", "保存支付配置失败")
-		return
-	}
-	if err := s.recordAudit(r, session, "payment.setting.create", int(setting.ID), "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "支付配置已保存，但审计记录失败")
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"success": true, "data": s.paymentSettingView(setting)})

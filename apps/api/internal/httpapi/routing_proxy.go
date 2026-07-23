@@ -165,7 +165,7 @@ func (s *server) modelProxy(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
 		response, err := s.services.NewAPI.Proxy(r.Context(), r.Method, r.URL.Path, r.Header, rewritten)
 		if err != nil {
-			observation := RouteObservation{Candidate: candidate, Outcome: "temporary_failure", RequestID: requestID, Summary: "New API 连接失败"}
+			observation := RouteObservation{Candidate: candidate, Outcome: "temporary_failure", RequestID: requestID, Summary: "核心服务连接失败"}
 			_ = s.services.Routing.RecordRouteObservation(r.Context(), observation)
 			if index+1 < len(selection.Candidates) {
 				continue

@@ -19,7 +19,7 @@ func paymentQuota(cnyCents int64) (int64, error) {
 		return 0, errors.New("充值金额必须为正数")
 	}
 	if cnyCents > math.MaxInt64/newAPIQuotaPerCNYCent {
-		return 0, errors.New("New API 额度超出范围")
+		return 0, errors.New("核心服务额度超出范围")
 	}
 	return cnyCents * newAPIQuotaPerCNYCent, nil
 }

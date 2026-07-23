@@ -129,10 +129,6 @@ func (s *server) createMerchantApplication(w http.ResponseWriter, r *http.Reques
 		s.writeMerchantStoreError(w, err)
 		return
 	}
-	if err := s.recordAudit(r, session, "merchant.application.submit", int(application.ID), "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "申请已提交，但审计记录失败")
-		return
-	}
 	writeJSON(w, http.StatusCreated, map[string]any{"success": true, "data": application})
 }
 
@@ -222,10 +218,6 @@ func (s *server) createMerchantChannel(w http.ResponseWriter, r *http.Request) {
 		s.writeMerchantStoreError(w, err)
 		return
 	}
-	if err := s.recordAudit(r, session, "merchant.channel.submit", int(review.ID), "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "渠道已提交，但审计记录失败")
-		return
-	}
 	writeJSON(w, http.StatusCreated, map[string]any{"success": true, "data": review})
 }
 
@@ -281,20 +273,6 @@ func (s *server) adminChannelReviews(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"page": page, "page_size": pageSize, "total": total, "items": items}})
 }
 
-func (s *server) adminMerchants(w http.ResponseWriter, r *http.Request) {
-	_, _, ok := s.requireSession(w, r, roleAdmin)
-	if !ok || !s.merchantReady(w) {
-		return
-	}
-	page, pageSize := pagination(r)
-	items, total, err := s.services.Merchants.ListMerchants(r.Context(), page, pageSize, r.URL.Query().Get("status"))
-	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "merchant_store_error", "读取商户列表失败")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"page": page, "page_size": pageSize, "total": total, "items": items}})
-}
-
 func (s *server) adminMerchantChannels(w http.ResponseWriter, r *http.Request) {
 	_, _, ok := s.requireSession(w, r, roleAdmin)
 	if !ok || !s.merchantReady(w) {
@@ -305,8 +283,8 @@ func (s *server) adminMerchantChannels(w http.ResponseWriter, r *http.Request) {
 	var total int
 	var err error
 	if repository, filtered := s.services.Merchants.(FilteredMerchantChannelRepository); filtered {
-		merchantID, _ := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("merchant_id")), 10, 64)
-		items, total, err = repository.ListChannelsFiltered(r.Context(), page, pageSize, r.URL.Query().Get("status"), r.URL.Query().Get("keyword"), merchantID)
+		merchantUserID, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("merchant_user_id")))
+		items, total, err = repository.ListChannelsFiltered(r.Context(), page, pageSize, r.URL.Query().Get("status"), r.URL.Query().Get("keyword"), merchantUserID)
 	} else {
 		items, total, err = s.services.Merchants.ListChannels(r.Context(), page, pageSize, r.URL.Query().Get("status"))
 	}
@@ -347,7 +325,6 @@ func (s *server) adminVerifyReviewID(w http.ResponseWriter, r *http.Request, rev
 				writeAPIError(w, http.StatusInternalServerError, "merchant_store_error", "保存审核状态失败")
 				return
 			}
-			_ = s.recordAudit(r, session, "merchant.channel.verify", int(reviewID), "success", "等待管理员逐模型检查")
 			writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{
 				"review_id": reviewID, "adapter_type": review.AdapterType, "models": bindings,
 			}})
@@ -376,23 +353,17 @@ func (s *server) adminVerifyReviewID(w http.ResponseWriter, r *http.Request, rev
 	if verifyErr != nil {
 		failure := "管理员发送 hi 复检失败"
 		_ = s.services.Merchants.FinishVerification(r.Context(), reviewID, session.UserID, "", failure)
-		_ = s.recordAudit(r, session, "merchant.channel.verify", int(reviewID), "failed", failure)
 		writeAPIError(w, http.StatusUnprocessableEntity, "channel_verification_failed", failure)
 		return
 	}
 	if outcome.AdapterType != review.AdapterType {
 		failure := "管理员复检得到的适配器与商户自测不一致"
 		_ = s.services.Merchants.FinishVerification(r.Context(), reviewID, session.UserID, "", failure)
-		_ = s.recordAudit(r, session, "merchant.channel.verify", int(reviewID), "failed", failure)
 		writeAPIError(w, http.StatusUnprocessableEntity, "channel_adapter_mismatch", failure)
 		return
 	}
 	if err := s.services.Merchants.FinishVerification(r.Context(), reviewID, session.UserID, outcome.AdapterType, ""); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "merchant_store_error", "保存验证结果失败")
-		return
-	}
-	if err := s.recordAudit(r, session, "merchant.channel.verify", int(reviewID), "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "验证已完成，但审计记录失败")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{
@@ -435,8 +406,7 @@ func (s *server) adminApproveReviewID(w http.ResponseWriter, r *http.Request, re
 	channelName := fmt.Sprintf("ModelRoute-R%d-U%d", review.ID, review.UserID)
 	channelID, err := s.createAndTestNewAPIChannel(r, session, review, channelName, string(credential))
 	if err != nil {
-		_ = s.services.Merchants.CancelApproval(r.Context(), reviewID, "New API 渠道导入或测试失败")
-		_ = s.recordAudit(r, session, "merchant.channel.approve", int(reviewID), "failed", "New API 渠道导入或测试失败")
+		_ = s.services.Merchants.CancelApproval(r.Context(), reviewID, "核心服务渠道导入或测试失败")
 		writeAPIError(w, http.StatusBadGateway, "channel_import_failed", "渠道导入或真实请求测试失败")
 		return
 	}
@@ -452,10 +422,6 @@ func (s *server) adminApproveReviewID(w http.ResponseWriter, r *http.Request, re
 			writeAPIError(w, http.StatusInternalServerError, "merchant_store_error", "保存正式渠道模型失败")
 			return
 		}
-	}
-	if err := s.recordAudit(r, session, "merchant.channel.approve", int(reviewID), "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "渠道已导入，但审计记录失败")
-		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": approval})
 }
@@ -515,7 +481,7 @@ func (s *server) createAndTestNewAPIChannel(r *http.Request, session platformaut
 		}
 	}
 	if channelID <= 0 {
-		return 0, errors.New("New API 未返回新渠道编号")
+		return 0, errors.New("核心服务未返回新渠道编号")
 	}
 	_, err = s.services.NewAPI.Do(r.Context(), http.MethodGet, fmt.Sprintf("/api/channel/test/%d?%s", channelID, url.Values{"model": []string{models[0]}}.Encode()), nil, upstreamAuth(session))
 	if err != nil {
@@ -568,22 +534,28 @@ func (s *server) adminRejectReviewID(w http.ResponseWriter, r *http.Request, rev
 		s.writeMerchantStoreError(w, err)
 		return
 	}
-	if err := s.recordAudit(r, session, "merchant.channel.reject", int(reviewID), "success", strings.TrimSpace(request.Reason)); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "审核已驳回，但审计记录失败")
-		return
-	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"review_id": reviewID, "status": "rejected"}})
 }
 
-func (s *server) adminMerchantStatus(w http.ResponseWriter, r *http.Request) {
+func (s *server) adminUserMerchantStatus(w http.ResponseWriter, r *http.Request) {
 	_, session, ok := s.requireSession(w, r, roleAdmin)
-	if !ok || !s.requireSameOrigin(w, r) || !s.merchantReady(w) {
+	if !ok || !s.requireSameOrigin(w, r) {
 		return
 	}
-	merchantID, ok := pathInt64(w, r, "id", "商户编号无效")
+	if s.services.Merchants == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "service_not_ready", "商户服务正在初始化")
+		return
+	}
+	userID, ok := pathID(w, r)
 	if !ok {
 		return
 	}
+	identity, err := s.services.Merchants.Identity(r.Context(), userID)
+	if err != nil {
+		s.writeMerchantStoreError(w, err)
+		return
+	}
+	merchantID := identity.MerchantID
 	var request struct {
 		Enabled *bool  `json:"enabled"`
 		Reason  string `json:"reason"`
@@ -618,15 +590,7 @@ func (s *server) adminMerchantStatus(w http.ResponseWriter, r *http.Request) {
 		s.writeMerchantStoreError(w, err)
 		return
 	}
-	action := "revoke"
-	if *request.Enabled {
-		action = "enable"
-	}
-	if err := s.recordAudit(r, session, "merchant."+action, int(merchantID), "success", strings.TrimSpace(request.Reason)); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "商户状态已更新，但审计记录失败")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": change})
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"user_id": change.UserID, "status": change.Status}})
 }
 
 type merchantChannelRequest struct {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -152,7 +153,7 @@ func TestAdminOverviewUsesRepositorySnapshotAndRoleChecks(t *testing.T) {
 	}
 }
 
-func TestAdminUsageRequiresAdminAndHidesInternalOfferAlias(t *testing.T) {
+func TestAdminChannelLogsRequireAdminAndHideInternalOfferAlias(t *testing.T) {
 	const alias = "mkt-ov-abcdefabcdefabcdefabcdef"
 	admin := &adminOperationStub{handler: func(method string, path string, _ any) ([]byte, error) {
 		if method != http.MethodGet {
@@ -174,7 +175,7 @@ func TestAdminUsageRequiresAdminAndHidesInternalOfferAlias(t *testing.T) {
 	handler := NewServerWithServices("test", Dependencies{}, services)
 
 	regularToken := createPlatformSession(t, services, 7, 1)
-	regularRequest := httptest.NewRequest(http.MethodGet, "/api/admin/usage", nil)
+	regularRequest := httptest.NewRequest(http.MethodGet, "/api/admin/channel-logs", nil)
 	regularRequest.AddCookie(&http.Cookie{Name: "modelroute_session", Value: regularToken})
 	regularResponse := httptest.NewRecorder()
 	handler.ServeHTTP(regularResponse, regularRequest)
@@ -183,12 +184,59 @@ func TestAdminUsageRequiresAdminAndHidesInternalOfferAlias(t *testing.T) {
 	}
 
 	adminToken := createPlatformSession(t, services, 1, 100)
-	request := httptest.NewRequest(http.MethodGet, "/api/admin/usage?start_timestamp=1784649600&end_timestamp=1784736000", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/channel-logs?start_timestamp=1784649600&end_timestamp=1784736000", nil)
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: adminToken})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "mkt-ov-") || !strings.Contains(response.Body.String(), `"total":1`) {
 		t.Fatalf("管理员用量响应=%d %s", response.Code, response.Body.String())
+	}
+}
+
+type merchantChannelLookupStub struct {
+	*merchantRepositoryStub
+	channel func(context.Context, int64) (MerchantChannel, error)
+}
+
+func (s *merchantChannelLookupStub) Channel(ctx context.Context, channelID int64) (MerchantChannel, error) {
+	return s.channel(ctx, channelID)
+}
+
+func TestAdminChannelLogsTranslatePlatformChannelID(t *testing.T) {
+	seenChannel := ""
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	services.AdminNewAPI = &adminOperationStub{handler: func(_ string, path string, _ any) ([]byte, error) {
+		parsed, err := url.Parse(path)
+		if err != nil {
+			return nil, err
+		}
+		if value := parsed.Query().Get("channel"); value != "" {
+			seenChannel = value
+		}
+		if strings.HasPrefix(parsed.Path, "/api/log/") {
+			return []byte(`{"page":1,"page_size":20,"total":0,"items":[]}`), nil
+		}
+		if strings.HasPrefix(parsed.Path, "/api/log/stat") {
+			return []byte(`{"quota":0,"rpm":0,"tpm":0}`), nil
+		}
+		return []byte(`[]`), nil
+	}}
+	services.Merchants = &merchantChannelLookupStub{
+		merchantRepositoryStub: &merchantRepositoryStub{},
+		channel: func(_ context.Context, channelID int64) (MerchantChannel, error) {
+			if channelID != 51 {
+				t.Fatalf("平台渠道 ID=%d", channelID)
+			}
+			return MerchantChannel{ID: 51, UserID: 7, NewAPIChannelID: 41}, nil
+		},
+	}
+	token := createPlatformSession(t, services, 1, 100)
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/channel-logs?channel_id=51&merchant_user_id=7", nil)
+	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
+	response := httptest.NewRecorder()
+	NewServerWithServices("test", Dependencies{}, services).ServeHTTP(response, request)
+	if response.Code != http.StatusOK || seenChannel != "41" {
+		t.Fatalf("渠道日志响应=%d %s，内部筛选=%q", response.Code, response.Body.String(), seenChannel)
 	}
 }
 
@@ -220,7 +268,7 @@ func TestPlatformSettingsAreWhitelistedAndEmptySMTPPasswordIsPreserved(t *testin
 		}
 		return nil, fmt.Errorf("未知设置调用 %s %s", method, path)
 	}}
-	services, _, audit := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	services.AdminNewAPI = admin
 	token := createPlatformSession(t, services, 1, 100)
 	handler := NewServerWithServices("test", Dependencies{}, services)
@@ -253,13 +301,10 @@ func TestPlatformSettingsAreWhitelistedAndEmptySMTPPasswordIsPreserved(t *testin
 			}
 		}
 	}
-	if len(audit.entries) != 1 || audit.entries[0].Action != "platform_settings.update" {
-		t.Fatalf("平台设置审计=%+v", audit.entries)
-	}
 }
 
 func TestAdminGroupsEndpointsAreNotExposed(t *testing.T) {
-	services, _, audit := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	token := createPlatformSession(t, services, 1, 100)
 	handler := NewServerWithServices("test", Dependencies{}, services)
 
@@ -278,12 +323,9 @@ func TestAdminGroupsEndpointsAreNotExposed(t *testing.T) {
 	if putResponse.Code != http.StatusNotFound {
 		t.Fatalf("分组保存端点仍暴露：%d %s", putResponse.Code, putResponse.Body.String())
 	}
-	if len(audit.entries) != 0 {
-		t.Fatalf("不存在的分组端点产生了审计=%+v", audit.entries)
-	}
 }
 
-func TestRedemptionOperationsKeepQuotaAsIntegerAndAuditWrites(t *testing.T) {
+func TestRedemptionOperationsKeepQuotaAsInteger(t *testing.T) {
 	admin := &adminOperationStub{handler: func(method string, path string, body any) ([]byte, error) {
 		switch {
 		case method == http.MethodGet && strings.HasPrefix(path, "/api/redemption/?"):
@@ -298,7 +340,7 @@ func TestRedemptionOperationsKeepQuotaAsIntegerAndAuditWrites(t *testing.T) {
 			return nil, fmt.Errorf("未知兑换码调用 %s %s", method, path)
 		}
 	}}
-	services, _, audit := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	services.AdminNewAPI = admin
 	handler := NewServerWithServices("test", Dependencies{}, services)
 
@@ -328,9 +370,6 @@ func TestRedemptionOperationsKeepQuotaAsIntegerAndAuditWrites(t *testing.T) {
 	if createResponse.Code != http.StatusCreated || !strings.Contains(createResponse.Body.String(), "CODE_A") {
 		t.Fatalf("创建兑换码响应=%d %s", createResponse.Code, createResponse.Body.String())
 	}
-	if len(audit.entries) != 1 || audit.entries[0].Action != "redemption.create" {
-		t.Fatalf("兑换码审计=%+v", audit.entries)
-	}
 }
 
 func TestAdminRedemptionUpdateStatusAndDeleteLifecycle(t *testing.T) {
@@ -359,7 +398,7 @@ func TestAdminRedemptionUpdateStatusAndDeleteLifecycle(t *testing.T) {
 			return nil, fmt.Errorf("未知兑换码生命周期调用 %s %s", method, path)
 		}
 	}}
-	services, _, audit := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	services.AdminNewAPI = admin
 	token := createPlatformSession(t, services, 1, 100)
 	handler := NewServerWithServices("test", Dependencies{}, services)
@@ -383,13 +422,10 @@ func TestAdminRedemptionUpdateStatusAndDeleteLifecycle(t *testing.T) {
 			t.Fatalf("兑换码生命周期 %s %s 响应=%d %s", test.method, test.path, response.Code, response.Body.String())
 		}
 	}
-	if len(audit.entries) != 4 {
-		t.Fatalf("兑换码生命周期审计=%+v", audit.entries)
-	}
 }
 
 func TestUserRedeemsCodeThroughOwnNewAPISession(t *testing.T) {
-	services, _, audit := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/user/topup" || r.Header.Get("New-Api-User") != "7" || r.Header.Get("Cookie") != "session=upstream" {
 			t.Fatalf("兑换码上游请求=%s %s user=%s cookie=%s", r.Method, r.URL.Path, r.Header.Get("New-Api-User"), r.Header.Get("Cookie"))
 		}
@@ -409,96 +445,5 @@ func TestUserRedeemsCodeThroughOwnNewAPISession(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"data":500000`) {
 		t.Fatalf("兑换响应=%d %s", response.Code, response.Body.String())
-	}
-	if len(audit.entries) != 1 || audit.entries[0].Action != "redemption.redeem" {
-		t.Fatalf("兑换审计=%+v", audit.entries)
-	}
-}
-
-func TestSystemTaskAndChannelOperationsRequireAdminSameOriginAndNeverReturnKey(t *testing.T) {
-	admin := &adminOperationStub{handler: func(method string, path string, _ any) ([]byte, error) {
-		switch {
-		case method == http.MethodGet && path == "/api/system-task/list?limit=20":
-			return []byte(`[{"task_id":"systask_1","type":"log_cleanup","status":"succeeded","created_at":1784649600,"updated_at":1784649660}]`), nil
-		case method == http.MethodPost && strings.HasPrefix(path, "/api/system-task/log-cleanup?"):
-			return []byte(`{"task_id":"systask_2","type":"log_cleanup","status":"pending"}`), nil
-		case method == http.MethodGet && path == "/api/channel/41":
-			return []byte(`{"id":41,"name":"上游渠道","status":1,"balance":12.5,"balance_updated_time":1784649600,"response_time":420,"test_time":1784649500,"key":"SECRET_CHANNEL_KEY","base_url":"https://secret.example"}`), nil
-		case method == http.MethodGet && path == "/api/channel/test/41":
-			return []byte(`{"time":420}`), nil
-		case method == http.MethodGet && path == "/api/channel/update_balance/41":
-			return []byte(`{"balance":12.5}`), nil
-		default:
-			return nil, fmt.Errorf("未知运维调用 %s %s", method, path)
-		}
-	}}
-	services, _, audit := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	services.AdminNewAPI = admin
-	repository := &routingRepositoryStub{}
-	repository.prepareHealth = func(_ context.Context, channelID int64) (int, error) {
-		if channelID != 51 {
-			return 0, fmt.Errorf("错误平台渠道编号 %d", channelID)
-		}
-		return 41, nil
-	}
-	services.Routing = repository
-	token := createPlatformSession(t, services, 1, 100)
-	handler := NewServerWithServices("test", Dependencies{}, services)
-
-	listRequest := httptest.NewRequest(http.MethodGet, "/api/admin/system-tasks?limit=20", nil)
-	listRequest.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
-	listResponse := httptest.NewRecorder()
-	handler.ServeHTTP(listResponse, listRequest)
-	if listResponse.Code != http.StatusOK || !strings.Contains(listResponse.Body.String(), "systask_1") {
-		t.Fatalf("任务列表响应=%d %s", listResponse.Code, listResponse.Body.String())
-	}
-
-	cleanupRequest := httptest.NewRequest(http.MethodPost, "/api/admin/system-tasks/log-cleanup", strings.NewReader(`{"before_timestamp":1784563200}`))
-	cleanupRequest.Header.Set("Origin", "https://aggregate.lwylink.xyz")
-	cleanupRequest.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
-	cleanupResponse := httptest.NewRecorder()
-	handler.ServeHTTP(cleanupResponse, cleanupRequest)
-	if cleanupResponse.Code != http.StatusAccepted || !strings.Contains(cleanupResponse.Body.String(), "systask_2") {
-		t.Fatalf("日志清理任务响应=%d %s", cleanupResponse.Code, cleanupResponse.Body.String())
-	}
-
-	runtimeRequest := httptest.NewRequest(http.MethodGet, "/api/admin/channels/51/runtime", nil)
-	runtimeRequest.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
-	runtimeResponse := httptest.NewRecorder()
-	handler.ServeHTTP(runtimeResponse, runtimeRequest)
-	if runtimeResponse.Code != http.StatusOK || strings.Contains(runtimeResponse.Body.String(), "SECRET_CHANNEL_KEY") || strings.Contains(runtimeResponse.Body.String(), "secret.example") {
-		t.Fatalf("渠道运行状态泄露敏感字段=%d %s", runtimeResponse.Code, runtimeResponse.Body.String())
-	}
-	for _, path := range []string{"/api/admin/channels/51/test", "/api/admin/channels/51/balance/refresh"} {
-		request := httptest.NewRequest(http.MethodPost, path, nil)
-		request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
-		request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
-		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, request)
-		if response.Code != http.StatusOK {
-			t.Fatalf("渠道运维 %s 响应=%d %s", path, response.Code, response.Body.String())
-		}
-	}
-	if len(audit.entries) != 3 {
-		t.Fatalf("运维写操作审计数量=%d，明细=%+v", len(audit.entries), audit.entries)
-	}
-	if audit.entries[0].Action != "system_task.log_cleanup.create" || audit.entries[1].Action != "channel.test" || audit.entries[2].Action != "channel.balance.refresh" {
-		t.Fatalf("运维审计动作=%+v", audit.entries)
-	}
-}
-
-func TestLogCleanupRejectsFutureTimestampBeforeUpstreamCall(t *testing.T) {
-	admin := &adminOperationStub{}
-	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	services.AdminNewAPI = admin
-	token := createPlatformSession(t, services, 1, 100)
-	handler := NewServerWithServices("test", Dependencies{}, services)
-	request := httptest.NewRequest(http.MethodPost, "/api/admin/system-tasks/log-cleanup", strings.NewReader(fmt.Sprintf(`{"before_timestamp":%d}`, time.Now().Add(time.Hour).Unix())))
-	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
-	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusBadRequest || len(admin.calls) != 0 {
-		t.Fatalf("未来时间清理响应=%d %s，上游调用=%d", response.Code, response.Body.String(), len(admin.calls))
 	}
 }

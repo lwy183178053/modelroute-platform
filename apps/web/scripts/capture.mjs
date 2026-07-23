@@ -54,7 +54,7 @@ async function captureSet(viewport, suffix) {
       trend: [{ created_at: 1784131200, quota: 250000, count: 2 }, { created_at: 1784217600, quota: 1000000, count: 5 }],
       logs: { page: 1, page_size: 20, total: 1, items: [{ id: 901, created_at: 1784692800, type: 2, model_name: 'gpt-4o-mini', quota: 500000, prompt_tokens: 2400, completion_tokens: 680, token_name: '生产主密钥', request_id: 'req-user-1001', other: '{"cache_tokens":1200}' }] },
     } });
-    if (url.pathname === '/api/merchant/channels') return fulfill({ success: true, data: { merchant: { merchant_id: 31, user_id: 1, merchant_status: 'active', is_merchant: true }, items: [{ id: 51, merchant_id: 31, review_id: 21, newapi_channel_id: 41, channel_name: 'OpenAI 主线路', canonical_model_id: 101, model: 'gpt-4o-mini', provider: 'OpenAI', protocol: 'chat_completions', adapter_type: 'openai_compatible', base_url: 'https://api.merchant.example', credential_fingerprint: 'a1b2c3...d4e5f6', status: 'active', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200, consecutive_failures: 0, created_at: '2026-07-22T14:00:00Z' }], reviews: [{ id: 21, user_id: 1, application_id: 11, channel_name: 'OpenAI 主线路', canonical_model_id: 101, model: 'gpt-4o-mini', provider: 'OpenAI', protocol: 'chat_completions', adapter_type: 'openai_compatible', base_url: 'https://api.merchant.example', status: 'approved', credential_configured: false, created_at: '2026-07-22T14:00:00Z' }] } });
+    if (url.pathname === '/api/merchant/channels') return fulfill({ success: true, data: { merchant: { user_id: 1, merchant_name: 'ModelRoute 官方', merchant_status: 'active', is_merchant: true }, items: [{ id: 51, user_id: 1, merchant_name: 'ModelRoute 官方', review_id: 21, channel_name: 'OpenAI 主线路', matched_models: ['gpt-4o-mini'], adapter_type: 'openai_compatible', base_url: 'https://api.merchant.example', credential_fingerprint: 'a1b2c3...d4e5f6', status: 'active', health_state: 'healthy', created_at: '2026-07-22T14:00:00Z' }], reviews: [{ id: 21, user_id: 1, channel_name: 'OpenAI 主线路', adapter_type: 'openai_compatible', base_url: 'https://api.merchant.example', status: 'approved', credential_configured: false, created_at: '2026-07-22T14:00:00Z' }] } });
     if (url.pathname === '/api/merchant/offers' || url.pathname === '/api/merchant/health') return fulfill({ success: true, data: [{ offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 12000, price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 180000, output_price_micros: 720000, cache_read_price_micros: 90000, cache_write_price_micros: 240000 }], offer_status: 'active', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200, channels: [{ merchant_channel_id: 51, channel_name: 'OpenAI 主线路', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] }] });
     if (url.pathname === '/api/merchant/balance') return fulfill({ success: true, data: { merchant_id: 31, available_quota: 9000000, frozen_quota: 2500000, lifetime_earned_quota: 14000000, lifetime_refunded_quota: 500000, lifetime_paid_quota: 2000000 } });
     if (url.pathname === '/api/merchant/ledger') return fulfill({ success: true, data: { page: 1, page_size: 50, total: 2, items: [
@@ -63,21 +63,19 @@ async function captureSet(viewport, suffix) {
     ] } });
     if (url.pathname === '/api/merchant/withdrawals') return fulfill({ success: true, data: { page: 1, page_size: 50, total: 1, items: [{ id: 8, withdrawal_no: 'MW202607220001', merchant_id: 31, amount_quota: 2500000, available_before_quota: 10600000, recipient_type: 'alipay', recipient_account_masked: '138****2621', status: 'pending', created_at: '2026-07-22T14:00:00Z' }] } });
     if (url.pathname === '/api/admin/channel-reviews') return fulfill({ success: true, data: { page: 1, page_size: 100, total: 1, items: [{ id: 22, user_id: 8, channel_name: 'Anthropic 备用线路', canonical_model_id: 103, model: 'claude-sonnet-4-6', provider: 'Anthropic', protocol: 'chat_completions', adapter_type: 'anthropic', base_url: 'https://api.anthropic.example', status: 'pending', credential_configured: true, created_at: '2026-07-22T15:00:00Z' }] } });
-    if (url.pathname === '/api/admin/channels') return fulfill({ success: true, data: { page: 1, page_size: 100, total: 1, items: [{ id: 51, merchant_id: 31, review_id: 21, newapi_channel_id: 41, channel_name: 'OpenAI 主线路', canonical_model_id: 101, model: 'gpt-4o-mini', provider: 'OpenAI', protocol: 'chat_completions', adapter_type: 'openai_compatible', base_url: 'https://api.merchant.example', credential_fingerprint: 'a1b2c3...d4e5f6', status: 'active', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200, consecutive_failures: 0, created_at: '2026-07-22T14:00:00Z' }] } });
-    if (url.pathname === '/api/admin/channels/51/runtime') return fulfill({ success: true, data: { newapi_channel_id: 41, status: 1, balance_usd_micros: 12500000, balance_updated_time: 1784649600, response_time_ms: 420, test_time: 1784649500 } });
+    if (url.pathname === '/api/admin/channels') return fulfill({ success: true, data: { page: 1, page_size: 100, total: 1, items: [{ id: 51, user_id: 1, merchant_name: 'ModelRoute 官方', review_id: 21, channel_name: 'OpenAI 主线路', matched_models: ['gpt-4o-mini'], adapter_type: 'openai_compatible', base_url: 'https://api.merchant.example', credential_fingerprint: 'a1b2c3...d4e5f6', status: 'active', health_state: 'healthy', created_at: '2026-07-22T14:00:00Z' }] } });
     if (url.pathname === '/api/admin/overview') return fulfill({ success: true, data: {
       generated_at: '2026-07-22T16:00:00Z', sync_delay_seconds: 16,
       summary: { today_gross_quota: 9000000, today_merchant_quota: 8100000, today_platform_quota: 900000, today_refund_quota: 500000, today_request_count: 128, today_successful_requests: 126, pending_merchant_applications: 1, pending_channel_reviews: 1, pending_withdrawals: 2, open_reconciliation: 1, total_channels: 2, active_channels: 1, cooling_channels: 1, disabled_channels: 1, payment_enabled: true, last_synced_through: 1784719984, last_sync_success_at: '2026-07-22T15:59:44Z' },
       services: { database: { status: 'healthy', latency_ms: 3 }, redis: { status: 'healthy', latency_ms: 2 }, new_api: { status: 'healthy', latency_ms: 24 } },
     } });
-    if (url.pathname === '/api/admin/usage') return fulfill({ success: true, data: {
+    if (url.pathname === '/api/admin/channel-logs') return fulfill({ success: true, data: {
       stats: { quota: 4750000, rpm: 7, tpm: 9200 },
       trend: [{ created_at: 1784692800, quota: 1750000, count: 18 }],
       logs: { page: 1, page_size: 20, total: 1, items: [{ id: 9901, user_id: 7, username: 'alice', created_at: 1784692800, type: 2, model_name: 'gpt-4o-mini', quota: 700000, prompt_tokens: 3100, completion_tokens: 920, token_name: '生产密钥', request_id: 'req-admin-9001', channel: 41, other: '{"cache_tokens":800}' }] },
     } });
     if (url.pathname === '/api/admin/platform-settings') return fulfill({ success: true, data: { smtp: { server: 'smtp.example.com', port: 465, account: 'notice@example.com', from: 'ModelRoute <notice@example.com>', ssl_enabled: true, starttls_enabled: false, insecure_skip_verify: false, force_auth_login: false, password_write_only: true }, registration: { email_verification_enabled: true, register_enabled: true, password_login_enabled: true, password_register_enabled: true } } });
     if (url.pathname === '/api/admin/redemptions') return fulfill({ success: true, data: { page: 1, page_size: 20, total: 1, items: [{ id: 6, name: '七月活动码', key: 'MR-JULY-2026', status: 1, quota: 500000, count: 2, expired_time: 1785168000 }] } });
-    if (url.pathname === '/api/admin/system-tasks') return fulfill({ success: true, data: [{ task_id: 'systask_1', type: 'log_cleanup', status: 'succeeded', created_at: 1784649600, updated_at: 1784649660 }] });
     if (url.pathname === '/api/admin/payment-settings') return fulfill({ success: true, data: { id: 11, version: 3, gateway_url: 'https://zpayz.cn', merchant_pid_masked: '202***********878', key_configured: true, payment_methods: ['alipay', 'wxpay'], minimum_cny_cents: 100, maximum_cny_cents: 2000000, enabled: true, notify_url: 'https://aggregate.lwylink.xyz/api/payments/easypay/notify', return_url: 'https://aggregate.lwylink.xyz/payments/return', created_at: '2026-07-22T09:00:00Z' } });
     if (url.pathname === '/api/admin/payment-orders') return fulfill({ success: true, data: { page: 1, page_size: 50, total: 2, items: [
       { id: 21, order_no: 'MR202607220001', user_id: 7, payment_type: 'alipay', amount_cny_cents: 10000, newapi_quota: 50000000, payment_status: 'paid', credit_status: 'succeeded', third_party_trade_no: 'EP202607220009', paid_at: '2026-07-22T09:05:00Z' },
@@ -87,7 +85,7 @@ async function captureSet(viewport, suffix) {
       { id: 8, withdrawal_no: 'MW202607220001', merchant_id: 31, merchant_name: '北辰云智', amount_quota: 2500000, available_before_quota: 10600000, recipient_type: 'alipay', recipient_account: '13800132621', recipient_account_masked: '138****2621', status: 'pending', created_at: '2026-07-22T14:00:00Z' },
       { id: 9, withdrawal_no: 'MW202607220002', merchant_id: 32, merchant_name: '矩阵算力', amount_quota: 5000000, available_before_quota: 8200000, recipient_type: 'bank', recipient_account: '6217000012341098', recipient_account_masked: '6217****1098', status: 'approved', created_at: '2026-07-22T13:00:00Z' },
     ] } });
-    if (url.pathname === '/api/admin/settlement-reconciliation') return fulfill({ success: true, data: { page: 1, page_size: 50, total: 1, items: [{ id: 12, source_id: 14, newapi_log_id: 1004, newapi_user_id: 18, source_type: 2, model_name: 'mkt-ov-missing', newapi_channel_id: 99, gross_quota: 50, reason_code: 'offer_mapping_missing', status: 'open', created_at: '2026-07-22T15:30:00Z' }] } });
+    if (url.pathname === '/api/admin/settlement-reconciliation') return fulfill({ success: true, data: { page: 1, page_size: 50, total: 1, items: [{ id: 12, source_id: 14, newapi_log_id: 1004, source_type: 2, model_name: 'mkt-ov-missing', channel_id: 51, gross_quota: 50, reason_code: 'offer_mapping_missing', status: 'open', created_at: '2026-07-22T15:30:00Z' }] } });
     if (url.pathname === '/api/payment-orders') return fulfill({ success: true, data: { page: 1, page_size: 10, total: 1, items: [{ id: 21, order_no: 'MR202607220001', amount_cny_cents: 10000, newapi_quota: 50000000, payment_status: 'paid', credit_status: 'succeeded', created_at: '2026-07-22T09:00:00Z' }] } });
     return fulfill({ success: false, error: { code: 'not_mocked', message: url.pathname } }, 404);
   });
@@ -123,7 +121,7 @@ async function captureSet(viewport, suffix) {
   await page.screenshot({ path, fullPage: true });
   if ((await stat(path)).size < 20_000) throw new Error(`admin-announcements-${suffix} 截图文件过小`);
 
-  await page.getByRole('button', { name: '调用日志' }).click();
+  await page.getByRole('button', { name: '渠道调用日志' }).click();
   await page.getByText('req-admin-9001').waitFor();
   await verifyLayout(page, `admin-usage-${suffix}`);
   path = `${outputDir}admin-usage-${suffix}.png`;
@@ -133,7 +131,6 @@ async function captureSet(viewport, suffix) {
   for (const [label, ready, filename] of [
     ['平台设置', () => page.getByLabel('SMTP 服务器'), 'admin-settings'],
     ['兑换码管理', () => page.getByText('MR-JULY-2026', { exact: true }), 'admin-redemptions'],
-    ['系统任务', () => page.getByText('systask_1', { exact: true }), 'admin-tasks'],
   ]) {
     await page.getByRole('button', { name: label }).click();
     await ready().first().waitFor();
@@ -158,7 +155,7 @@ async function captureSet(viewport, suffix) {
   if ((await stat(path)).size < 20_000) throw new Error(`admin-channels-${suffix} 截图文件过小`);
 
   await page.getByRole('button', { name: '模型与定价' }).click();
-  await page.getByText('价格版本 v2').waitFor();
+  await page.getByText('v2', { exact: true }).waitFor();
   await verifyLayout(page, `admin-models-${suffix}`);
   path = `${outputDir}admin-models-${suffix}.png`;
   await page.screenshot({ path, fullPage: true });

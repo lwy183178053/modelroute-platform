@@ -68,7 +68,6 @@ func TestAPIKeyLifecycleUsesAuthenticatedNewAPIEndpoints(t *testing.T) {
 		{method: http.MethodPost, path: "/api/keys", body: `{"name":"主密钥","expired_time":-1,"unlimited_quota":true}`, origin: true},
 		{method: http.MethodPut, path: "/api/keys/9", body: `{"name":"新名称","expired_time":-1,"unlimited_quota":true}`, origin: true},
 		{method: http.MethodPost, path: "/api/keys/9/status", body: `{"enabled":false}`, origin: true},
-		{method: http.MethodPost, path: "/api/keys/9/reveal", origin: true},
 		{method: http.MethodDelete, path: "/api/keys/9", origin: true},
 	}
 	for _, test := range tests {
@@ -91,7 +90,6 @@ func TestAPIKeyLifecycleUsesAuthenticatedNewAPIEndpoints(t *testing.T) {
 		"POST /api/token/",
 		"PUT /api/token/",
 		"PUT /api/token/?status_only=true",
-		"POST /api/token/9/key",
 		"DELETE /api/token/9",
 	}
 	if strings.Join(calls, "|") != strings.Join(want, "|") {
@@ -99,9 +97,9 @@ func TestAPIKeyLifecycleUsesAuthenticatedNewAPIEndpoints(t *testing.T) {
 	}
 }
 
-func TestAdminQuotaAndPasswordOperationsUseNewAPIAndAudit(t *testing.T) {
+func TestAdminQuotaAndPasswordOperationsUseCoreService(t *testing.T) {
 	var calls []string
-	services, store, audit := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	services, store, _ := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls = append(calls, r.Method+" "+r.URL.Path)
 		data := any(nil)
 		switch r.Method + " " + r.URL.Path {
@@ -153,32 +151,5 @@ func TestAdminQuotaAndPasswordOperationsUseNewAPIAndAudit(t *testing.T) {
 	}
 	if strings.Join(calls, "|") != "POST /api/user/manage|GET /api/user/7|PUT /api/user/" {
 		t.Fatalf("上游调用=%v", calls)
-	}
-	if len(audit.entries) != 2 || audit.entries[0].Action != "user.quota.add" || audit.entries[1].Action != "user.password.reset" {
-		t.Fatalf("审计记录=%+v", audit.entries)
-	}
-}
-
-func TestAdminCanListPlatformAuditLogs(t *testing.T) {
-	services, store, audit := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		t.Fatalf("审计列表不应调用 New API")
-	}))
-	audit.entries = append(audit.entries, AuditEntry{
-		ID: 3, ActorUserID: 1, ActorRole: "100", Action: "user.disable",
-		ObjectType: "user", ObjectID: "7", Result: "success",
-	})
-	adminToken, err := store.Create(context.Background(), platformauth.Session{
-		UserID: 1, Username: "modelroute", Role: 100, Status: 1, UpstreamCookie: "session=root",
-	})
-	if err != nil {
-		t.Fatalf("创建管理员会话失败：%v", err)
-	}
-	handler := NewServerWithServices("test", Dependencies{}, services)
-	request := httptest.NewRequest(http.MethodGet, "/api/admin/audit-logs?p=1&page_size=20", nil)
-	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: adminToken})
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"action":"user.disable"`) || !strings.Contains(response.Body.String(), `"actor_user_id":1`) {
-		t.Fatalf("审计响应=%d %s", response.Code, response.Body.String())
 	}
 }

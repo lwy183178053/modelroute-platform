@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Check, CreditCard, KeyRound, Landmark, LockKeyhole, Plus, RotateCcw, Send, ShieldCheck, Store } from 'lucide-react';
 import AuthModal from './AuthModal';
 import { apiRequest, formatPriceMicros, formatQuota } from './api';
-import { Button, Field, InlineNotice, Modal, Select, TextInput } from './ui';
+import { Button, Field, InlineNotice, Modal, Select, Status, TextInput } from './ui';
 
 function Footer({ cancel, submit, submitText, icon = Check }) {
   return <><Button onClick={cancel}>取消</Button><Button icon={icon} variant="primary" onClick={submit}>{submitText}</Button></>;
@@ -86,17 +86,20 @@ function RouteModal({ close, config, notify }) {
         {(config.merchants || []).map((merchant) => <label key={merchant.id}><input aria-label={`选择商户 ${merchant.name}`} checked={merchantIDs.includes(merchant.id)} onChange={() => toggleMerchant(merchant.id)} type="checkbox" /><span><strong>{merchant.name}</strong><small>{(Number(merchant.availability_ppm || 0) / 10_000).toFixed(2)}% 可用率 · 最低 {(Number(merchant.minimum_multiplier_bps || 0) / 10_000).toFixed(2)}x</small></span></label>)}
         {(config.merchants || []).length === 0 && <InlineNotice tone="warning">当前市场没有可选择的商户</InlineNotice>}
       </div></div>}
-      <InlineNotice tone="warning">没有符合固定商户名单、倍率区间和健康条件的候选时，返回兼容 New API 的 503 错误且不扣费。</InlineNotice>
+      <InlineNotice tone="warning">没有符合固定商户名单、倍率区间和健康条件的候选时，将返回无可用渠道错误且不扣费。</InlineNotice>
     </Modal>
   );
 }
 
 function QuoteModal({ close, config, notify }) {
   const initialModel = config.models?.find((model) => model.public_name === config.offer?.model) || config.models?.[0];
+  const [provider, setProvider] = useState(initialModel?.provider || '');
   const [modelID, setModelID] = useState(String(initialModel?.id || ''));
   const [multiplier, setMultiplier] = useState(String(Number(config.offer?.multiplier_bps ?? 10_000) / 10_000));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const providers = [...new Set((config.models || []).map((model) => model.provider).filter(Boolean))];
+  const providerModels = (config.models || []).filter((model) => model.provider === provider);
   const selectedModel = config.models?.find((model) => String(model.id) === modelID);
   const selectedTier = selectedModel?.price?.tiers?.[0];
   const multiplierBPS = Math.round(Number(multiplier) * 10_000);
@@ -126,7 +129,10 @@ function QuoteModal({ close, config, notify }) {
   return (
     <Modal title="设置模型报价" description="同一模型只保留一个在售报价，并自动应用到该模型的全部已审核渠道。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !modelID} icon={Check} variant="primary" onClick={submit}>{busy ? '同步中' : '保存报价'}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
-      <Field label="标准模型"><Select value={modelID} onChange={(event) => setModelID(event.target.value)}>{(config.models || []).map((model) => <option key={model.id} value={model.id}>{model.public_name} · {model.provider}</option>)}</Select></Field>
+      <div className="form-grid two-column">
+        <Field label="模型厂商"><Select value={provider} onChange={(event) => { const nextProvider = event.target.value; setProvider(nextProvider); setModelID(String((config.models || []).find((model) => model.provider === nextProvider)?.id || '')); }}>{providers.map((item) => <option key={item} value={item}>{item}</option>)}</Select></Field>
+        <Field label="模型型号"><Select value={modelID} onChange={(event) => setModelID(event.target.value)}>{providerModels.map((model) => <option key={model.id} value={model.id}>{model.public_name}</option>)}</Select></Field>
+      </div>
       <div className="quote-summary"><div><span>价格版本</span><strong>v{selectedModel?.price?.version || '-'}</strong></div><div><span>首档基础价格</span><strong>{selectedTier ? `${formatPriceMicros(selectedTier.input_price_micros)} 输入${selectedTier.output_price_micros == null ? '' : ` / ${formatPriceMicros(selectedTier.output_price_micros)} 输出`}` : '图片价格矩阵'}</strong></div><div><span>倍率后价格</span><strong>{selectedTier ? `${formatAdjusted(selectedTier.input_price_micros)} 输入${selectedTier.output_price_micros == null ? '' : ` / ${formatAdjusted(selectedTier.output_price_micros)} 输出`}` : multiplierBPS === 0 ? '免费' : '按图片价格矩阵计算'}</strong></div></div>
       <Field label="报价倍率" hint="允许范围 0.00x - 5.00x"><div className="suffix-input"><TextInput max="5" min="0" onChange={(event) => setMultiplier(event.target.value)} step="0.01" type="number" value={multiplier} /><span>x</span></div></Field>
       <InlineNotice>调价将创建不可变的新报价版本；已进入请求的价格不会变化。</InlineNotice>
@@ -251,7 +257,7 @@ function CreditResolveModal({ close, config, notify }) {
   };
   return <Modal title={config.action === 'credited' ? '确认已完成入账' : '核对后重新入账'} description={`订单 ${config.order.order_no} · 此操作只用于结果未知的入账任务`} onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || reason.trim().length < 3} icon={RotateCcw} variant="primary" onClick={submit}>{busy ? '提交中' : '确认处置'}</Button></>}>
     {error && <InlineNotice tone="danger">{error}</InlineNotice>}
-    <Field label="核对原因"><textarea className="textarea" onChange={(event) => setReason(event.target.value)} placeholder="填写已核对的 New API 审计或余额依据" rows="4" value={reason} /></Field>
+    <Field label="核对原因"><textarea className="textarea" onChange={(event) => setReason(event.target.value)} placeholder="填写已核对的消费日志或余额依据" rows="4" value={reason} /></Field>
     <InlineNotice tone="warning">选择重新入账前，必须确认此前请求没有增加用户额度。</InlineNotice>
   </Modal>;
 }
@@ -460,7 +466,7 @@ function SettlementActionModal({ close, config, notify }) {
     }
   };
   return (
-    <Modal title={definition.title} description={action === 'ignore' ? `New API 日志 ${config.item.newapi_log_id}` : `${config.item.merchant_name} · ${config.item.withdrawal_no}`} onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy} icon={Check} onClick={submit} variant="primary">{busy ? '处理中' : definition.submit}</Button></>}>
+    <Modal title={definition.title} description={action === 'ignore' ? `消费日志 ID ${config.item.newapi_log_id}` : `${config.item.merchant_name} · ${config.item.withdrawal_no}`} onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy} icon={Check} onClick={submit} variant="primary">{busy ? '处理中' : definition.submit}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
       {action === 'paid' ? <><Field label="打款流水号"><TextInput maxLength="200" onChange={(event) => setReference(event.target.value)} value={reference} /></Field><Field label="凭证说明"><textarea className="textarea" maxLength="2000" onChange={(event) => setProof(event.target.value)} rows="4" value={proof} /></Field></> : <Field label={action === 'ignore' ? '处置原因' : '审核原因'}><textarea className="textarea" maxLength="500" onChange={(event) => setReason(event.target.value)} rows="4" value={reason} /></Field>}
     </Modal>
@@ -504,7 +510,7 @@ function KeyModal({ config, close, notify }) {
   };
 
   return (
-    <Modal title={key ? '编辑 API 密钥' : '创建 API 密钥'} description="密钥由 New API 创建并管理。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !name.trim()} icon={KeyRound} onClick={submit} variant="primary">{busy ? '保存中' : '保存密钥'}</Button></>}>
+    <Modal title={key ? '编辑 API 密钥' : '创建 API 密钥'} description="密钥由平台统一创建和管理。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !name.trim()} icon={KeyRound} onClick={submit} variant="primary">{busy ? '保存中' : '保存密钥'}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
       <Field label="密钥名称"><TextInput maxLength="50" onChange={(event) => setName(event.target.value)} value={name} /></Field>
       <label className="toggle-line"><input checked={unlimitedQuota} onChange={(event) => setUnlimitedQuota(event.target.checked)} type="checkbox" /><span><strong>不限额</strong><small>关闭后按下方整数额度限制使用</small></span></label>
@@ -540,7 +546,7 @@ function AdminUserModal({ config, close, notify }) {
   };
 
   return (
-    <Modal title={quotaMode ? '调整用户额度' : '重置用户密码'} description={`${config.user.display_name || config.user.username} · UID ${config.user.id}`} onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || (quotaMode ? value === '' : password.length < 8)} icon={quotaMode ? CreditCard : LockKeyhole} onClick={submit} variant="primary">{busy ? '处理中' : '确认提交'}</Button></>}>
+    <Modal title={quotaMode ? '调整用户额度' : '重置用户密码'} description={`${config.user.display_name || config.user.username} · 用户 ID ${config.user.id}`} onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || (quotaMode ? value === '' : password.length < 8)} icon={quotaMode ? CreditCard : LockKeyhole} onClick={submit} variant="primary">{busy ? '处理中' : '确认提交'}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
       {quotaMode ? <div className="form-grid two-column"><Field label="调整方式"><Select onChange={(event) => setMode(event.target.value)} value={mode}><option value="add">增加</option><option value="subtract">扣减</option><option value="override">设为</option></Select></Field><Field label="整数额度"><TextInput min="0" onChange={(event) => setValue(event.target.value)} type="number" value={value} /></Field></div> : <Field label="新密码" hint="长度为 8 到 20 位"><TextInput maxLength="20" minLength="8" onChange={(event) => setPassword(event.target.value)} type="password" value={password} /></Field>}
     </Modal>

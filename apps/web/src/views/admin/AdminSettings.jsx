@@ -83,7 +83,7 @@ export default function AdminSettings({ notify }) {
           </div>
         </>}
       </Section>
-      <Section title="注册与登录" description="控制 New API 账号注册和邮箱验证入口">
+      <Section title="注册与登录" description="控制平台账号注册和邮箱验证入口">
         <div className="settings-toggle-grid">
           <ToggleRow checked={settings.registration.register_enabled} label="开放账号注册" onChange={(value) => setRegistration('register_enabled', value)} />
           <ToggleRow checked={settings.registration.password_register_enabled} label="允许密码注册" onChange={(value) => setRegistration('password_register_enabled', value)} />

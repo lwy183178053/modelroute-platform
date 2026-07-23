@@ -219,17 +219,23 @@ func (s *server) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response["role"] = user.Role
+	response["account_type"] = "user"
 	response["is_merchant"] = false
 	response["is_platform_merchant"] = false
+	if user.Role >= roleAdmin {
+		response["account_type"] = "admin"
+	}
 	if s.services.Merchants != nil {
 		identity, err := s.services.Merchants.Identity(r.Context(), session.UserID)
 		switch {
 		case err == nil:
 			response["is_merchant"] = identity.IsMerchant && identity.Status == "active"
-			response["merchant_id"] = identity.MerchantID
 			response["merchant_name"] = identity.DisplayName
 			response["merchant_status"] = identity.Status
 			response["is_platform_merchant"] = identity.IsPlatformOwned
+			if user.Role < roleAdmin {
+				response["account_type"] = "merchant"
+			}
 		case errors.Is(err, ErrMerchantNotFound):
 			response["merchant_status"] = "none"
 		default:
@@ -282,7 +288,54 @@ func (s *server) adminUsers(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, err, http.StatusBadGateway)
 		return
 	}
-	writeRawData(w, data)
+	var result struct {
+		Page     int           `json:"page"`
+		PageSize int           `json:"page_size"`
+		Total    int           `json:"total"`
+		Items    []newapi.User `json:"items"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		writeAPIError(w, http.StatusBadGateway, "upstream_response_invalid", "用户列表响应格式无效")
+		return
+	}
+	type userView struct {
+		newapi.User
+		AccountType    string `json:"account_type"`
+		MerchantStatus string `json:"merchant_status,omitempty"`
+	}
+	accountType := strings.TrimSpace(r.URL.Query().Get("type"))
+	if accountType != "" && accountType != "user" && accountType != "merchant" && accountType != "admin" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_account_type", "用户类型筛选无效")
+		return
+	}
+	items := make([]userView, 0, len(result.Items))
+	for _, user := range result.Items {
+		user.Role = platformRole(user.Username, user.Role, s.services.AdminUsername)
+		view := userView{User: user, AccountType: "user"}
+		if user.Role >= roleAdmin {
+			view.AccountType = "admin"
+		} else if s.services.Merchants != nil {
+			identity, identityErr := s.services.Merchants.Identity(r.Context(), user.ID)
+			switch {
+			case identityErr == nil:
+				view.AccountType = "merchant"
+				view.MerchantStatus = identity.Status
+			case errors.Is(identityErr, ErrMerchantNotFound):
+			default:
+				writeAPIError(w, http.StatusInternalServerError, "merchant_store_error", "读取用户类型失败")
+				return
+			}
+		}
+		if accountType == "" || view.AccountType == accountType {
+			items = append(items, view)
+		}
+	}
+	if accountType != "" {
+		result.Total = len(items)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{
+		"page": result.Page, "page_size": result.PageSize, "total": result.Total, "items": items,
+	}})
 }
 
 func (s *server) adminUserStatus(w http.ResponseWriter, r *http.Request) {
@@ -313,7 +366,6 @@ func (s *server) adminUserStatus(w http.ResponseWriter, r *http.Request) {
 		"id": targetUserID, "action": action,
 	}, upstreamAuth(session))
 	if err != nil {
-		s.recordAudit(r, session, "user."+action, targetUserID, "failed", err.Error())
 		writeUpstreamError(w, err, http.StatusBadGateway)
 		return
 	}
@@ -322,10 +374,6 @@ func (s *server) adminUserStatus(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusInternalServerError, "session_cleanup_failed", "用户已封禁，但会话清理失败")
 			return
 		}
-	}
-	if err := s.recordAudit(r, session, "user."+action, targetUserID, "success", ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "audit_failed", "操作已生效，但审计记录失败")
-		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]string{"status": action}})
 }
@@ -435,23 +483,6 @@ func (s *server) clearSessionCookie(w http.ResponseWriter) {
 
 func upstreamAuth(session platformauth.Session) *newapi.Auth {
 	return &newapi.Auth{Cookie: session.UpstreamCookie, UserID: session.UserID}
-}
-
-func (s *server) recordAudit(r *http.Request, actor platformauth.Session, action string, objectID int, result string, reason string) error {
-	if s.services.Audit == nil {
-		return nil
-	}
-	return s.services.Audit.Record(r.Context(), AuditEntry{
-		ActorUserID: actor.UserID,
-		ActorRole:   strconv.Itoa(actor.Role),
-		Action:      action,
-		ObjectType:  "user",
-		ObjectID:    strconv.Itoa(objectID),
-		Result:      result,
-		Reason:      reason,
-		RequestID:   r.Header.Get("X-Request-ID"),
-		SourceIP:    clientIP(r),
-	})
 }
 
 func clientIP(r *http.Request) string {

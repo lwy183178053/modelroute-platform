@@ -44,6 +44,7 @@ class ReleaseToolContractTest(unittest.TestCase):
             self.assertIn(marker, verifier)
         for old_field in ('"channel_type"', '"models"'):
             self.assertNotIn(old_field, verifier)
+        self.assertNotIn("platform_audit_logs", verifier)
 
     def test_production_verifiers_use_the_unique_admin_username(self):
         for name in (
@@ -100,17 +101,15 @@ class ReleaseToolContractTest(unittest.TestCase):
         for path in (
             "/api/usage",
             "/api/admin/overview",
-            "/api/admin/usage",
+            "/api/admin/channel-logs",
             "/api/admin/platform-settings",
             "/api/admin/redemptions",
-            "/api/admin/system-tasks",
             "/api/admin/channels",
         ):
             self.assertIn(path, verifier)
         self.assertNotIn("/api/admin/groups", verifier)
         for write_path in (
             "/api/redemptions/redeem",
-            "/api/admin/system-tasks/log-cleanup",
             "/api/admin/channels/$CHANNEL_ID/test",
             "/api/admin/channels/$CHANNEL_ID/balance/refresh",
         ):

@@ -133,7 +133,7 @@ export default function AdminRedemptions({ notify }) {
   return <>
     <Section
       title="兑换码管理"
-      description="兑换额度沿用 New API 整数额度口径"
+      description="兑换额度使用平台统一整数额度口径"
       actions={<><Button icon={Trash2} onClick={cleanup} variant="danger">清理失效</Button><Button icon={Plus} onClick={() => setDialog({ mode: 'create' })} variant="primary">新建兑换码</Button></>}
     >
       <form className="toolbar-form" onSubmit={(event) => { event.preventDefault(); load(keyword); }}>
@@ -142,9 +142,9 @@ export default function AdminRedemptions({ notify }) {
       </form>
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}
       {createdCodes.length > 0 && <InlineNotice tone="success"><span>本次生成：</span>{createdCodes.map((code) => <CopyValue key={code} onCopy={() => copyCode(code)}>{code}</CopyValue>)}</InlineNotice>}
-      <div className="table-wrap"><table className="data-table"><thead><tr><th>名称</th><th>兑换码</th><th>单码额度</th><th>数量</th><th>失效时间</th><th>状态</th><th>操作</th></tr></thead><tbody>
+      <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>名称</th><th>兑换码</th><th>单码额度</th><th>数量</th><th>失效时间</th><th>状态</th><th>操作</th></tr></thead><tbody>
         {items.map((item) => <tr key={item.id}>
-          <td><strong>{item.name}</strong><small>R{item.id}</small></td>
+          <td><code>{item.id}</code></td><td><strong>{item.name}</strong></td>
           <td><CopyValue onCopy={() => copyCode(item.key)}>{item.key || '-'}</CopyValue></td>
           <td>{formatQuota(item.quota)}</td>
           <td>{item.count ?? '-'}</td>
@@ -152,8 +152,8 @@ export default function AdminRedemptions({ notify }) {
           <td><Status>{Number(item.status) === 1 ? '正常' : '停用'}</Status></td>
           <td><div className="row-actions"><Button icon={Pencil} onClick={() => setDialog({ mode: 'edit', item })} variant="ghost">编辑</Button><Button onClick={() => setStatus(item)} variant="ghost">{Number(item.status) === 1 ? '停用' : '启用'}</Button><Button icon={Trash2} onClick={() => remove(item)} variant="danger">删除</Button></div></td>
         </tr>)}
-        {!loading && items.length === 0 && <tr><td className="table-message" colSpan="7">暂无兑换码</td></tr>}
-        {loading && <tr><td className="table-message" colSpan="7">正在读取兑换码</td></tr>}
+        {!loading && items.length === 0 && <tr><td className="table-message" colSpan="8">暂无兑换码</td></tr>}
+        {loading && <tr><td className="table-message" colSpan="8">正在读取兑换码</td></tr>}
       </tbody></table></div>
     </Section>
     {dialog && <RedemptionDialog close={() => setDialog(null)} config={{ ...dialog, onSaved: (codes) => { setCreatedCodes(codes); load(); } }} notify={notify} />}

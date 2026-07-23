@@ -18,11 +18,12 @@ SELECT count(*) FROM settlement_reconciliation_items WHERE ($1 = '' OR status = 
 	}
 	rows, err := s.database.QueryContext(ctx, `
 SELECT r.id, r.settlement_source_id, s.newapi_log_id, s.newapi_user_id, s.source_type,
-       s.model_name, s.newapi_channel_id, s.gross_quota, r.reason_code, r.details,
+       s.model_name, COALESCE(c.id, 0), s.newapi_channel_id, s.gross_quota, r.reason_code, r.details,
        r.status, COALESCE(r.resolution_note, ''), COALESCE(r.resolved_by_newapi_user_id, 0),
        r.resolved_at, r.created_at
 FROM settlement_reconciliation_items r
 JOIN settlement_sources s ON s.id = r.settlement_source_id
+LEFT JOIN merchant_channels c ON c.newapi_channel_id = s.newapi_channel_id
 WHERE ($1 = '' OR r.status = $1)
 ORDER BY r.id DESC LIMIT $2 OFFSET $3
 `, status, pageSize, (page-1)*pageSize)
@@ -35,7 +36,7 @@ ORDER BY r.id DESC LIMIT $2 OFFSET $3
 		var item SettlementReconciliationItem
 		if err := rows.Scan(
 			&item.ID, &item.SourceID, &item.NewAPILogID, &item.NewAPIUserID, &item.SourceType,
-			&item.ModelName, &item.NewAPIChannelID, &item.GrossQuota, &item.ReasonCode,
+			&item.ModelName, &item.ChannelID, &item.NewAPIChannelID, &item.GrossQuota, &item.ReasonCode,
 			&item.Details, &item.Status, &item.ResolutionNote, &item.ResolvedByUserID,
 			&item.ResolvedAt, &item.CreatedAt,
 		); err != nil {

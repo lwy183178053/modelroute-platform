@@ -27,6 +27,10 @@ func TestMerchantChannelResponsesHideInternalLegacyFields(t *testing.T) {
 		VerifiedModels:   []string{"claude-sonnet-4-6"},
 	}
 	channel := MerchantChannel{
+		MerchantID:       31,
+		UserID:           7,
+		MerchantName:     "北辰云智",
+		NewAPIChannelID:  41,
 		ChannelType:      14,
 		CanonicalModelID: 7,
 		Model:            "claude-sonnet-4-6",
@@ -42,16 +46,25 @@ func TestMerchantChannelResponsesHideInternalLegacyFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(payload)
-	for _, field := range []string{"channel_type", "requested_models", "verified_models", "models"} {
+	for _, field := range []string{"channel_type", "requested_models", "verified_models", "models", "merchant_id", "newapi_channel_id"} {
 		if strings.Contains(text, `"`+field+`"`) {
 			t.Fatalf("V2 公共响应仍暴露内部字段 %s：%s", field, text)
 		}
 	}
-	for _, field := range []string{"canonical_model_id", "model", "adapter_type"} {
+	for _, field := range []string{"canonical_model_id", "model", "adapter_type", "user_id", "merchant_name", "matched_models"} {
 		if !strings.Contains(text, `"`+field+`"`) {
 			t.Fatalf("V2 公共响应缺少单模型字段 %s：%s", field, text)
 		}
 	}
+}
+
+type filteredMerchantRepositoryStub struct {
+	*merchantRepositoryStub
+	listChannelsFiltered func(context.Context, int, int, string, string, int) ([]MerchantChannel, int, error)
+}
+
+func (s *filteredMerchantRepositoryStub) ListChannelsFiltered(ctx context.Context, page int, pageSize int, status, keyword string, userID int) ([]MerchantChannel, int, error) {
+	return s.listChannelsFiltered(ctx, page, pageSize, status, keyword, userID)
 }
 
 type merchantRepositoryStub struct {
@@ -64,6 +77,8 @@ type merchantRepositoryStub struct {
 	finishApproval    func(context.Context, int64, int, int) (MerchantApproval, error)
 	cancelApproval    func(context.Context, int64, string) error
 	saveChannelTest   func(context.Context, CreateChannelTest) (ChannelTest, error)
+	merchant          func(context.Context, int64) (MerchantProfile, error)
+	setMerchantStatus func(context.Context, int64, bool, int, string) (MerchantStatusChange, error)
 }
 
 func (s *merchantRepositoryStub) SaveChannelTest(ctx context.Context, command CreateChannelTest) (ChannelTest, error) {
@@ -113,6 +128,14 @@ func (s *merchantRepositoryStub) CancelApproval(ctx context.Context, reviewID in
 		return nil
 	}
 	return s.cancelApproval(ctx, reviewID, failure)
+}
+
+func (s *merchantRepositoryStub) Merchant(ctx context.Context, merchantID int64) (MerchantProfile, error) {
+	return s.merchant(ctx, merchantID)
+}
+
+func (s *merchantRepositoryStub) SetMerchantStatus(ctx context.Context, merchantID int64, enabled bool, adminID int, reason string) (MerchantStatusChange, error) {
+	return s.setMerchantStatus(ctx, merchantID, enabled, adminID, reason)
 }
 
 func testCredentialBox(t *testing.T) *secretbox.Box {
@@ -324,7 +347,7 @@ func TestAdminApprovalCreatesAndTestsNewAPIChannelBeforeFinalizing(t *testing.T)
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"newapi_channel_id":41`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"channel_id":51`) || strings.Contains(response.Body.String(), `"newapi_channel_id"`) {
 		t.Fatalf("审批响应=%d %s", response.Code, response.Body.String())
 	}
 	if strings.Join(calls, "|") != "POST /api/channel/|GET /api/channel/search|GET /api/channel/test/41" {
@@ -350,6 +373,58 @@ func TestMerchantAndAdminEndpointsEnforceServerSideIdentity(t *testing.T) {
 		if response.Code != http.StatusForbidden {
 			t.Fatalf("%s 状态码=%d，响应=%s", path, response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestAdminChangesMerchantStatusByUserID(t *testing.T) {
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	repository := &merchantRepositoryStub{
+		identity: func(_ context.Context, userID int) (MerchantIdentity, error) {
+			if userID != 7 {
+				t.Fatalf("商户用户 ID=%d", userID)
+			}
+			return MerchantIdentity{MerchantID: 31, UserID: 7, Status: "active", IsMerchant: true}, nil
+		},
+		merchant: func(_ context.Context, merchantID int64) (MerchantProfile, error) {
+			return MerchantProfile{ID: merchantID, UserID: 7, Status: "active"}, nil
+		},
+		setMerchantStatus: func(_ context.Context, merchantID int64, enabled bool, adminID int, reason string) (MerchantStatusChange, error) {
+			if merchantID != 31 || enabled || adminID != 1 || reason != "资料异常" {
+				t.Fatalf("商户状态参数=%d %v %d %q", merchantID, enabled, adminID, reason)
+			}
+			return MerchantStatusChange{MerchantID: 31, UserID: 7, Status: "revoked"}, nil
+		},
+	}
+	services.Merchants = repository
+	token := createPlatformSession(t, services, 1, 100)
+	request := httptest.NewRequest(http.MethodPost, "/api/admin/users/7/merchant-status", strings.NewReader(`{"enabled":false,"reason":"资料异常"}`))
+	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
+	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
+	response := httptest.NewRecorder()
+	NewServerWithServices("test", Dependencies{}, services).ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"user_id":7`) || strings.Contains(response.Body.String(), `"merchant_id"`) {
+		t.Fatalf("商户状态响应=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestAdminChannelsFiltersByMerchantUserID(t *testing.T) {
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	repository := &filteredMerchantRepositoryStub{merchantRepositoryStub: &merchantRepositoryStub{}}
+	repository.listChannelsFiltered = func(_ context.Context, page, pageSize int, status, keyword string, userID int) ([]MerchantChannel, int, error) {
+		if page != 1 || pageSize != 50 || status != "active" || keyword != "主线路" || userID != 7 {
+			t.Fatalf("渠道筛选参数=%d %d %q %q %d", page, pageSize, status, keyword, userID)
+		}
+		return []MerchantChannel{{ID: 51, UserID: 7, MerchantName: "北辰云智", ChannelName: "主线路", NewAPIChannelID: 41}}, 1, nil
+	}
+	services.Merchants = repository
+	services.Credentials = testCredentialBox(t)
+	token := createPlatformSession(t, services, 1, 100)
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/channels?p=1&page_size=50&status=active&keyword=%E4%B8%BB%E7%BA%BF%E8%B7%AF&merchant_user_id=7", nil)
+	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
+	response := httptest.NewRecorder()
+	NewServerWithServices("test", Dependencies{}, services).ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"user_id":7`) || !strings.Contains(response.Body.String(), `"merchant_name":"北辰云智"`) || strings.Contains(response.Body.String(), `"newapi_channel_id"`) {
+		t.Fatalf("渠道筛选响应=%d %s", response.Code, response.Body.String())
 	}
 }
 
@@ -407,9 +482,9 @@ func TestMeIncludesPlatformMerchantIdentity(t *testing.T) {
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"is_merchant":true`) ||
-		!strings.Contains(response.Body.String(), `"merchant_id":31`) ||
 		!strings.Contains(response.Body.String(), `"merchant_name":"ModelRoute 官方"`) ||
-		!strings.Contains(response.Body.String(), `"is_platform_merchant":true`) {
+		!strings.Contains(response.Body.String(), `"is_platform_merchant":true`) ||
+		strings.Contains(response.Body.String(), `"merchant_id"`) {
 		t.Fatalf("me 响应=%d %s", response.Code, response.Body.String())
 	}
 }

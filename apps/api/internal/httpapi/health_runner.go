@@ -83,7 +83,7 @@ func (r *HealthRunner) executeProbe(ctx context.Context, probe HealthProbe, key 
 	}, body)
 	if err != nil {
 		state := nextProbeState(probe, healthFailureTemporary, now, 0)
-		return HealthProbeResult{Probe: probe, State: state, Class: healthFailureTemporary, FirstByteMS: int(time.Since(started).Milliseconds()), Summary: "New API 连接失败"}
+		return HealthProbeResult{Probe: probe, State: state, Class: healthFailureTemporary, FirstByteMS: int(time.Since(started).Milliseconds()), Summary: "核心服务连接失败"}
 	}
 	defer response.Body.Close()
 	_, _ = io.Copy(io.Discard, response.Body)

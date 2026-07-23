@@ -25,21 +25,44 @@ func (s *server) usage(w http.ResponseWriter, r *http.Request) {
 	s.writeUsage(w, r, session, false)
 }
 
-func (s *server) adminUsage(w http.ResponseWriter, r *http.Request) {
-	_, session, ok := s.requireSession(w, r, roleAdmin)
-	if !ok {
-		return
-	}
-	s.writeUsage(w, r, session, true)
-}
-
 func (s *server) adminChannelLogs(w http.ResponseWriter, r *http.Request) {
 	_, session, ok := s.requireSession(w, r, roleAdmin)
 	if !ok {
 		return
 	}
-	// New API already indexes its usage log by channel; keep the platform
-	// endpoint as a narrow alias so the UI can use channel-specific wording.
+	if rawChannelID := strings.TrimSpace(r.URL.Query().Get("channel_id")); rawChannelID != "" {
+		channelID, err := strconv.ParseInt(rawChannelID, 10, 64)
+		lookup, ready := s.services.Merchants.(MerchantChannelLookup)
+		if err != nil || channelID <= 0 {
+			writeAPIError(w, http.StatusBadRequest, "invalid_channel_id", "渠道 ID 无效")
+			return
+		}
+		if !ready {
+			writeAPIError(w, http.StatusServiceUnavailable, "service_not_ready", "渠道服务正在初始化")
+			return
+		}
+		channel, err := lookup.Channel(r.Context(), channelID)
+		if err != nil {
+			s.writeMerchantStoreError(w, err)
+			return
+		}
+		if rawUserID := strings.TrimSpace(r.URL.Query().Get("merchant_user_id")); rawUserID != "" {
+			userID, parseErr := strconv.Atoi(rawUserID)
+			if parseErr != nil || userID <= 0 || channel.UserID != userID {
+				writeAPIError(w, http.StatusBadRequest, "invalid_merchant_user_id", "商户用户 ID 与渠道不匹配")
+				return
+			}
+		}
+		clonedRequest := r.Clone(r.Context())
+		clonedURL := *r.URL
+		query := clonedURL.Query()
+		query.Del("channel_id")
+		query.Del("merchant_user_id")
+		query.Set("channel", strconv.Itoa(channel.NewAPIChannelID))
+		clonedURL.RawQuery = query.Encode()
+		clonedRequest.URL = &clonedURL
+		r = clonedRequest
+	}
 	s.writeUsage(w, r, session, true)
 }
 
@@ -99,17 +122,17 @@ func (s *server) writeUsage(w http.ResponseWriter, r *http.Request, session plat
 
 	logValue, err := decodeJSONValue(logs)
 	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, "new_api_contract_error", "New API 调用日志响应格式无效")
+		writeAPIError(w, http.StatusBadGateway, "new_api_contract_error", "核心服务调用日志响应格式无效")
 		return
 	}
 	statValue, err := decodeJSONValue(stats)
 	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, "new_api_contract_error", "New API 用量统计响应格式无效")
+		writeAPIError(w, http.StatusBadGateway, "new_api_contract_error", "核心服务用量统计响应格式无效")
 		return
 	}
 	trendValue, err := decodeJSONValue(trend)
 	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, "new_api_contract_error", "New API 用量趋势响应格式无效")
+		writeAPIError(w, http.StatusBadGateway, "new_api_contract_error", "核心服务用量趋势响应格式无效")
 		return
 	}
 	aliases := collectInternalAliases(logValue, statValue, trendValue)
@@ -139,7 +162,7 @@ func (s *server) writeUsage(w http.ResponseWriter, r *http.Request, session plat
 func (s *server) usageNewAPIDo(r *http.Request, session platformauth.Session, admin bool, path string) ([]byte, error) {
 	if admin {
 		if s.services.AdminNewAPI == nil {
-			return nil, &newapi.APIError{StatusCode: http.StatusServiceUnavailable, Message: "New API 管理服务尚未就绪"}
+			return nil, &newapi.APIError{StatusCode: http.StatusServiceUnavailable, Message: "核心管理服务尚未就绪"}
 		}
 		return s.services.AdminNewAPI.Do(r.Context(), http.MethodGet, path, nil)
 	}

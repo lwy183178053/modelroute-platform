@@ -19,7 +19,7 @@ type CredentialProtector interface {
 }
 
 type MerchantIdentity struct {
-	MerchantID      int64  `json:"merchant_id"`
+	MerchantID      int64  `json:"-"`
 	UserID          int    `json:"user_id"`
 	DisplayName     string `json:"merchant_name"`
 	Status          string `json:"merchant_status"`
@@ -63,7 +63,7 @@ type ReviewModelBinding struct {
 	CanonicalModelID     int64      `json:"canonical_model_id,omitempty"`
 	MatchStatus          string     `json:"match_status"`
 	TestStatus           string     `json:"test_status"`
-	TestedByNewAPIUserID int        `json:"tested_by_newapi_user_id,omitempty"`
+	TestedByNewAPIUserID int        `json:"tested_by_user_id,omitempty"`
 	TestedAt             *time.Time `json:"tested_at,omitempty"`
 	TestLatencyMS        int        `json:"test_latency_ms,omitempty"`
 	TestError            string     `json:"test_error,omitempty"`
@@ -104,9 +104,11 @@ type MerchantProfile struct {
 
 type MerchantChannel struct {
 	ID                    int64      `json:"id"`
-	MerchantID            int64      `json:"merchant_id"`
-	ReviewID              int64      `json:"review_id"`
-	NewAPIChannelID       int        `json:"newapi_channel_id"`
+	MerchantID            int64      `json:"-"`
+	UserID                int        `json:"user_id"`
+	MerchantName          string     `json:"merchant_name"`
+	ReviewID              int64      `json:"review_id,omitempty"`
+	NewAPIChannelID       int        `json:"-"`
 	ChannelName           string     `json:"channel_name"`
 	ChannelType           int        `json:"-"`
 	CanonicalModelID      int64      `json:"canonical_model_id"`
@@ -115,7 +117,7 @@ type MerchantChannel struct {
 	Protocol              string     `json:"protocol"`
 	AdapterType           string     `json:"adapter_type"`
 	BaseURL               string     `json:"base_url"`
-	Models                []string   `json:"-"`
+	Models                []string   `json:"matched_models,omitempty"`
 	CredentialFingerprint string     `json:"credential_fingerprint"`
 	Status                string     `json:"status"`
 	HealthState           string     `json:"health_state"`
@@ -190,10 +192,10 @@ type CreateMerchantChannel struct {
 }
 
 type MerchantApproval struct {
-	MerchantID      int64 `json:"merchant_id"`
+	MerchantID      int64 `json:"-"`
 	UserID          int   `json:"user_id"`
 	ChannelID       int64 `json:"channel_id"`
-	NewAPIChannelID int   `json:"newapi_channel_id"`
+	NewAPIChannelID int   `json:"-"`
 }
 
 type MerchantStatusChange struct {
@@ -214,7 +216,6 @@ type MerchantRepository interface {
 	ListApplications(context.Context, int, int, string, string) ([]MerchantApplication, int, error)
 	Application(context.Context, int64) (MerchantApplication, error)
 	ListChannelReviews(context.Context, int, int, string) ([]MerchantChannelReview, int, error)
-	ListMerchants(context.Context, int, int, string) ([]MerchantProfile, int, error)
 	ListChannels(context.Context, int, int, string) ([]MerchantChannel, int, error)
 	ClaimReview(context.Context, int64, string) (MerchantChannelReview, error)
 	FinishVerification(context.Context, int64, int, string, string) error
@@ -243,5 +244,9 @@ type MerchantChannelManagement interface {
 }
 
 type FilteredMerchantChannelRepository interface {
-	ListChannelsFiltered(context.Context, int, int, string, string, int64) ([]MerchantChannel, int, error)
+	ListChannelsFiltered(context.Context, int, int, string, string, int) ([]MerchantChannel, int, error)
+}
+
+type MerchantChannelLookup interface {
+	Channel(context.Context, int64) (MerchantChannel, error)
 }

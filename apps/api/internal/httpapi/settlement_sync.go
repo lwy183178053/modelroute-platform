@@ -75,7 +75,7 @@ func (r *SettlementSyncRunner) fetchType(ctx context.Context, logType int, start
 		}
 		for _, item := range page.Items {
 			if item.ID <= 0 || item.UserID <= 0 || item.Type != logType || item.ModelName == "" || item.ChannelID <= 0 || item.Quota <= 0 {
-				return fmt.Errorf("New API 日志字段无效：id=%d type=%d", item.ID, item.Type)
+				return fmt.Errorf("核心服务日志字段无效：id=%d type=%d", item.ID, item.Type)
 			}
 			if _, err := r.repository.ApplySettlementLog(ctx, item); err != nil {
 				return fmt.Errorf("应用 New API 日志 id=%d：%w", item.ID, err)
@@ -85,7 +85,7 @@ func (r *SettlementSyncRunner) fetchType(ctx context.Context, logType int, start
 			return nil
 		}
 		if len(page.Items) == 0 {
-			return fmt.Errorf("New API 日志分页提前结束：type=%d page=%d total=%d", logType, pageNumber, page.Total)
+			return fmt.Errorf("核心服务日志分页提前结束：type=%d page=%d total=%d", logType, pageNumber, page.Total)
 		}
 	}
 }

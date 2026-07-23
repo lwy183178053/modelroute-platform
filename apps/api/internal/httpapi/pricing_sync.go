@@ -222,7 +222,7 @@ func buildAliasPriceOptions(existing map[string]string, offers []aliasPrice) (ma
 		}
 		parsed := values[key]
 		if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
-			return nil, fmt.Errorf("New API %s 配置不是有效对象：%w", key, err)
+			return nil, fmt.Errorf("核心服务 %s 配置不是有效对象：%w", key, err)
 		}
 		values[key] = parsed
 	}

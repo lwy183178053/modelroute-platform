@@ -55,7 +55,7 @@ func TestBuildHTTPServicesUsesSessionAndOriginConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("构建 HTTP 依赖失败：%v", err)
 	}
-	if services.Sessions == nil || services.NewAPI == nil || services.Audit == nil || services.Merchants == nil || services.Credentials == nil {
+	if services.Sessions == nil || services.NewAPI == nil || services.Merchants == nil || services.Credentials == nil {
 		t.Fatalf("HTTP 服务依赖未完整注入：%+v", services)
 	}
 	if services.AdminNewAPI == nil || services.Routing == nil || services.OfferSync == nil || services.Health == nil || services.Payments == nil || services.PaymentCredit == nil || services.Settlement == nil || services.SettlementSync == nil {

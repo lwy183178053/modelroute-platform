@@ -77,7 +77,7 @@ func TestAdministratorAnnouncementAudienceDoesNotFallThroughToMerchant(t *testin
 
 func TestAdministratorCreatesScheduledAnnouncementWithAudienceMask(t *testing.T) {
 	future := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
-	services, _, audit := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	services.Announcements = &announcementRepositoryStub{create: func(_ context.Context, command AnnouncementCommand) (Announcement, error) {
 		if command.AudienceMask != announcementAudienceUser|announcementAudienceMerchant || command.Status != "scheduled" || command.PublishAt == nil || !command.PublishAt.Equal(future) {
 			t.Fatalf("公告创建参数=%+v", command)
@@ -95,8 +95,5 @@ func TestAdministratorCreatesScheduledAnnouncementWithAudienceMask(t *testing.T)
 
 	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"id":12`) {
 		t.Fatalf("公告创建响应=%d %s", response.Code, response.Body.String())
-	}
-	if len(audit.entries) != 1 || audit.entries[0].ObjectType != "announcement" || audit.entries[0].ObjectID != "12" {
-		t.Fatalf("公告审计记录=%+v", audit.entries)
 	}
 }

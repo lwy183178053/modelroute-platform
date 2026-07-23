@@ -94,6 +94,7 @@ type MerchantOfferView struct {
 	Model           string             `json:"model"`
 	Protocol        string             `json:"protocol"`
 	MultiplierBPS   int                `json:"multiplier_bps"`
+	ChannelCount    int                `json:"channel_count"`
 	PriceTiers      []OfferPriceTier   `json:"price_tiers"`
 	ImagePrices     []ImagePriceItem   `json:"image_prices,omitempty"`
 	Channels        []OfferChannelView `json:"channels"`
@@ -1042,7 +1043,8 @@ WHERE merchant_channel_id = $1
 func (s *SQLRoutingStore) ListMarketOffers(ctx context.Context, _ int, publicModel string) ([]MarketOffer, error) {
 	rows, err := s.database.QueryContext(ctx, `
 SELECT o.id, mp.id, mp.display_name, cm.public_name, cm.protocol,
-       o.multiplier_bps, o.official_price_version_id, count(aliases.id),
+       o.multiplier_bps, o.official_price_version_id,
+       count(*) FILTER (WHERE h.state IN ('healthy', 'degraded')),
        CASE
            WHEN bool_or(h.state = 'healthy') THEN 'healthy'
            WHEN bool_or(h.state = 'degraded') THEN 'degraded'
@@ -1050,7 +1052,8 @@ SELECT o.id, mp.id, mp.display_name, cm.public_name, cm.protocol,
            WHEN bool_or(h.state = 'cooling') THEN 'cooling'
            ELSE 'disabled'
        END,
-       COALESCE(max(h.availability_ppm), 0), COALESCE(max(h.ttft_p95_ms), 0)
+       COALESCE(max(h.availability_ppm) FILTER (WHERE h.state IN ('healthy', 'degraded')), 0),
+       COALESCE(max(h.ttft_p95_ms) FILTER (WHERE h.state IN ('healthy', 'degraded')), 0)
 FROM offer_versions o
 JOIN canonical_models cm ON cm.id = o.canonical_model_id
 JOIN offer_channel_aliases aliases ON aliases.offer_version_id = o.id
@@ -1061,6 +1064,7 @@ WHERE o.status = 'active' AND mc.status = 'active' AND mp.status = 'active'
   AND cm.status = 'active'
   AND ($1 = '' OR cm.public_name = $1)
 GROUP BY o.id, mp.id, mp.display_name, cm.public_name, cm.protocol
+HAVING count(*) FILTER (WHERE h.state IN ('healthy', 'degraded')) > 0
 ORDER BY cm.public_name, o.multiplier_bps, o.id
 `, strings.TrimSpace(publicModel))
 	if err != nil {
@@ -1221,6 +1225,8 @@ WITH latest AS (
 )
 SELECT o.id, cm.public_name, cm.protocol, o.multiplier_bps, o.status,
        COALESCE(o.sync_error, ''), o.official_price_version_id,
+       count(*) FILTER (WHERE mc.status = 'active' AND h.state IN ('healthy', 'degraded'))
+           OVER (PARTITION BY o.id),
        mc.id, mc.channel_name, COALESCE(h.state, 'healthy'),
        COALESCE(h.availability_ppm, 0), COALESCE(h.ttft_p95_ms, 0)
 FROM offer_versions o
@@ -1245,7 +1251,7 @@ ORDER BY o.id DESC, mc.id
 		var channel OfferChannelView
 		if err := rows.Scan(
 			&offer.OfferID, &offer.Model, &offer.Protocol, &offer.MultiplierBPS,
-			&offer.OfferStatus, &offer.SyncError, &priceID,
+			&offer.OfferStatus, &offer.SyncError, &priceID, &offer.ChannelCount,
 			&channel.MerchantChannelID, &channel.ChannelName, &channel.HealthState,
 			&channel.AvailabilityPPM, &channel.TTFTP95MS,
 		); err != nil {

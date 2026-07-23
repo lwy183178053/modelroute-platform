@@ -121,8 +121,30 @@ RETURNING id
 	if err != nil || len(market) != 1 || market[0].MultiplierBPS != 7200 || market[0].ChannelCount != 1 || len(market[0].PriceTiers) != 1 || market[0].PriceTiers[0].InputPriceMicros != 864_000 {
 		t.Fatalf("市场折后价格=%+v，错误=%v", market, err)
 	}
+	if _, err := database.ExecContext(ctx, `
+UPDATE channel_health
+SET state = 'cooling', cooldown_until = now() + interval '5 minutes', next_probe_at = now() + interval '5 minutes'
+WHERE merchant_channel_id = $1
+`, channelID); err != nil {
+		t.Fatalf("设置渠道冷却状态：%v", err)
+	}
+	market, err = store.ListMarketOffers(ctx, 0, "gpt-4o-mini")
+	if err != nil || len(market) != 0 {
+		t.Fatalf("冷却渠道不应出现在市场：报价=%+v，错误=%v", market, err)
+	}
+	if _, err := database.ExecContext(ctx, `
+UPDATE channel_health
+SET state = 'degraded', cooldown_until = NULL, next_probe_at = NULL
+WHERE merchant_channel_id = $1
+`, channelID); err != nil {
+		t.Fatalf("恢复渠道降级状态：%v", err)
+	}
+	market, err = store.ListMarketOffers(ctx, 0, "gpt-4o-mini")
+	if err != nil || len(market) != 1 || market[0].ChannelCount != 1 {
+		t.Fatalf("降级渠道应作为可用渠道展示：报价=%+v，错误=%v", market, err)
+	}
 	merchantOffers, err := store.ListMerchantOffers(ctx, 7)
-	if err != nil || len(merchantOffers) != 1 || len(merchantOffers[0].Channels) != 1 || len(merchantOffers[0].PriceTiers) != 1 || merchantOffers[0].PriceTiers[0].OutputPriceMicros == nil || *merchantOffers[0].PriceTiers[0].OutputPriceMicros != 3_456_000 {
+	if err != nil || len(merchantOffers) != 1 || merchantOffers[0].ChannelCount != 1 || len(merchantOffers[0].Channels) != 1 || len(merchantOffers[0].PriceTiers) != 1 || merchantOffers[0].PriceTiers[0].OutputPriceMicros == nil || *merchantOffers[0].PriceTiers[0].OutputPriceMicros != 3_456_000 {
 		t.Fatalf("商户折后价格=%+v，错误=%v", merchantOffers, err)
 	}
 

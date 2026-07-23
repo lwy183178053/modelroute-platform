@@ -1884,3 +1884,29 @@
 - `data/ui-preview/verify.mjs`：Git 忽略的本地浏览器渲染检查脚本。
 - `data/ui-preview/current.png`：Git 忽略的本地渠道管理截图。
 - 回滚点：撤销本轮未提交的 `apps/web/src/styles.css` 与截图改动即可恢复上一提交 `acaa5edd9c32`；本地预览服务可通过结束监听 `57723` 的 Node 进程关闭，未连接和修改服务器。
+
+## 2026-07-23 - Task: 报价可用渠道数与市场可见性
+
+### What was done
+
+- 市场报价只统计启用且健康状态为“健康/降级”的可用渠道，并在可用渠道数为零时直接隐藏报价。
+- 商户报价接口增加 `channel_count`，商户中心和模型市场统一显示“可用渠道”数量；前端增加零数量保护，避免异常数据再次展示。
+- 本地演示接口同步模拟渠道下架后的市场空列表与恢复后的报价数量，未连接生产服务。
+
+### Testing
+
+- PostgreSQL 集成回归：冷却渠道不返回市场报价，恢复为降级后返回报价且 `channel_count=1`；商户报价数量同步为 `1`。
+- `go test -count=1 ./...`、`go vet ./...`、`go build ./...` 通过。
+- `npm.cmd run test:ui`、`npm.cmd run capture` 通过；本地 `http://127.0.0.1:57723/` 的浏览器检查无运行时错误、无横向溢出。
+- 本地预览接口实测：下架渠道后 `/api/offers` 返回空数组，重新启用后恢复报价；部署测试 27 项通过，Compose 配置校验通过。
+
+### Notes
+
+- `apps/api/internal/httpapi/routing_store.go`：增加商户可用渠道数字段，市场和商户查询按健康可路由状态统计。
+- `apps/api/internal/httpapi/routing_store_postgres_test.go`：增加冷却隐藏、降级恢复和商户数量回归。
+- `apps/web/src/views/MarketView.jsx`：显示可用渠道数量并过滤零数量报价。
+- `apps/web/src/views/MerchantView.jsx`：报价表改为显示可用渠道数量。
+- `docs/模型报价路由与健康.md`：记录 `channel_count` 与市场隐藏规则。
+- `data/ui-preview/vite.config.mjs`：Git 忽略的本地演示接口加入渠道下架后的市场过滤。
+- `apps/web/artifacts/market-*.png`、`apps/web/artifacts/merchant-offers-*.png`：更新本地界面截图；同次截图命令生成的其他界面截图保持现状。
+- 回滚点：本轮提交未推送、未上传、未部署；使用 `git revert <本轮提交哈希>` 可撤销本轮代码、文档和截图，停止监听 `57723` 的 Node 进程可关闭本地预览。

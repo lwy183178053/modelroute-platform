@@ -85,6 +85,9 @@ type MarketOffer struct {
 	HealthState     string           `json:"health_state"`
 	AvailabilityPPM int              `json:"availability_ppm"`
 	TTFTP95MS       int              `json:"ttft_p95_ms"`
+	CallCount       int64            `json:"call_count"`
+	TokenUsage      int64            `json:"token_usage"`
+	LastCalledAt    *time.Time       `json:"last_called_at,omitempty"`
 	InternalAlias   string           `json:"-"`
 	OfficialPrice   OfficialPrice    `json:"-"`
 }
@@ -1045,6 +1048,26 @@ WHERE merchant_channel_id = $1
 
 func (s *SQLRoutingStore) ListMarketOffers(ctx context.Context, _ int, publicModel string) ([]MarketOffer, error) {
 	rows, err := s.database.QueryContext(ctx, `
+WITH usage_stats AS (
+    SELECT source_offer.merchant_profile_id, source_offer.canonical_model_id,
+           count(*) FILTER (WHERE sources.source_type = 2 AND sources.status = 'settled') AS call_count,
+           COALESCE(sum(
+               CASE WHEN sources.source_type = 2 AND sources.status = 'settled' THEN
+                   CASE
+                       WHEN (CASE WHEN sources.other->>'prompt_tokens' ~ '^[0-9]+$' THEN (sources.other->>'prompt_tokens')::bigint ELSE 0 END)
+                          + (CASE WHEN sources.other->>'completion_tokens' ~ '^[0-9]+$' THEN (sources.other->>'completion_tokens')::bigint ELSE 0 END) > 0
+                       THEN (CASE WHEN sources.other->>'prompt_tokens' ~ '^[0-9]+$' THEN (sources.other->>'prompt_tokens')::bigint ELSE 0 END)
+                          + (CASE WHEN sources.other->>'completion_tokens' ~ '^[0-9]+$' THEN (sources.other->>'completion_tokens')::bigint ELSE 0 END)
+                       WHEN sources.other->>'total_tokens' ~ '^[0-9]+$' THEN (sources.other->>'total_tokens')::bigint
+                       ELSE 0
+                   END
+               ELSE 0 END
+           ), 0) AS token_usage,
+           max(sources.source_created_at) FILTER (WHERE sources.source_type = 2 AND sources.status = 'settled') AS last_called_at
+    FROM settlement_sources sources
+    JOIN offer_versions source_offer ON source_offer.id = sources.offer_version_id
+    GROUP BY source_offer.merchant_profile_id, source_offer.canonical_model_id
+)
 SELECT o.id, mp.id, mp.display_name, cm.public_name, cm.protocol,
        o.multiplier_bps, o.official_price_version_id,
        count(*) FILTER (WHERE h.state IN ('healthy', 'degraded')),
@@ -1056,17 +1079,21 @@ SELECT o.id, mp.id, mp.display_name, cm.public_name, cm.protocol,
            ELSE 'disabled'
        END,
        COALESCE(max(h.availability_ppm) FILTER (WHERE h.state IN ('healthy', 'degraded')), 0),
-       COALESCE(max(h.ttft_p95_ms) FILTER (WHERE h.state IN ('healthy', 'degraded')), 0)
+       COALESCE(max(h.ttft_p95_ms) FILTER (WHERE h.state IN ('healthy', 'degraded')), 0),
+       COALESCE(stats.call_count, 0), COALESCE(stats.token_usage, 0), stats.last_called_at
 FROM offer_versions o
 JOIN canonical_models cm ON cm.id = o.canonical_model_id
 JOIN offer_channel_aliases aliases ON aliases.offer_version_id = o.id
 JOIN merchant_channels mc ON mc.id = aliases.merchant_channel_id
 JOIN merchant_profiles mp ON mp.id = mc.merchant_profile_id
 JOIN channel_health h ON h.merchant_channel_id = mc.id
+LEFT JOIN usage_stats stats ON stats.merchant_profile_id = o.merchant_profile_id
+    AND stats.canonical_model_id = o.canonical_model_id
 WHERE o.status = 'active' AND mc.status = 'active' AND mp.status = 'active'
   AND cm.status = 'active'
   AND ($1 = '' OR cm.public_name = $1)
-GROUP BY o.id, mp.id, mp.display_name, cm.public_name, cm.protocol
+GROUP BY o.id, mp.id, mp.display_name, cm.public_name, cm.protocol,
+         stats.call_count, stats.token_usage, stats.last_called_at
 HAVING count(*) FILTER (WHERE h.state IN ('healthy', 'degraded')) > 0
 ORDER BY cm.public_name, o.multiplier_bps, o.id
 `, strings.TrimSpace(publicModel))
@@ -1082,6 +1109,7 @@ ORDER BY cm.public_name, o.multiplier_bps, o.id
 			&offer.OfferID, &offer.MerchantID, &offer.MerchantName, &offer.Model,
 			&offer.Protocol, &offer.MultiplierBPS, &priceID, &offer.ChannelCount,
 			&offer.HealthState, &offer.AvailabilityPPM, &offer.TTFTP95MS,
+			&offer.CallCount, &offer.TokenUsage, &offer.LastCalledAt,
 		); err != nil {
 			return nil, fmt.Errorf("解析市场报价：%w", err)
 		}

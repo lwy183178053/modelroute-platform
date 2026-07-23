@@ -52,8 +52,8 @@ async function mockAdminAPI(targetPage, state, account = null) {
     }
     if (url.pathname === '/api/offers') {
       return json({ success: true, data: [
-        { offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 108000, output_price_micros: 432000, cache_read_price_micros: 54000, cache_write_price_micros: 144000 }], channel_count: 1, health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 },
-        { offer_id: 202, merchant_id: 32, merchant_name: '矩阵算力', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 5800, price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 87000, output_price_micros: 348000, cache_read_price_micros: 43500, cache_write_price_micros: 116000 }], channel_count: 1, health_state: 'degraded', availability_ppm: 987500, ttft_p95_ms: 1650 },
+        { offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, call_count: 32400, token_usage: 2600000000, last_called_at: new Date(Date.now() - 10 * 60_000).toISOString(), price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 108000, output_price_micros: 432000, cache_read_price_micros: 54000, cache_write_price_micros: 144000 }], channel_count: 1, health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 },
+        { offer_id: 202, merchant_id: 32, merchant_name: '矩阵算力', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 5800, call_count: 1200, token_usage: 640000, last_called_at: new Date(Date.now() - 2 * 60 * 60_000).toISOString(), price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 87000, output_price_micros: 348000, cache_read_price_micros: 43500, cache_write_price_micros: 116000 }], channel_count: 1, health_state: 'degraded', availability_ppm: 987500, ttft_p95_ms: 1650 },
       ] });
     }
     if (url.pathname === '/api/keys' && request.method() === 'GET') {
@@ -333,6 +333,13 @@ try {
   await page.getByText('平台管理员').waitFor();
   await page.getByText('gpt-4o-mini').first().waitFor();
   await page.getByText('北辰云智').first().waitFor();
+  for (const label of ['调用次数', 'Token 用量', '最后调用']) {
+    assert(await page.getByRole('columnheader', { name: label, exact: true }).count() === 1, `模型市场缺少${label}列名`);
+  }
+  await page.getByText('32.4K', { exact: true }).waitFor();
+  await page.getByText('2.6B', { exact: true }).waitFor();
+  await page.getByText('10分钟前', { exact: true }).waitFor();
+  assert(await page.getByText('当前价格', { exact: true }).count() === 0, '模型市场仍显示当前价格');
   assert(await page.getByText('GPT-5.2').count() === 0, '模型市场仍展示演示报价');
   assert(await page.getByRole('button', { name: '接入文档', exact: true }).count() === 0, '模型市场仍显示无效接入文档按钮');
   assert(await page.getByRole('button', { name: '帮助中心' }).count() === 0, '顶部仍保留无行为帮助按钮');
@@ -631,7 +638,7 @@ try {
     if (url.pathname === '/api/me' && anonymousLoggedIn) return fulfill({ success: true, data: { id: 7, username: 'alice', display_name: 'Alice', role: 1, status: 1, group: 'default', quota: 500000, used_quota: 120000, is_merchant: false, merchant_status: 'none' } });
     if (url.pathname === '/api/me') return fulfill({ success: false, error: { code: 'authentication_required', message: '请先登录' } }, 401);
     if (url.pathname === '/api/models') return fulfill({ success: true, data: [{ id: 101, public_name: 'gpt-4o-mini', provider: 'OpenAI', protocol: 'chat_completions', status: 'active', price: { version: 2, price_kind: 'text', tiers: [{ minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 150000, output_price_micros: 600000 }] } }] });
-    if (url.pathname === '/api/offers') return fulfill({ success: true, data: [{ offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, price_tiers: [{ minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 108000, output_price_micros: 432000 }], channel_count: 1, health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] });
+    if (url.pathname === '/api/offers') return fulfill({ success: true, data: [{ offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, call_count: 32400, token_usage: 2600000000, last_called_at: new Date(Date.now() - 10 * 60_000).toISOString(), price_tiers: [{ minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 108000, output_price_micros: 432000 }], channel_count: 1, health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] });
     if (url.pathname === '/api/auth/login' && request.method() === 'POST') {
       anonymousLoggedIn = true;
       return fulfill({ success: true, data: { id: 7, username: 'alice', display_name: 'Alice', role: 1, status: 1, group: 'default' } });

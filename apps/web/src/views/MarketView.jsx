@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Activity, Boxes, Clock3, Gauge, Search, Store } from 'lucide-react';
-import { apiRequest, formatImagePrice, formatOfferPrice } from '../api';
+import { apiRequest, formatCompactCount, formatLastCalled } from '../api';
 import { Button, InlineNotice, Metric, PageHeader, ProviderLogo, Section, Select, Status, TextInput } from '../ui';
 
 const healthNames = {
@@ -31,10 +31,6 @@ function offerInputPrice(offer) {
     return Math.min(...(offer.image_prices || []).map((item) => Number(item.price_micros)), Number.MAX_SAFE_INTEGER);
   }
   return Number(offer.price_tiers?.[0]?.input_price_micros ?? Number.MAX_SAFE_INTEGER);
-}
-
-function offerPrice(offer) {
-  return offer.protocol === 'image_generation' ? formatImagePrice(offer.image_prices) : `${formatOfferPrice(offer.price_tiers)} / 百万 Token`;
 }
 
 export default function MarketView({ navigate }) {
@@ -127,7 +123,7 @@ export default function MarketView({ navigate }) {
 
         <div className="table-wrap market-table-wrap">
           <table className="data-table market-table">
-            <thead><tr><th>ID</th><th>排名</th><th>模型与商户</th><th>协议</th><th>状态</th><th>可用率</th><th>P95 首字</th><th>当前价格</th><th>倍率</th><th>可用渠道</th></tr></thead>
+            <thead><tr><th>ID</th><th>排名</th><th>模型与商户</th><th>协议</th><th>状态</th><th>可用率</th><th>P95 首字</th><th>调用次数</th><th>Token 用量</th><th>最后调用</th><th>倍率</th><th>可用渠道</th></tr></thead>
             <tbody>
               {offers.map((offer, index) => {
                 const model = modelMap.get(offer.model);
@@ -139,7 +135,9 @@ export default function MarketView({ navigate }) {
                   <td><Status>{healthNames[offer.health_state] || offer.health_state}</Status></td>
                   <td><strong className="success-text">{formatAvailability(offer.availability_ppm)}</strong></td>
                   <td>{formatLatency(offer.ttft_p95_ms)}</td>
-                  <td><strong>{offerPrice(offer)}</strong>{offer.price_tiers?.length > 1 && <small>{offer.price_tiers.length} 个上下文阶梯</small>}</td>
+                  <td><strong>{formatCompactCount(offer.call_count)}</strong></td>
+                  <td><strong>{formatCompactCount(offer.token_usage)}</strong></td>
+                  <td><strong>{formatLastCalled(offer.last_called_at)}</strong></td>
                   <td><span className="price-multiple">{formatMultiplier(offer.multiplier_bps)}</span></td>
                   <td><strong>{offer.channel_count || 0} 个</strong><small>可用渠道</small></td>
                 </tr>;

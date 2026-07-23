@@ -156,6 +156,10 @@ VALUES (9001, 21, $1, 2, $2, 41, 9, 'req-merchant-stats', 1000,
 `, lastCalledAt, offer.Aliases[0].InternalAlias, merchantID, offer.ID, offer.Aliases[0].ID); err != nil {
 		t.Fatalf("创建商户调用统计来源：%v", err)
 	}
+	market, err = store.ListMarketOffers(ctx, 0, "gpt-4o-mini")
+	if err != nil || len(market) != 1 || market[0].CallCount != 1 || market[0].TokenUsage != 2_600_000_000 || market[0].LastCalledAt == nil || !market[0].LastCalledAt.Equal(lastCalledAt) {
+		t.Fatalf("市场调用统计=%+v，错误=%v", market, err)
+	}
 	merchantOffers, err := store.ListMerchantOffers(ctx, 7)
 	if err != nil || len(merchantOffers) != 1 || merchantOffers[0].ChannelCount != 1 || merchantOffers[0].CallCount != 1 || merchantOffers[0].TokenUsage != 2_600_000_000 || merchantOffers[0].LastCalledAt == nil || !merchantOffers[0].LastCalledAt.Equal(lastCalledAt) || len(merchantOffers[0].Channels) != 1 || len(merchantOffers[0].PriceTiers) != 1 || merchantOffers[0].PriceTiers[0].OutputPriceMicros == nil || *merchantOffers[0].PriceTiers[0].OutputPriceMicros != 3_456_000 {
 		t.Fatalf("商户折后价格=%+v，错误=%v", merchantOffers, err)

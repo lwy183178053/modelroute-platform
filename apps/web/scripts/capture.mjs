@@ -44,8 +44,8 @@ async function captureSet(viewport, suffix) {
       { id: 102, public_name: 'gpt-image-1', provider: 'OpenAI', protocol: 'image_generation', adapter: 'openai_compatible', status: 'active', price: { id: 502, version: 1, price_kind: 'image', image_prices: [{ quality: 'low', size: '1024x1024', price_micros: 11000 }, { quality: 'high', size: '1024x1024', price_micros: 167000 }] } },
     ] });
     if (url.pathname === '/api/offers') return fulfill({ success: true, data: [
-      { offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 12000, price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 180000, output_price_micros: 720000, cache_read_price_micros: 90000, cache_write_price_micros: 240000 }], channel_count: 2, health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200, channels: [{ merchant_channel_id: 51, channel_name: 'OpenAI 主线路', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }, { merchant_channel_id: 52, channel_name: 'OpenAI 备用线路', health_state: 'degraded', availability_ppm: 987500, ttft_p95_ms: 1650 }] },
-      { offer_id: 202, merchant_id: 32, merchant_name: '矩阵算力', model: 'gpt-image-1', protocol: 'image_generation', multiplier_bps: 0, image_prices: [{ quality: 'low', size: '1024x1024', price_micros: 0 }], channel_count: 1, health_state: 'healthy', availability_ppm: 998000, ttft_p95_ms: 2100, channels: [{ merchant_channel_id: 53, channel_name: '图片线路', health_state: 'healthy', availability_ppm: 998000, ttft_p95_ms: 2100 }] },
+      { offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 12000, call_count: 32400, token_usage: 2600000000, last_called_at: new Date(Date.now() - 10 * 60_000).toISOString(), price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 180000, output_price_micros: 720000, cache_read_price_micros: 90000, cache_write_price_micros: 240000 }], channel_count: 2, health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200, channels: [{ merchant_channel_id: 51, channel_name: 'OpenAI 主线路', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }, { merchant_channel_id: 52, channel_name: 'OpenAI 备用线路', health_state: 'degraded', availability_ppm: 987500, ttft_p95_ms: 1650 }] },
+      { offer_id: 202, merchant_id: 32, merchant_name: '矩阵算力', model: 'gpt-image-1', protocol: 'image_generation', multiplier_bps: 0, call_count: 1200, token_usage: 0, last_called_at: new Date(Date.now() - 2 * 60 * 60_000).toISOString(), image_prices: [{ quality: 'low', size: '1024x1024', price_micros: 0 }], channel_count: 1, health_state: 'healthy', availability_ppm: 998000, ttft_p95_ms: 2100, channels: [{ merchant_channel_id: 53, channel_name: '图片线路', health_state: 'healthy', availability_ppm: 998000, ttft_p95_ms: 2100 }] },
     ] });
     if (url.pathname === '/api/keys' && request.method() === 'GET') return fulfill({ success: true, data: { page: 1, page_size: 20, total: 1, items: [{ id: 9, name: '生产主密钥', key: 'abcd**********wxyz', status: 1, expired_time: -1, unlimited_quota: true }] } });
     if (url.pathname === '/api/routing-policies/9') return fulfill({ success: true, data: { id: 71, newapi_token_id: 9, mode: 'smart', priority: 'stability', minimum_multiplier_bps: 0, maximum_multiplier_bps: 50000, merchant_ids: [] } });
@@ -90,6 +90,10 @@ async function captureSet(viewport, suffix) {
     return fulfill({ success: false, error: { code: 'not_mocked', message: url.pathname } }, 404);
   });
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
+  for (const label of ['调用次数', 'Token 用量', '最后调用']) await page.getByRole('columnheader', { name: label, exact: true }).waitFor();
+  await page.getByText('32.4K', { exact: true }).waitFor();
+  await page.getByText('2.6B', { exact: true }).waitFor();
+  await page.getByText('10分钟前', { exact: true }).waitFor();
 
   const captures = [
     ['模型市场', 'market'],

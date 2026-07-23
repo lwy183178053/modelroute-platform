@@ -2089,3 +2089,46 @@
 - `docs/模型报价路由与健康.md`：记录统计独立列及 `K/M/B` 展示规则。
 - `apps/web/artifacts/merchant-offers-desktop.png`、`apps/web/artifacts/merchant-offers-mobile.png`：更新本地验收截图。
 - 回滚点：执行 `git revert <本轮提交哈希>` 可撤销本轮表格展示调整；本轮未上传或部署服务器。
+
+## 2026-07-23 - Task: 同步模型市场调用统计列
+
+### What was done
+
+- 模型市场删除“当前价格”列，增加调用次数、Token 用量和最后调用三个独立列，展示规则与商户报价一致。
+- 公开市场报价接口按商户与标准模型读取已结算消费来源，返回 `call_count`、`token_usage` 和 `last_called_at`，不改变原有计费链路。
+- 本地预览、桌面/移动端截图和市场浏览器断言同步更新；本地默认上游地址只用于模拟同步，不保存密钥。
+
+### Testing
+
+- `go test -p=1 -count=1 ./internal/httpapi` 通过，包含市场统计 PostgreSQL 回归。
+- `go vet ./...`、`go build ./...` 待本轮后续命令完成后记录。
+- `npm.cmd run test:ui` 通过，市场独立列名和统计展示断言通过。
+- `npm.cmd run capture` 通过，模型市场桌面和移动端截图更新，根页面无横向溢出。
+- `node data/ui-preview/verify.mjs` 通过，模型行数 `21`、渠道行数 `3`、运行时错误 `0`。
+
+### Notes
+
+- `apps/api/internal/httpapi/routing_store.go`：市场报价增加消费统计字段并通过报价版本关联结算来源。
+- `apps/api/internal/httpapi/routing_store_postgres_test.go`：增加市场调用次数、Token 用量和最后调用时间回归。
+- `apps/web/src/api.js`：抽取共享的 `K/M/B` 和相对时间格式化函数。
+- `apps/web/src/views/MerchantView.jsx`、`apps/web/src/views/MarketView.jsx`：统一商户报价与模型市场统计列展示。
+- `apps/web/scripts/ui-smoke.mjs`、`apps/web/scripts/capture.mjs`、`data/ui-preview/verify.mjs`：同步市场模拟数据和列名断言。
+- `docs/模型报价路由与健康.md`：同步模型市场统计字段说明。
+- `data/ui-preview/vite.config.mjs`：本地预览默认地址和动态相对时间，仅为忽略目录运行夹具。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可撤销模型市场统计展示和接口字段；本轮未上传或部署服务器。
+
+## 2026-07-23 - Task: 补充模型市场构建验证
+
+### What was done
+
+- 完成模型市场统计改动后的 Go 静态检查和构建验证。
+
+### Testing
+
+- `go vet ./...` 通过。
+- `go build ./...` 通过。
+
+### Notes
+
+- 本条为上一条模型市场任务的验证补充，不增加业务代码。
+- 回滚点：沿用上一条模型市场任务的提交回滚点。

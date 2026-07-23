@@ -64,3 +64,27 @@ export function formatImagePrice(items) {
   const minimum = Math.min(...items.map((item) => Number(item.price_micros || 0)));
   return minimum === 0 ? '免费' : `${formatPriceMicros(minimum)} / 张起`;
 }
+
+export function formatCompactCount(value) {
+  const count = Math.max(0, Number(value || 0));
+  const units = [[1_000_000_000, 'B'], [1_000_000, 'M'], [1_000, 'K']];
+  for (const [threshold, suffix] of units) {
+    if (count >= threshold) {
+      const compact = count / threshold;
+      return `${compact >= 100 ? Math.round(compact) : compact.toFixed(1).replace(/\.0$/, '')}${suffix}`;
+    }
+  }
+  return String(Math.round(count));
+}
+
+export function formatLastCalled(value) {
+  if (!value) return '暂无调用';
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) return '暂无调用';
+  const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60_000));
+  if (minutes < 1) return '刚刚';
+  if (minutes < 60) return `${minutes}分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}小时前`;
+  return `${Math.floor(hours / 24)}天前`;
+}

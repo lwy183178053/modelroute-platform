@@ -455,6 +455,7 @@ try {
   await page.getByRole('dialog', { name: '编辑路由策略' }).waitFor();
   assert(await page.getByLabel('最低成交倍率').inputValue() === '0.4', '路由弹窗未读取当前最低倍率');
   await page.getByLabel('启用最低缓存命中率').check();
+  await page.getByText('只保留样本充足且达到阈值的文本商户，图片模型不受影响', { exact: true }).waitFor();
   await page.getByRole('spinbutton', { name: /最低缓存命中率/ }).fill('60');
   await page.getByRole('button', { name: '保存策略' }).click();
   assert(adminMockState.routeSaveCalls === 1, '保存路由策略没有调用真实接口');

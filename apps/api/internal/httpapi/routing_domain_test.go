@@ -126,7 +126,7 @@ func TestCachePriorityTreatsLowSampleAsNeutral(t *testing.T) {
 	}
 }
 
-func TestSmartCacheFloorTreatsInsufficientSampleAsNeutral(t *testing.T) {
+func TestSmartCacheFloorRejectsInsufficientSample(t *testing.T) {
 	floor := 600_000
 	selection := RouteSelection{MinimumCacheHitPPM: &floor}
 	for _, test := range []struct {
@@ -134,7 +134,7 @@ func TestSmartCacheFloorTreatsInsufficientSampleAsNeutral(t *testing.T) {
 		candidate RouteCandidate
 		want      bool
 	}{
-		{name: "样本不足", candidate: RouteCandidate{MerchantCacheHitPPM: 0, MerchantCacheWeightReady: false}, want: true},
+		{name: "样本不足", candidate: RouteCandidate{MerchantCacheHitPPM: 0, MerchantCacheWeightReady: false}, want: false},
 		{name: "低于阈值", candidate: RouteCandidate{MerchantCacheHitPPM: 599_999, MerchantCacheWeightReady: true}, want: false},
 		{name: "达到阈值", candidate: RouteCandidate{MerchantCacheHitPPM: 600_000, MerchantCacheWeightReady: true}, want: true},
 	} {

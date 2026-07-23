@@ -48,10 +48,10 @@ type RouteCandidate struct {
 }
 
 func routeCandidateMeetsCacheFloor(selection RouteSelection, candidate RouteCandidate) bool {
-	if selection.MinimumCacheHitPPM == nil || selection.PriceKind == "image" || !candidate.MerchantCacheWeightReady {
+	if selection.MinimumCacheHitPPM == nil || selection.PriceKind == "image" {
 		return true
 	}
-	return candidate.MerchantCacheHitPPM >= *selection.MinimumCacheHitPPM
+	return candidate.MerchantCacheWeightReady && candidate.MerchantCacheHitPPM >= *selection.MinimumCacheHitPPM
 }
 
 type healthFailureClass string

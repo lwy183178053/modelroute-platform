@@ -2829,3 +2829,27 @@
 - `data/ui-preview/vite.config.mjs`：清理旧固定路由预览数据和接口；该文件位于 Git 忽略目录，仅用于当前本地预览。
 - `progress.md`：追加本地预览校准和浏览器验收证据。
 - 回滚方式：将 `data/ui-preview/vite.config.mjs` 的路由样例重置为当前提交的预览配置；本轮未改动服务器。
+
+## 2026-07-24 - Task: 补齐最低缓存命中率的样本过滤规则
+
+### What was done
+
+- 修正智能路由的最低缓存命中率筛选：启用阈值后，文本模型商户必须同时满足样本充足且命中率达标；样本不足和低于阈值均退出候选。
+- 图片模型继续忽略缓存阈值；未启用阈值时，样本不足的商户仍按中性分参与普通加权路由。
+- 路由弹窗明确提示样本不足会被阈值过滤，与服务端行为保持一致。
+
+### Testing
+
+- `go test ./internal/httpapi -run TestSmartCacheFloorRejectsInsufficientSample -count=1`：修正前稳定失败，错误为样本不足候选仍返回可用。
+- `go test ./internal/httpapi -run 'TestSmartCacheFloorRejectsInsufficientSample|TestCachePriorityTreatsLowSampleAsNeutral' -count=1`：通过，阈值过滤与未开启阈值时的中性权重均正确。
+- `npm.cmd run test:ui`：通过，路由弹窗显示新筛选口径，前端生产构建和交互冒烟无失败。
+
+### Notes
+
+- `apps/api/internal/httpapi/routing_domain.go`：最低缓存阈值启用时增加商户样本就绪条件。
+- `apps/api/internal/httpapi/routing_domain_test.go`：将样本不足用例改为应被阈值过滤。
+- `apps/web/src/Modals.jsx`：更新最低缓存命中率的界面说明。
+- `apps/web/scripts/ui-smoke.mjs`：增加路由阈值规则文案回归。
+- `docs/模型报价路由与健康.md`：同步样本不足退出候选的业务口径。
+- `progress.md`：追加本轮实现、红绿验证和回滚信息。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可恢复样本不足候选按中性分参与的旧行为；本轮不涉及数据库结构，未发布服务器。

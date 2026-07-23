@@ -95,7 +95,7 @@ function RouteModal({ close, config, notify }) {
       </div></div>
 
       <div className="form-section cache-floor-setting"><h3>缓存筛选</h3>
-        <label className="toggle-line"><input aria-label="启用最低缓存命中率" checked={cacheFloorEnabled} onChange={(event) => setCacheFloorEnabled(event.target.checked)} type="checkbox" /><span><strong>启用最低缓存命中率</strong><small>仅过滤样本充足且低于阈值的商户，新商户按中性分参与</small></span></label>
+        <label className="toggle-line"><input aria-label="启用最低缓存命中率" checked={cacheFloorEnabled} onChange={(event) => setCacheFloorEnabled(event.target.checked)} type="checkbox" /><span><strong>启用最低缓存命中率</strong><small>只保留样本充足且达到阈值的文本商户，图片模型不受影响</small></span></label>
         {cacheFloorEnabled && <Field label="最低缓存命中率" hint="按最近 7 天商户与模型汇总数据判断"><div className="suffix-input"><TextInput max="100" min="0" onChange={(event) => setCacheFloor(event.target.value)} step="0.01" type="number" value={cacheFloor} /><span>%</span></div></Field>}
       </div>
       <InlineNotice tone="warning">没有符合策略条件的候选时返回无可用渠道错误，本次请求不扣费。</InlineNotice>

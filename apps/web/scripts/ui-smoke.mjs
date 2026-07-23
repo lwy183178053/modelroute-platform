@@ -47,6 +47,9 @@ async function mockAdminAPI(targetPage, state, account = null) {
     if (url.pathname === '/api/models') {
       return json({ success: true, data: [{ id: 101, public_name: 'gpt-4o-mini', provider: 'OpenAI', protocol: 'chat_completions', status: 'active', adapter_hint: 'openai_compatible', price: { id: 501, version: 2, price_kind: 'text', tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 150000, output_price_micros: 600000, cache_read_price_micros: 75000, cache_write_price_micros: 200000 }] } }] });
     }
+    if (url.pathname === '/api/merchant/channel-defaults' && request.method() === 'GET') {
+      return json({ success: true, data: { configured: true, channel_type: 'openai_compatible', base_url: 'https://api.lwylink.xyz' } });
+    }
     if (url.pathname === '/api/offers') {
       return json({ success: true, data: [
         { offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 108000, output_price_micros: 432000, cache_read_price_micros: 54000, cache_write_price_micros: 144000 }], channel_count: 1, health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 },
@@ -400,17 +403,18 @@ try {
   await page.getByRole('button', { name: '提交新渠道' }).click();
   const channelDialog = page.getByRole('dialog', { name: '提交新渠道' });
   await channelDialog.getByLabel('渠道名称').fill('企业多模型线路');
-  await channelDialog.getByLabel('上游基础地址').fill('https://api.upstream.example/v1');
-  await channelDialog.getByLabel('上游 API 密钥').fill('sk-local-test-key');
+  await channelDialog.getByLabel('上游基础地址').waitFor();
+  assert(await channelDialog.getByLabel('上游基础地址').inputValue() === 'https://api.lwylink.xyz', '渠道弹窗没有读取本地默认上游地址');
   const channelPageURL = page.url();
-  await channelDialog.getByRole('button', { name: '一键同步模型' }).click();
+  await channelDialog.getByRole('button', { name: '一键获取模型' }).click();
   await page.waitForTimeout(200);
-  assert(adminMockState.channelModelSyncCalls === 1, '一键同步模型没有调用接口');
+  assert(adminMockState.channelModelSyncCalls === 1, '一键获取模型没有调用接口');
   const channelDialogVisible = await channelDialog.isVisible().catch(() => false);
   const channelDialogText = channelDialogVisible ? await channelDialog.innerText() : await page.locator('body').innerText();
   assert(channelDialogVisible && page.url() === channelPageURL, `同步上游模型后离开了渠道弹窗：${page.url()} ${pageErrors.join('; ')} ${channelDialogText}`);
   assert(channelDialogText.includes('已匹配 1 个模型') && channelDialogText.includes('平台未收录'), `同步结果没有显示在渠道弹窗：${channelDialogText}`);
   assert(adminMockState.channelModelSyncCalls === 1 && adminMockState.channelModelSyncBody.channel_type === 'openai_compatible', '同步模型没有提交密钥类型');
+  await channelDialog.getByLabel('上游 API 密钥').fill('sk-local-test-key');
   await channelDialog.getByRole('button', { name: '提交渠道审核' }).click();
   await page.getByText('渠道已提交审核').waitFor();
   assert(adminMockState.channelSubmitCalls === 1 && adminMockState.channelSubmitBody.channel_name === '企业多模型线路', '渠道审核没有提交真实表单');

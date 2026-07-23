@@ -1910,3 +1910,32 @@
 - `data/ui-preview/vite.config.mjs`：Git 忽略的本地演示接口加入渠道下架后的市场过滤。
 - `apps/web/artifacts/market-*.png`、`apps/web/artifacts/merchant-offers-*.png`：更新本地界面截图；同次截图命令生成的其他界面截图保持现状。
 - 回滚点：本轮提交未推送、未上传、未部署；使用 `git revert <本轮提交哈希>` 可撤销本轮代码、文档和截图，停止监听 `57723` 的 Node 进程可关闭本地预览。
+
+## 2026-07-23 - Task: 本地默认上游模型获取与支付配置预览
+
+### What was done
+
+- 渠道弹窗打开时读取本地预览默认上游地址和协议，已配置默认上游时无需重复填写密钥即可获取模型。
+- 将按钮统一为“一键获取模型”；同步结果留在原弹窗内，不再触发页面跳转或关闭，手动补充提交密钥后仍保留同步结果。
+- 本地预览服务端使用受限进程环境请求真实上游模型列表，并按本地模型目录返回已收录与平台未收录结果；支付设置只显示网关、商户号掩码和已配置状态。
+- 增加真实浏览器回归，覆盖默认地址填充、真实模型同步、弹窗不跳转和无横向溢出。
+
+### Testing
+
+- 实测 `GET /api/merchant/channel-defaults` 返回已配置的默认地址和协议，未返回密钥。
+- 实测 `POST /api/merchant/channel-models/sync` 通过真实上游返回 20 个模型，其中 2 个匹配本地目录，其余标记为平台未收录。
+- 实测管理支付设置返回网关、商户号掩码和 `key_configured=true`，响应不含明文密钥。
+- `node data/ui-preview/verify.mjs` 通过，浏览器运行时错误为 0，页面宽度与滚动宽度均为 1440。
+- `npm.cmd run test:ui` 通过；`npm.cmd run capture` 通过；`node --check data/ui-preview/vite.config.mjs`、`node --check data/ui-preview/verify.mjs` 和 `git diff --check` 通过。
+
+### Notes
+
+- `apps/web/src/Modals.jsx`：读取默认上游配置，修复获取模型按钮文案、校验和同步后弹窗状态。
+- `apps/web/scripts/ui-smoke.mjs`：增加默认上游、无重复输入和同步不跳转回归。
+- `docs/部署运行手册.md`：补充仅限本地预览的环境变量和敏感字段边界。
+- `apps/web/artifacts/admin-settings-desktop.png`：更新支付设置桌面截图。
+- `apps/web/artifacts/admin-settings-mobile.png`：更新支付设置移动端截图。
+- `data/ui-preview/vite.config.mjs`：本地忽略目录中的真实上游同步和支付配置预览逻辑，不进入正式构建。
+- `data/ui-preview/verify.mjs`：本地忽略目录中的真实浏览器回归脚本，不进入 Git。
+- 凭据只存在于当前本地预览进程环境，未写入 Git、文档、进度日志、截图或接口响应；本轮未推送、未上传、未部署服务器。
+- 回滚点：提交后执行 `git revert <本轮提交哈希>` 回退跟踪文件；停止监听 `57723` 的 Node 进程即可关闭本地预览。

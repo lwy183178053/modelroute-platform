@@ -1990,3 +1990,28 @@
 - `docs/部署运行手册.md`：说明本地模型页面读取完整种子而非精简演示数据。
 - 凭据仍只存在当前本地预览进程环境，未写入 Git、文档、进度日志或接口响应；本轮未上传服务器。
 - 回滚点：停止监听 `57723` 的 Node 进程可关闭预览；恢复 `data/ui-preview` 到本轮前本地状态即可撤销本地预览变更。
+
+## 2026-07-23 - Task: 修复账户设置移动端侧栏布局
+
+### What was done
+
+- 修复窄屏进入“账户设置”时控制台侧栏横向滚动导致前置入口被截断的问题。
+- 控制台侧栏在移动端改为两列换行，五个入口同时可见；桌面端和管理后台侧栏布局保持不变。
+
+### Testing
+
+- `npm.cmd run test:ui` 通过。
+- `npm.cmd run capture` 通过，桌面和移动端截图已重新生成。
+- `node data/ui-preview/account-settings-check.mjs` 通过：桌面与移动端文案完整，移动端 `scrollWidth` 等于视口宽度。
+- `node data/ui-preview/verify.mjs` 通过：模型定价页 21 行、运行时错误为 0、根页面无横向溢出。
+- `git diff --check` 通过。
+
+### Notes
+
+- `apps/web/src/styles.css`：为移动端控制台侧栏增加两列换行布局，避免账户设置入口触发横向滚动定位。
+- `apps/web/artifacts/admin-settings-desktop.png`：按最新本地构建更新桌面验收截图。
+- `apps/web/artifacts/admin-settings-mobile.png`：按最新本地构建更新移动端验收截图。
+- `apps/web/artifacts/console-mobile.png`：按最新本地构建更新控制台移动端验收截图。
+- `apps/web/artifacts/route-modal-mobile.png`：按最新本地构建更新路由弹窗移动端验收截图。
+- `docs/部署运行手册.md`：补充窄屏控制台侧栏验收要求。
+- 回滚点：本轮仅修改前端样式、验收截图和文档；执行 `git revert <本轮提交哈希>` 可回退，未上传或部署服务器。

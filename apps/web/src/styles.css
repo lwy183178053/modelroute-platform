@@ -455,6 +455,8 @@ main { min-height: calc(100vh - 66px); }
   .callback-list > div { padding: 8px 0; grid-template-columns: 72px 1fr auto; }
   .callback-list > div span { grid-column: 2 / -1; }
   .settings-list > div { padding: 8px 0; grid-template-columns: 1fr auto; }.settings-list > div strong { grid-column: 1 / -1; }
+  .console-layout .admin-sidebar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; }
+  .console-layout .admin-sidebar button { min-width: 0; grid-template-columns: 18px minmax(0, 1fr); }
   .modal-layer { padding: 10px; align-items: end; }
   .modal { max-height: calc(100vh - 20px); }
   .modal-header, .modal-body, .modal-footer { padding-left: 14px; padding-right: 14px; }

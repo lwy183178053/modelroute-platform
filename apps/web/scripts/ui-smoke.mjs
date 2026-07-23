@@ -364,10 +364,11 @@ try {
   }
   assert(!(await page.locator('body').innerText()).includes('账户分组'), '用户控制台仍显示外围分组');
   await page.getByRole('main').getByText('¥257.28', { exact: true }).waitFor();
+  assert(await page.locator('[aria-label="最近 7 天用量趋势"]').count() === 1, '账户概览未渲染真实用量趋势');
   await consoleSidebar.getByRole('button', { name: '调用记录', exact: true }).click();
   await page.getByText('req-user-1001').waitFor();
   await page.getByText('缓存 1,200 Token').waitFor();
-  assert(await page.locator('[aria-label="最近 7 天用量趋势"]').count() === 1, '控制台未渲染真实用量趋势');
+  assert(await page.locator('[aria-label="最近 7 天用量趋势"]').count() === 0, '调用记录页仍重复渲染用量趋势');
   assert(!(await page.locator('body').innerText()).includes('mkt-ov-'), '控制台泄露了内部报价别名');
   await consoleSidebar.getByRole('button', { name: '充值中心', exact: true }).click();
   await page.getByLabel('兑换码', { exact: true }).fill('MR-USER-CODE');

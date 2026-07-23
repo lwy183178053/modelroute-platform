@@ -211,7 +211,7 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
             </div>
           </Section>}
 
-          {section === 'usage' && <><UsageTrend data={usage.data} error={usage.error} loading={usage.loading} /><UsageLogTable data={usage.data} error={usage.error} loading={usage.loading} onRefresh={usage.load} /></>}
+          {section === 'usage' && <UsageLogTable data={usage.data} error={usage.error} loading={usage.loading} onRefresh={usage.load} />}
 
           {section === 'recharge' && <>
             <Section title="账户充值" actions={<Button icon={Plus} variant="primary" onClick={() => openModal({ type: 'recharge', onSaved: loadPaymentOrders })}>立即充值</Button>}>

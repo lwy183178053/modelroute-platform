@@ -182,20 +182,30 @@ main { min-height: calc(100vh - 66px); }
 .chart-column { height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 8px; }
 .chart-bar { width: min(36px, 72%); min-height: 4px; border-radius: 4px 4px 0 0; background: var(--teal); }
 .chart-column span { height: 20px; color: var(--muted); font-size: 10px; white-space: nowrap; }
-.account-summary { padding: 18px 0 16px; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; }
 .account-avatar { width: 42px; height: 42px; border-radius: 8px; background: var(--teal-soft); color: var(--teal-dark); display: grid; place-items: center; font-size: 17px; font-weight: 750; }
-.account-summary > div:nth-child(2) { display: grid; gap: 3px; }
-.account-summary > div:nth-child(2) span { color: var(--muted); font-size: 10px; }
 .account-rows { padding: 10px 0 4px; }
 .account-rows > div { min-height: 34px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .account-rows span { color: var(--muted); }
 .account-rows strong { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
-.account-settings-layout { display: grid; grid-template-columns: minmax(260px, .8fr) minmax(320px, 1.2fr); gap: 28px; align-items: start; }
-.account-settings-layout .account-summary { min-height: 92px; border-bottom: 0; }
-.account-settings-layout .account-rows { padding-top: 14px; }
-.account-settings-layout .account-rows > div { min-height: 40px; border-bottom: 1px solid var(--line); }
-.account-actions { padding-top: 18px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.account-actions .inline-notice { margin: 0; }
+.account-settings-content { margin: 0 !important; padding: 20px 18px; display: grid; grid-template-columns: minmax(260px, .85fr) minmax(340px, 1.15fr); gap: 30px; align-items: start; }
+.account-identity { min-width: 0; padding-right: 30px; border-right: 1px solid var(--line); }
+.account-identity-header { min-height: 44px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 10px; }
+.account-identity-copy { min-width: 0; display: grid; gap: 4px; }
+.account-identity-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; line-height: 20px; }
+.account-identity-copy span { color: var(--muted); font-size: 10px; line-height: 16px; }
+.account-workspace { margin-top: 24px; padding-top: 15px; border-top: 1px solid var(--line); display: grid; gap: 4px; }
+.account-workspace span, .account-workspace small { color: var(--muted); font-size: 10px; }
+.account-workspace strong { font-size: 13px; line-height: 20px; }
+.account-actions { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.account-actions .button { width: max-content; }
+.account-details { min-width: 0; }
+.account-details-heading { min-height: 40px; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.account-details-heading h3 { margin: 0; font-size: 13px; line-height: 20px; }
+.account-details-heading span { color: var(--muted); font-size: 10px; }
+.account-settings-section .account-rows { padding: 0; }
+.account-settings-section .account-rows > div { min-height: 56px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.account-settings-section .account-rows > div:last-child { border-bottom: 0; }
+.account-details .inline-notice { margin: 16px 0 0; }
 .inline-notice { min-height: 38px; margin-top: 14px; margin-bottom: 14px; padding: 9px 11px; border: 1px solid #cfe6e1; border-radius: 6px; background: #f1faf8; color: #3e625b; display: flex; align-items: center; gap: 8px; font-size: 11px; line-height: 18px; }
 .inline-notice-warning { border-color: #efdbb7; background: #fffaf0; color: #7a5318; }
 .inline-notice-success { border-color: #cbe5d5; background: #f1faf4; color: #316d4b; }
@@ -442,8 +452,11 @@ main { min-height: calc(100vh - 66px); }
   .chart-shell { height: 226px; padding-top: 14px; }
   .chart-bars { gap: 7px; }
   .chart-bar { width: min(24px, 70%); }
-  .account-summary { grid-template-columns: auto 1fr; }.account-summary .status { grid-column: 2; }
-  .account-settings-layout { grid-template-columns: 1fr; gap: 4px; }
+  .account-settings-content { padding: 16px 12px; grid-template-columns: 1fr; gap: 20px; }
+  .account-identity { padding-right: 0; padding-bottom: 20px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .account-details-heading { min-height: 34px; }
+  .account-details-heading span { display: none; }
+  .account-settings-section .account-rows > div { min-height: 52px; }
   .settlement-chart { grid-template-columns: 1fr; justify-items: center; gap: 10px; }
   .legend-list { width: 100%; }
   .transaction-band { grid-template-columns: repeat(2, 1fr); }

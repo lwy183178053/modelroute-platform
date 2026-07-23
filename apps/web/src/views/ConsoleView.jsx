@@ -228,15 +228,27 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
             </Section>
           </>}
 
-          {section === 'settings' && <Section title="账户设置" description="查看当前账号资料和已开通的工作区">
-            <div className="account-settings-layout">
-              <div className="account-summary"><div className="account-avatar">{displayName.slice(0, 1).toUpperCase()}</div><div><strong>{displayName}</strong><span>用户 ID {account.id} · {accountTypeName}</span></div><Status>正常</Status></div>
-              <div className="account-rows"><div><span>登录账号</span><strong>{account.username}</strong></div><div><span>邮箱</span><strong>{account.email || '-'}</strong></div><div><span>用户类型</span><strong>{accountTypeName}</strong></div></div>
+          {section === 'settings' && <Section className="account-settings-section" title="账户设置" description="查看当前账号资料和已开通的工作区">
+            <div className="account-settings-content">
+              <div className="account-identity">
+                <div className="account-identity-header">
+                  <div className="account-avatar">{displayName.slice(0, 1).toUpperCase()}</div>
+                  <div className="account-identity-copy"><strong>{displayName}</strong><span>用户 ID {account.id} · {accountTypeName}</span></div>
+                  <Status>正常</Status>
+                </div>
+                <div className="account-workspace"><span>当前工作区</span><strong>{account.is_merchant || Number(account.role) >= 10 ? '商户工作区' : '用户工作台'}</strong><small>{accountTypeName} · 可用功能按账号身份显示</small></div>
+                <div className="account-actions">
+                  {(account.is_merchant || Number(account.role) >= 10) && <Button icon={ArrowUpRight} onClick={() => navigate('merchant')} variant="primary">进入商户中心</Button>}
+                  {!account.is_merchant && Number(account.role) < 10 && (!merchantApplication || merchantApplication.status === 'rejected') && <Button icon={ArrowUpRight} onClick={() => openModal({ type: 'merchantApply', models, onSaved: loadMerchantApplication })}>{merchantApplication?.status === 'rejected' ? '重新提交商户申请' : '申请成为商户'}</Button>}
+                </div>
+              </div>
+              <div className="account-details">
+                <div className="account-details-heading"><h3>账号信息</h3><span>登录凭据和账号身份</span></div>
+                <div className="account-rows"><div><span>登录账号</span><strong>{account.username}</strong></div><div><span>邮箱</span><strong>{account.email || '-'}</strong></div><div><span>用户类型</span><strong>{accountTypeName}</strong></div></div>
+                {!account.is_merchant && Number(account.role) < 10 && merchantApplication && ['pending', 'verifying', 'verified', 'approving'].includes(merchantApplication.status) && <InlineNotice tone="warning">等待管理员审核 · 申请 ID {merchantApplication.id}</InlineNotice>}
+                {merchantApplication?.status === 'rejected' && <InlineNotice tone="warning">上次申请未通过：{merchantApplication.review_reason || '请核对资料后重新提交'}</InlineNotice>}
+              </div>
             </div>
-            <div className="account-actions">{(account.is_merchant || Number(account.role) >= 10) && <Button icon={ArrowUpRight} onClick={() => navigate('merchant')} variant="primary">进入商户中心</Button>}
-            {!account.is_merchant && Number(account.role) < 10 && merchantApplication && ['pending', 'verifying', 'verified', 'approving'].includes(merchantApplication.status) && <InlineNotice tone="warning">等待管理员审核 · 申请 ID {merchantApplication.id}</InlineNotice>}
-            {!account.is_merchant && Number(account.role) < 10 && (!merchantApplication || merchantApplication.status === 'rejected') && <Button icon={ArrowUpRight} onClick={() => openModal({ type: 'merchantApply', models, onSaved: loadMerchantApplication })}>{merchantApplication?.status === 'rejected' ? '重新提交商户申请' : '申请成为商户'}</Button>}
-            {merchantApplication?.status === 'rejected' && <InlineNotice tone="warning">上次申请未通过：{merchantApplication.review_reason || '请核对资料后重新提交'}</InlineNotice>}</div>
           </Section>}
         </div>
       </div>

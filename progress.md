@@ -2195,3 +2195,28 @@
 - `data/ui-preview/vite.config.mjs`：更新忽略目录中的管理员测试渠道与本地同步夹具。
 - `docs/模型报价路由与健康.md`：记录管理员专用测试渠道边界。
 - 回滚点：执行 `git revert <本轮提交哈希>` 可恢复默认地址行为和旧渠道夹具；本轮未上传或部署服务器。
+
+## 2026-07-23 - Task: 优化用户控制台账户设置布局
+
+### What was done
+
+- 将账户设置从横向大块资料排布调整为身份摘要、工作区操作和账号资料的清晰分区。
+- 右侧登录账号、邮箱和用户类型改为独立行高，避免内容挤在一起；移动端改为上下排列并保持相同信息层级。
+- 商户入口、商户申请和审核提示继续沿用原有权限与交互，不改变账号接口和业务数据。
+
+### Testing
+
+- `npm.cmd run test:ui` 通过。
+- `npm.cmd run capture` 通过，桌面与移动端截图已更新。
+- `node data/ui-preview/account-settings-check.mjs` 通过，桌面和移动端无横向溢出，账号资料文案完整。
+- `node data/ui-preview/verify.mjs` 通过，模型目录 21 行、渠道 3 行、运行时错误为 0。
+- `git diff --check` 通过。
+
+### Notes
+
+- `apps/web/src/views/ConsoleView.jsx`：重排账户设置 JSX，保留身份、工作区入口和申请状态逻辑。
+- `apps/web/src/styles.css`：新增账户设置双栏与移动端堆叠样式，增加右侧资料行高。
+- `docs/账号与管理员接口.md`：补充账户设置布局和审核提示展示规则。
+- `data/ui-preview/account-settings-desktop.png`、`data/ui-preview/account-settings-mobile.png`：更新本地验收截图（忽略目录）。
+- `apps/web/artifacts/admin-settings-desktop.png`：按本地构建更新截图。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可回退本轮账户设置代码、文档和截图；本轮仅本地修改，未上传服务器。

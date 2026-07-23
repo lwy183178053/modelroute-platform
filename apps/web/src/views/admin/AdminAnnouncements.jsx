@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Megaphone, Pencil, Pin, Plus } from 'lucide-react';
 import { apiRequest } from '../../api';
-import { Button, Field, InlineNotice, Modal, Section, Status, TextInput } from '../../ui';
+import { ActionMenu, Button, Field, InlineNotice, Modal, Section, Status, TextInput } from '../../ui';
 
 const audienceLabels = { user: '普通用户', merchant: '商户', admin: '管理员' };
 const statusLabels = { draft: '草稿', scheduled: '定时发布', published: '已发布', withdrawn: '已下架' };
@@ -119,11 +119,11 @@ export default function AdminAnnouncements({ notify }) {
           <td>{item.publish_at ? new Date(item.publish_at).toLocaleString('zh-CN', { hour12: false }) : '尚未设置'}</td>
           <td>{item.expires_at ? new Date(item.expires_at).toLocaleString('zh-CN', { hour12: false }) : '长期有效'}</td>
           <td><Status>{statusLabels[item.status] || item.status}</Status></td>
-          <td><div className="row-actions">
-            {['draft', 'scheduled'].includes(item.status) && <Button icon={Pencil} onClick={() => setDialog({ item })} variant="ghost">编辑</Button>}
-            {['draft', 'scheduled'].includes(item.status) && <Button icon={Megaphone} onClick={() => changeStatus(item, 'publish')} variant="ghost">发布</Button>}
-            {['scheduled', 'published'].includes(item.status) && <Button onClick={() => changeStatus(item, 'withdraw')} variant="danger">下架</Button>}
-          </div></td>
+          <td><ActionMenu items={[
+            ['draft', 'scheduled'].includes(item.status) && { label: '编辑', icon: Pencil, onClick: () => setDialog({ item }) },
+            ['draft', 'scheduled'].includes(item.status) && { label: '发布', icon: Megaphone, onClick: () => changeStatus(item, 'publish') },
+            ['scheduled', 'published'].includes(item.status) && { label: '下架', danger: true, onClick: () => changeStatus(item, 'withdraw') },
+          ]} /></td>
         </tr>)}
         {!loading && items.length === 0 && <tr><td className="table-message" colSpan="7">暂无公告</td></tr>}
         {loading && <tr><td className="table-message" colSpan="7">正在读取公告</td></tr>}

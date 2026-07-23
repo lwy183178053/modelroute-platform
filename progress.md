@@ -2220,3 +2220,30 @@
 - `data/ui-preview/account-settings-desktop.png`、`data/ui-preview/account-settings-mobile.png`：更新本地验收截图（忽略目录）。
 - `apps/web/artifacts/admin-settings-desktop.png`：按本地构建更新截图。
 - 回滚点：执行 `git revert <本轮提交哈希>` 可回退本轮账户设置代码、文档和截图；本轮仅本地修改，未上传服务器。
+
+## 2026-07-23 - Task: 统一列表操作菜单
+
+### What was done
+
+- 将用户密钥、商户渠道与报价、管理员公告、渠道、商户审核、模型、支付订单、兑换码、用户、提现和对账列表的多按钮操作统一收纳到三点下拉菜单。
+- 菜单支持危险操作标色、禁用状态、点击外部关闭、Esc 关闭和窗口尺寸变化关闭；固定定位避免被表格滚动容器裁切。
+- 更新桌面与移动端截图脚本及浏览器回归，确保具体操作仍可从菜单触发。
+
+### Testing
+
+- `npm.cmd run test:ui` 通过，覆盖密钥路由、渠道审核/恢复、报价取消、模型发布/删除、兑换码、支付入账、提现和对账操作。
+- `npm.cmd run capture` 通过，桌面和移动端页面截图生成完成，根页面无横向溢出。
+- `node data/ui-preview/verify.mjs` 通过，模型目录 21 行、渠道 3 行、运行时错误为 0。
+- `node data/ui-preview/account-settings-check.mjs` 通过，桌面和移动端控制台布局无横向溢出。
+- `git diff --check` 通过。
+
+### Notes
+
+- `apps/web/src/ui.jsx`：新增可复用 `ActionMenu` 组件。
+- `apps/web/src/styles.css`：新增三点触发器、固定定位菜单、禁用和危险动作样式。
+- `apps/web/src/views/ConsoleView.jsx`、`apps/web/src/views/MerchantView.jsx`：收纳密钥、渠道和报价操作。
+- `apps/web/src/views/admin/*.jsx`：收纳公告、渠道、商户审核、模型、支付、兑换码、用户、提现和对账操作。
+- `apps/web/scripts/ui-smoke.mjs`、`apps/web/scripts/capture.mjs`：更新菜单交互回归和截图流程。
+- `docs/账号与管理员接口.md`：补充列表操作菜单行为说明。
+- `apps/web/artifacts/*.png`：按本地构建更新受影响的桌面和移动端截图。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可回退统一菜单代码、测试、文档和截图；本轮仅本地修改，未上传服务器。

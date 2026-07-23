@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Check, RefreshCw, Search, ShieldCheck, X } from 'lucide-react';
 import { apiRequest } from '../../api';
-import { Button, InlineNotice, Section, Status, TextInput } from '../../ui';
+import { ActionMenu, Button, InlineNotice, Section, Status, TextInput } from '../../ui';
 
 const statusNames = {
   pending: '审核中', verifying: '审核中', verified: '审核中', approving: '审核中',
@@ -59,7 +59,7 @@ export default function AdminMerchants({ notify }) {
         <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>申请人</th><th>网站</th><th>初始渠道</th><th>模型</th><th>检测适配器</th><th>凭据</th><th>状态</th><th>审核操作</th></tr></thead><tbody>
           {applications.map((application) => {
             const review = application.initial_channel || {};
-            return <tr key={application.id}><td><code>{application.id}</code><small>{application.created_at ? new Date(application.created_at).toLocaleString('zh-CN') : '-'}</small></td><td><strong>{application.display_name}</strong><small>用户 ID {application.user_id}</small></td><td><a href={application.website_url} rel="noreferrer" target="_blank">{application.website_url}</a></td><td><strong>{review.channel_name || '-'}</strong></td><td>{review.model || '-'}</td><td>{review.adapter_type || '-'}</td><td>{review.credential_configured ? '已加密保存' : '已清除正文'}</td><td><Status>{statusNames[application.status] || application.status}</Status></td><td><div className="row-actions"><Button disabled={Boolean(busyID) || !['pending', 'verified'].includes(application.status)} icon={ShieldCheck} onClick={() => operate(application, 'verify')} variant="ghost">验证</Button><Button disabled={Boolean(busyID) || application.status !== 'verified'} icon={Check} onClick={() => operate(application, 'approve')} variant="ghost">通过</Button><Button disabled={Boolean(busyID) || !['pending', 'verified'].includes(application.status)} icon={X} onClick={() => operate(application, 'reject')} variant="danger">驳回</Button></div></td></tr>;
+            return <tr key={application.id}><td><code>{application.id}</code><small>{application.created_at ? new Date(application.created_at).toLocaleString('zh-CN') : '-'}</small></td><td><strong>{application.display_name}</strong><small>用户 ID {application.user_id}</small></td><td><a href={application.website_url} rel="noreferrer" target="_blank">{application.website_url}</a></td><td><strong>{review.channel_name || '-'}</strong></td><td>{review.model || '-'}</td><td>{review.adapter_type || '-'}</td><td>{review.credential_configured ? '已加密保存' : '已清除正文'}</td><td><Status>{statusNames[application.status] || application.status}</Status></td><td><ActionMenu items={[{ label: '验证', icon: ShieldCheck, disabled: Boolean(busyID) || !['pending', 'verified'].includes(application.status), onClick: () => operate(application, 'verify') }, { label: '通过', icon: Check, disabled: Boolean(busyID) || application.status !== 'verified', onClick: () => operate(application, 'approve') }, { label: '驳回', icon: X, danger: true, disabled: Boolean(busyID) || !['pending', 'verified'].includes(application.status), onClick: () => operate(application, 'reject') }]} /></td></tr>;
           })}
           {applications.length === 0 && <tr><td className="table-message" colSpan="9">暂无商户申请</td></tr>}
         </tbody></table></div>

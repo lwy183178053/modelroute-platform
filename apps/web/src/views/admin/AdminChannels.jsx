@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, Power, RefreshCw, Search, ShieldCheck, Trash2, X } from 'lucide-react';
 import { apiRequest } from '../../api';
-import { Button, InlineNotice, Section, Select, Status, TextInput } from '../../ui';
+import { ActionMenu, Button, InlineNotice, Section, Select, Status, TextInput } from '../../ui';
 
 const reviewStatuses = new Set(['pending', 'verifying', 'verified', 'approving']);
 const healthNames = {
@@ -135,7 +135,7 @@ export default function AdminChannels({ notify }) {
               <td><code>{item.base_url}</code></td>
               <td><Status>{displayStatus(item)}</Status><small>{item.verification_error || item.review_reason || ''}</small></td>
               <td>{item.kind === 'channel' ? <Status>{healthNames[item.health_state] || item.health_state || '待调用'}</Status> : '-'}</td>
-              <td>{item.kind === 'review' ? <div className="row-actions"><Button disabled={Boolean(busyID) || !['pending', 'verified'].includes(item.status)} icon={ShieldCheck} onClick={() => operate(item, 'verify')} variant="ghost">验证</Button><Button disabled={Boolean(busyID) || item.status !== 'verified'} icon={Check} onClick={() => operate(item, 'approve')} variant="ghost">通过</Button><Button disabled={Boolean(busyID) || !['pending', 'verified'].includes(item.status)} icon={X} onClick={() => operate(item, 'reject')} variant="danger">驳回</Button></div> : <div className="row-actions"><Button disabled={Boolean(busyID) || item.status === 'archived'} icon={Power} onClick={() => updateChannel(item, 'status')} variant="ghost">{item.status === 'active' ? '下架' : '启用'}</Button><Button disabled={Boolean(busyID)} icon={Trash2} onClick={() => updateChannel(item, 'delete')} variant="danger">删除</Button>{canRecover && <Button disabled={Boolean(busyID)} icon={RefreshCw} variant="ghost" onClick={() => recover(item)}>恢复渠道</Button>}</div>}</td>
+              <td>{item.kind === 'review' ? <ActionMenu items={[{ label: '验证', icon: ShieldCheck, disabled: Boolean(busyID) || !['pending', 'verified'].includes(item.status), onClick: () => operate(item, 'verify') }, { label: '通过', icon: Check, disabled: Boolean(busyID) || item.status !== 'verified', onClick: () => operate(item, 'approve') }, { label: '驳回', icon: X, danger: true, disabled: Boolean(busyID) || !['pending', 'verified'].includes(item.status), onClick: () => operate(item, 'reject') }]} /> : <ActionMenu items={[{ label: item.status === 'active' ? '下架' : '启用', icon: Power, disabled: Boolean(busyID) || item.status === 'archived', onClick: () => updateChannel(item, 'status') }, { label: '删除', icon: Trash2, danger: true, disabled: Boolean(busyID), onClick: () => updateChannel(item, 'delete') }, canRecover && { label: '恢复渠道', icon: RefreshCw, disabled: Boolean(busyID), onClick: () => recover(item) }]} />}</td>
             </tr>;
           })}
           {visibleRows.length === 0 && <tr><td className="table-message" colSpan="8">暂无匹配渠道</td></tr>}

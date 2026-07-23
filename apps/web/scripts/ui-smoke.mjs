@@ -11,6 +11,19 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+async function openActionMenu(targetPage, index = 0) {
+  const trigger = targetPage.getByRole('button', { name: '操作', exact: true }).nth(index);
+  await trigger.click();
+  const menu = targetPage.getByRole('menu').last();
+  await menu.waitFor();
+  return menu;
+}
+
+async function clickRowAction(targetPage, label, index = 0) {
+  const menu = await openActionMenu(targetPage, index);
+  await menu.getByRole('menuitem', { name: label, exact: true }).click();
+}
+
 const browser = await chromium.launch({ executablePath, headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 const pageErrors = [];
@@ -389,7 +402,7 @@ try {
   assert(await page.getByRole('checkbox', { name: '启用真实主密钥' }).isChecked(), '有效密钥的启用开关未选中');
   await page.getByRole('button', { name: '复制' }).first().click();
   await page.getByText('密钥已复制').waitFor();
-  await page.getByRole('button', { name: '编辑路由策略' }).first().click();
+  await clickRowAction(page, '编辑路由策略');
   await page.getByRole('dialog', { name: '编辑路由策略' }).waitFor();
   assert(await page.getByLabel('最低成交倍率').inputValue() === '0.4', '路由弹窗未读取当前最低倍率');
   await page.getByLabel('固定商户').check();
@@ -461,7 +474,7 @@ try {
   assert(adminMockState.offerCreateCalls === 1, '创建报价没有调用真实接口');
   assert(adminMockState.offerCreateBody.multiplier_bps === 6500, '报价倍率没有转换为整数基点');
   page.once('dialog', (dialog) => dialog.accept());
-  await page.getByRole('button', { name: '取消报价' }).first().click();
+  await clickRowAction(page, '取消报价');
   assert(adminMockState.offerRetireCalls === 1, '取消报价没有调用真实接口');
 
   await page.getByRole('button', { name: '管理后台', exact: true }).click();
@@ -505,7 +518,7 @@ try {
   assert(adminMockState.modelCreateBody.provider === 'OpenAI' && !('lifecycle' in adminMockState.modelCreateBody), '模型创建仍提交生命周期');
   assert(!('currency' in adminMockState.modelCreateBody.price) && !('usd_exchange_rate_micros' in adminMockState.modelCreateBody.price), '模型价格仍提交币种或汇率');
   assert(adminMockState.modelCreateBody.price.tiers.length === 1 && adminMockState.modelCreateBody.price.tiers[0].input_price_micros === 200000 && adminMockState.modelCreateBody.price.tiers[0].output_price_micros === 800000, '文本价格没有按整数微单位提交');
-  await page.getByRole('button', { name: '发布价格' }).first().click();
+  await clickRowAction(page, '发布价格');
   const priceDialog = page.getByRole('dialog', { name: '发布模型价格' });
   await priceDialog.getByRole('button', { name: '新增价格阶梯' }).click();
   await priceDialog.getByLabel('第 1 档上下文上限').fill('200000');
@@ -516,14 +529,14 @@ try {
   assert(adminMockState.pricePublishCalls === 1, '发布官方价格没有调用真实接口');
   assert(adminMockState.pricePublishBody.tiers.length === 2 && adminMockState.pricePublishBody.tiers[0].maximum_input_tokens === 200000 && adminMockState.pricePublishBody.tiers[1].minimum_input_tokens === 200001, '价格阶梯没有按连续区间提交');
   page.once('dialog', (dialog) => dialog.accept());
-  await page.getByRole('button', { name: '删除', exact: true }).first().click();
+  await clickRowAction(page, '删除');
   await page.getByText('标准模型已归档下架').waitFor();
   assert(adminMockState.modelDeleteCalls === 1, '模型删除或归档接口没有调用');
   await page.getByRole('button', { name: '用户管理' }).click();
   await page.getByText('alice@example.com').waitFor();
   await page.getByRole('button', { name: '商户审核' }).click();
   await page.getByText('东海模型服务').waitFor();
-  await page.getByRole('button', { name: '验证' }).click();
+  await clickRowAction(page, '验证');
   await page.getByText('渠道验证通过').waitFor();
   assert(adminMockState.merchantVerifyCalls === 1, '管理员验证没有调用真实商户审核接口');
   await page.getByRole('button', { name: '渠道与探活' }).click();
@@ -534,10 +547,10 @@ try {
   assert(!(await page.locator('body').innerText()).includes('¥12.50'), '渠道管理仍显示上游运行余额');
   assert(await page.getByRole('button', { name: '测试渠道' }).count() === 0, '渠道管理仍显示行内测试按钮');
   assert(await page.getByRole('button', { name: '刷新余额' }).count() === 0, '渠道管理仍显示刷新余额按钮');
-  await page.getByRole('button', { name: '恢复渠道' }).click();
+  await clickRowAction(page, '恢复渠道', 1);
   await page.getByText('渠道已进入恢复检测').waitFor();
   assert(adminMockState.healthResetCalls === 1, '恢复渠道没有调用真实健康接口');
-  await page.getByRole('button', { name: '验证' }).click();
+  await clickRowAction(page, '验证');
   await page.getByText('渠道验证完成').waitFor();
   assert(adminMockState.channelVerifyCalls === 1, '管理员渠道页验证没有调用真实渠道审核接口');
   await page.getByRole('button', { name: '平台设置' }).click();
@@ -557,10 +570,10 @@ try {
   await redemptionDialog.getByRole('button', { name: '创建兑换码' }).click();
   await page.getByText('兑换码已创建').waitFor();
   assert(adminMockState.redemptionCreateCalls === 1 && adminMockState.redemptionCreateBody.quota === 1000000 && adminMockState.redemptionCreateBody.count === 2, '兑换码额度或数量没有按整数规则提交');
-  await page.getByRole('button', { name: '停用', exact: true }).first().click();
+  await clickRowAction(page, '停用');
   await page.getByText('兑换码已停用').waitFor();
   assert(adminMockState.redemptionStatusCalls === 1 && adminMockState.redemptionStatusBody.enabled === false, '兑换码启停没有调用真实接口');
-  await page.getByRole('button', { name: '编辑', exact: true }).first().click();
+  await clickRowAction(page, '编辑');
   const editRedemptionDialog = page.getByRole('dialog', { name: '编辑兑换码' });
   await editRedemptionDialog.getByLabel('名称').fill('更新活动码');
   await editRedemptionDialog.getByLabel('单码额度（人民币）').fill('1.4');
@@ -568,7 +581,7 @@ try {
   await page.getByText('兑换码已更新').waitFor();
   assert(adminMockState.redemptionUpdateCalls === 1 && adminMockState.redemptionUpdateBody.quota === 700000 && !('count' in adminMockState.redemptionUpdateBody), '编辑兑换码参数不符合整数额度规则');
   page.once('dialog', (dialog) => dialog.accept());
-  await page.getByRole('button', { name: '删除', exact: true }).first().click();
+  await clickRowAction(page, '删除');
   await page.getByText('兑换码已删除').waitFor();
   assert(adminMockState.redemptionDeleteCalls === 1, '删除兑换码没有调用真实接口');
   page.once('dialog', (dialog) => dialog.accept());
@@ -590,23 +603,23 @@ try {
   await paymentDialog.getByRole('button', { name: '保存支付配置' }).click();
   assert(adminMockState.paymentSettingCalls === 1, '支付配置没有调用真实接口');
   assert(adminMockState.paymentSettingBody.minimum_cny_cents === 200 && !('exchange_rate_cny_cents_per_usd' in adminMockState.paymentSettingBody), '人民币充值范围提交不正确');
-  await page.getByRole('button', { name: '重试入账' }).click();
+  await clickRowAction(page, '重试入账');
   await page.getByText('入账任务已重新排队').waitFor();
   assert(adminMockState.paymentRetryCalls === 1, '失败入账没有调用重试接口');
   await page.getByRole('button', { name: '提现审核' }).click();
   await page.getByText('MW202607220001').waitFor();
-  await page.getByRole('button', { name: '通过' }).first().click();
+  await clickRowAction(page, '通过');
   const approveDialog = page.getByRole('dialog', { name: '通过提现申请' });
   await approveDialog.getByLabel('审核原因').fill('账本与收款信息核对通过');
   await approveDialog.getByRole('button', { name: '确认通过' }).click();
   assert(adminMockState.withdrawalActionCalls === 1 && adminMockState.withdrawalActionPath.endsWith('/8/approve'), '提现审核通过没有调用真实接口');
-  await page.getByRole('button', { name: '确认打款' }).click();
+  await clickRowAction(page, '确认打款', 1);
   const paidDialog = page.getByRole('dialog', { name: '确认线下打款' });
   await paidDialog.getByLabel('打款流水号').fill('BANK-009');
   await paidDialog.getByLabel('凭证说明').fill('银行回单 009');
   await paidDialog.getByRole('button', { name: '确认已打款' }).click();
   assert(adminMockState.withdrawalActionCalls === 2 && adminMockState.withdrawalActionPath.endsWith('/9/paid'), '确认线下打款没有调用真实接口');
-  await page.getByRole('button', { name: '忽略异常' }).click();
+  await clickRowAction(page, '忽略异常', 2);
   const ignoreDialog = page.getByRole('dialog', { name: '忽略对账异常' });
   await ignoreDialog.getByLabel('处置原因').fill('确认不是平台路由产生的日志');
   await ignoreDialog.getByRole('button', { name: '确认忽略' }).click();

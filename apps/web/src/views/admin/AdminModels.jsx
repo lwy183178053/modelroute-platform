@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BadgeDollarSign, Plus, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
 import { apiRequest, formatImagePrice, formatPriceMicros } from '../../api';
-import { Button, Field, InlineNotice, Modal, ProviderLogo, Section, Select, Status, TextInput } from '../../ui';
+import { ActionMenu, Button, Field, InlineNotice, Modal, ProviderLogo, Section, Select, Status, TextInput } from '../../ui';
 
 const providers = ['OpenAI', 'Anthropic', 'Gemini', 'DeepSeek', 'Qwen', 'Moonshot'];
 const protocolNames = {
@@ -239,7 +239,7 @@ export default function AdminModels({ notify }) {
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}
       <Section title="标准模型与基础价格" actions={<><Button icon={RefreshCw} onClick={load}>刷新</Button><Button icon={Plus} variant="primary" onClick={() => setDialog({ onSaved: load })}>新增标准模型</Button></>}>
         <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>模型与厂商</th><th>协议</th><th>首档价格</th><th>价格结构</th><th>价格版本</th><th>状态</th><th>操作</th></tr></thead><tbody>
-          {models.map((model) => <tr key={model.id}><td><code>{model.id}</code></td><td><div className="model-cell"><ProviderLogo provider={model.provider} size={22} /><div><strong>{model.public_name}</strong><span>{model.provider}</span></div></div></td><td>{protocolNames[model.protocol] || model.protocol}</td><td><strong>{formatOfficialPrice(model)}</strong></td><td>{model.protocol === 'image_generation' ? `${model.price.image_prices?.length || 0} 个组合` : `${model.price.tiers?.length || 0} 档`}</td><td><strong>v{model.price.version}</strong></td><td><Status>{model.status === 'active' ? '已启用' : model.status === 'archived' ? '已归档' : model.status}</Status></td><td><div className="row-actions"><Button icon={BadgeDollarSign} variant="ghost" onClick={() => setDialog({ model, onSaved: load })}>发布价格</Button><Button icon={Trash2} variant="danger" onClick={() => remove(model)}>删除</Button></div></td></tr>)}
+          {models.map((model) => <tr key={model.id}><td><code>{model.id}</code></td><td><div className="model-cell"><ProviderLogo provider={model.provider} size={22} /><div><strong>{model.public_name}</strong><span>{model.provider}</span></div></div></td><td>{protocolNames[model.protocol] || model.protocol}</td><td><strong>{formatOfficialPrice(model)}</strong></td><td>{model.protocol === 'image_generation' ? `${model.price.image_prices?.length || 0} 个组合` : `${model.price.tiers?.length || 0} 档`}</td><td><strong>v{model.price.version}</strong></td><td><Status>{model.status === 'active' ? '已启用' : model.status === 'archived' ? '已归档' : model.status}</Status></td><td><ActionMenu items={[{ label: '发布价格', icon: BadgeDollarSign, onClick: () => setDialog({ model, onSaved: load }) }, { label: '删除', icon: Trash2, danger: true, onClick: () => remove(model) }]} /></td></tr>)}
           {models.length === 0 && <tr><td className="table-message" colSpan="8">暂无标准模型</td></tr>}
         </tbody></table></div>
       </Section>

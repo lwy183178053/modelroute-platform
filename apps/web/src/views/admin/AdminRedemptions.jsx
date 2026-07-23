@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { apiRequest, formatQuota } from '../../api';
-import { Button, CopyValue, Field, InlineNotice, Modal, Section, Status, TextInput } from '../../ui';
+import { ActionMenu, Button, CopyValue, Field, InlineNotice, Modal, Section, Status, TextInput } from '../../ui';
 
 function localDateTime(timestamp) {
   if (!timestamp || Number(timestamp) <= 0) return '';
@@ -150,7 +150,7 @@ export default function AdminRedemptions({ notify }) {
           <td>{item.count ?? '-'}</td>
           <td>{Number(item.expired_time) > 0 ? new Date(Number(item.expired_time) * 1000).toLocaleString('zh-CN', { hour12: false }) : '永不过期'}</td>
           <td><Status>{Number(item.status) === 1 ? '正常' : '停用'}</Status></td>
-          <td><div className="row-actions"><Button icon={Pencil} onClick={() => setDialog({ mode: 'edit', item })} variant="ghost">编辑</Button><Button onClick={() => setStatus(item)} variant="ghost">{Number(item.status) === 1 ? '停用' : '启用'}</Button><Button icon={Trash2} onClick={() => remove(item)} variant="danger">删除</Button></div></td>
+          <td><ActionMenu items={[{ label: '编辑', icon: Pencil, onClick: () => setDialog({ mode: 'edit', item }) }, { label: Number(item.status) === 1 ? '停用' : '启用', onClick: () => setStatus(item) }, { label: '删除', icon: Trash2, danger: true, onClick: () => remove(item) }]} /></td>
         </tr>)}
         {!loading && items.length === 0 && <tr><td className="table-message" colSpan="8">暂无兑换码</td></tr>}
         {loading && <tr><td className="table-message" colSpan="8">正在读取兑换码</td></tr>}

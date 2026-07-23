@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Check,
@@ -47,6 +48,87 @@ export function IconButton({ label, icon: Icon = MoreHorizontal, ...props }) {
     <button className="icon-button" type="button" aria-label={label} title={label} {...props}>
       <Icon size={18} />
     </button>
+  );
+}
+
+export function ActionMenu({ items = [], label = '操作' }) {
+  const availableItems = items.filter(Boolean);
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState(null);
+  const rootRef = useRef(null);
+  const triggerRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeOnOutside = (event) => {
+      if (!rootRef.current?.contains(event.target)) setOpen(false);
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    const closeOnViewportChange = () => setOpen(false);
+    document.addEventListener('pointerdown', closeOnOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    window.addEventListener('resize', closeOnViewportChange);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutside);
+      document.removeEventListener('keydown', closeOnEscape);
+      window.removeEventListener('resize', closeOnViewportChange);
+    };
+  }, [open]);
+
+  const toggle = () => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const width = 164;
+    const height = Math.min(320, availableItems.length * 36 + 10);
+    const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
+    const top = rect.bottom + height + 8 <= window.innerHeight ? rect.bottom + 6 : Math.max(8, rect.top - height - 6);
+    setPosition({ left, top });
+    setOpen(true);
+  };
+
+  if (availableItems.length === 0) return <span className="action-menu-empty">-</span>;
+
+  return (
+    <span className="action-menu" ref={rootRef}>
+      <button
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={label}
+        className="action-menu-trigger"
+        onClick={toggle}
+        ref={triggerRef}
+        title={label}
+        type="button"
+      >
+        <MoreHorizontal size={18} />
+      </button>
+      {open && position && <span className="action-menu-popover" role="menu" style={{ left: position.left, top: position.top }}>
+        {availableItems.map((item, index) => {
+          const Icon = item.icon;
+          return <button
+            className={item.danger ? 'action-menu-item action-menu-item-danger' : 'action-menu-item'}
+            disabled={item.disabled}
+            key={item.key || `${item.label}-${index}`}
+            onClick={() => {
+              if (item.disabled) return;
+              setOpen(false);
+              item.onClick?.();
+            }}
+            role="menuitem"
+            type="button"
+          >
+            {Icon && <Icon size={15} />}
+            <span>{item.label}</span>
+          </button>;
+        })}
+      </span>}
+    </span>
   );
 }
 

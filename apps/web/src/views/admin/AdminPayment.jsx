@@ -8,7 +8,7 @@ import {
   WalletCards,
 } from 'lucide-react';
 import { apiRequest, formatQuota } from '../../api';
-import { Button, InlineNotice, Section, Status } from '../../ui';
+import { ActionMenu, Button, InlineNotice, Section, Status } from '../../ui';
 
 const paymentMethodNames = { alipay: '支付宝', wxpay: '微信', qqpay: 'QQ 钱包' };
 const paymentStatusNames = { pending: '待支付', paid: '已支付', closed: '已关闭' };
@@ -91,7 +91,7 @@ export default function AdminPayment({ notify, openModal }) {
         actions={<Button disabled={loading} icon={RefreshCw} onClick={load}>刷新订单</Button>}
       >
         <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>平台订单号</th><th>用户</th><th>人民币金额</th><th>入账额度</th><th>方式</th><th>第三方交易号</th><th>支付时间</th><th>支付状态</th><th>额度入账</th><th>操作</th></tr></thead><tbody>
-          {orders.map((order) => <tr key={order.id}><td><code>{order.id}</code></td><td><code>{order.order_no}</code></td><td>用户 ID {order.user_id}</td><td><strong>{formatCNYCents(order.amount_cny_cents)}</strong></td><td>{formatQuota(order.newapi_quota)}</td><td>{paymentMethodNames[order.payment_type] || order.payment_type}</td><td>{order.third_party_trade_no || '-'}</td><td>{formatTime(order.paid_at)}</td><td><Status>{paymentStatusNames[order.payment_status] || order.payment_status}</Status></td><td><Status>{creditStatusNames[order.credit_status] || order.credit_status}</Status></td><td><div className="row-actions">{order.credit_status === 'failed' && <Button icon={RotateCcw} variant="ghost" onClick={() => retryCredit(order)}>重试入账</Button>}{order.credit_status === 'unknown' && <><Button variant="ghost" onClick={() => openModal({ type: 'creditResolve', action: 'credited', order, onSaved: load })}>确认已入账</Button><Button icon={RotateCcw} variant="ghost" onClick={() => openModal({ type: 'creditResolve', action: 'retry', order, onSaved: load })}>核对后重试</Button></>}</div></td></tr>)}
+          {orders.map((order) => <tr key={order.id}><td><code>{order.id}</code></td><td><code>{order.order_no}</code></td><td>用户 ID {order.user_id}</td><td><strong>{formatCNYCents(order.amount_cny_cents)}</strong></td><td>{formatQuota(order.newapi_quota)}</td><td>{paymentMethodNames[order.payment_type] || order.payment_type}</td><td>{order.third_party_trade_no || '-'}</td><td>{formatTime(order.paid_at)}</td><td><Status>{paymentStatusNames[order.payment_status] || order.payment_status}</Status></td><td><Status>{creditStatusNames[order.credit_status] || order.credit_status}</Status></td><td><ActionMenu items={[order.credit_status === 'failed' && { label: '重试入账', icon: RotateCcw, onClick: () => retryCredit(order) }, order.credit_status === 'unknown' && { label: '确认已入账', onClick: () => openModal({ type: 'creditResolve', action: 'credited', order, onSaved: load }) }, order.credit_status === 'unknown' && { label: '核对后重试', icon: RotateCcw, onClick: () => openModal({ type: 'creditResolve', action: 'retry', order, onSaved: load }) }]} /></td></tr>)}
           {!loading && orders.length === 0 && <tr><td className="table-message" colSpan="11">暂无充值订单</td></tr>}
           {loading && <tr><td className="table-message" colSpan="11">正在读取充值订单</td></tr>}
         </tbody></table></div>

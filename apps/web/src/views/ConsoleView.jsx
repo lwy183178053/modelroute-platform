@@ -7,17 +7,15 @@ import {
   FileText,
   KeyRound,
   LayoutDashboard,
-  Pencil,
   Plus,
   Route,
   Settings2,
   Store,
   TicketCheck,
-  Trash2,
   WalletCards,
 } from 'lucide-react';
 import { apiRequest, formatQuota } from '../api';
-import { Button, CopyValue, Field, InlineNotice, Metric, PageHeader, Section, Status, TextInput } from '../ui';
+import { ActionMenu, Button, CopyValue, Field, InlineNotice, Metric, PageHeader, Section, Status, TextInput } from '../ui';
 import { UsageLogTable, UsageTrend, useUsage } from './UsagePanels';
 
 const consoleSections = [
@@ -203,7 +201,7 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
                   <td>{key.routing_policy?.priority === 'price' ? '价格优先' : key.routing_policy ? '稳定性优先' : '-'}</td>
                   <td>{key.routing_policy?.mode === 'fixed' ? `${key.routing_policy.merchant_ids?.length || 0} 家` : '全部合格商户'}</td>
                   <td><div className="status-control"><Status>{Number(key.status) === 1 ? '正常' : '停用'}</Status><label className="compact-switch" title={Number(key.status) === 1 ? '停用密钥' : '启用密钥'}><input aria-label={`启用${key.name}`} checked={Number(key.status) === 1} onChange={(event) => setKeyStatus(key, event.target.checked)} type="checkbox" /><span /></label></div></td>
-                  <td><div className="row-actions"><Button icon={Pencil} onClick={() => openModal({ type: 'key', key, onSaved: loadKeys })} variant="ghost">编辑</Button><Button onClick={() => openModal({ type: 'route', key, policy: key.routing_policy, merchants, onSaved: loadKeys })} variant="ghost">编辑路由策略</Button><Button icon={Trash2} onClick={() => deleteKey(key)} variant="danger">删除</Button></div></td>
+                  <td><ActionMenu items={[{ label: '编辑', onClick: () => openModal({ type: 'key', key, onSaved: loadKeys }) }, { label: '编辑路由策略', onClick: () => openModal({ type: 'route', key, policy: key.routing_policy, merchants, onSaved: loadKeys }) }, { label: '删除', danger: true, onClick: () => deleteKey(key) }]} /></td>
                 </tr>)}
                 {!keyLoading && keys.length === 0 && <tr><td className="table-message" colSpan="8">{keyError || '尚未创建 API 密钥'}</td></tr>}
                 {keyLoading && <tr><td className="table-message" colSpan="8">正在读取 API 密钥</td></tr>}</tbody>

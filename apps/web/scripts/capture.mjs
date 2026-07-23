@@ -18,6 +18,18 @@ async function openNavigation(page, label) {
   await page.waitForTimeout(120);
 }
 
+async function openActionMenu(page, index = 0) {
+  await page.getByRole('button', { name: '操作', exact: true }).nth(index).click();
+  const menu = page.getByRole('menu').last();
+  await menu.waitFor();
+  return menu;
+}
+
+async function clickRowAction(page, label, index = 0) {
+  const menu = await openActionMenu(page, index);
+  await menu.getByRole('menuitem', { name: label, exact: true }).click();
+}
+
 async function verifyLayout(page, name) {
   const dimensions = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
@@ -164,14 +176,14 @@ async function captureSet(viewport, suffix) {
   path = `${outputDir}admin-models-${suffix}.png`;
   await page.screenshot({ path, fullPage: true });
   if ((await stat(path)).size < 20_000) throw new Error(`admin-models-${suffix} 截图文件过小`);
-  await page.getByRole('button', { name: '发布价格' }).first().click();
+   await clickRowAction(page, '发布价格');
   await page.getByLabel('第 1 档输入价格').waitFor();
   await verifyLayout(page, `admin-model-price-${suffix}`);
   path = `${outputDir}admin-model-price-${suffix}.png`;
   await page.screenshot({ path, fullPage: false });
   if ((await stat(path)).size < 20_000) throw new Error(`admin-model-price-${suffix} 截图文件过小`);
   await page.getByRole('button', { name: '关闭', exact: true }).click();
-  await page.getByRole('button', { name: '发布价格' }).nth(1).click();
+   await clickRowAction(page, '发布价格', 1);
   await page.getByRole('heading', { name: '图片单张价格矩阵' }).waitFor();
   await verifyLayout(page, `admin-image-price-${suffix}`);
   path = `${outputDir}admin-image-price-${suffix}.png`;
@@ -207,7 +219,7 @@ async function captureSet(viewport, suffix) {
   await openNavigation(page, '控制台');
   const consoleSidebar = page.getByRole('complementary', { name: '控制台功能' });
   await consoleSidebar.getByRole('button', { name: 'API 密钥与路由', exact: true }).click();
-  await page.getByRole('button', { name: '编辑路由策略' }).first().click();
+   await clickRowAction(page, '编辑路由策略');
   path = `${outputDir}route-modal-${suffix}.png`;
   await page.screenshot({ path, fullPage: false });
   if ((await stat(path)).size < 20_000) throw new Error(`route-modal-${suffix} 截图文件过小`);

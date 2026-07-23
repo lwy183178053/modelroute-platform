@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { LockKeyhole, RefreshCw, Search, UserRoundCheck, UserRoundX, WalletCards } from 'lucide-react';
 import { apiRequest, formatQuota } from '../../api';
-import { Button, Section, Select, Status, TextInput } from '../../ui';
+import { ActionMenu, Button, Section, Select, Status, TextInput } from '../../ui';
 
 function accountType(user) {
   if (user.account_type) return user.account_type;
@@ -85,7 +85,7 @@ export default function AdminUsers({ notify, openModal }) {
                 <td><code>{user.id}</code></td><td><strong>{user.display_name || user.username}</strong><small>{user.username}</small></td>
                 <td>{user.email || '-'}</td><td><Status>{accountTypeNames[accountType(user)] || accountType(user)}</Status>{accountType(user) === 'merchant' && <small>{user.merchant_status === 'active' ? '权限正常' : '权限已撤销'}</small>}</td><td>{formatQuota(user.quota)}</td><td>{formatQuota(user.used_quota)}</td><td>{user.request_count || 0}</td>
                 <td><Status>{Number(user.status) === 1 ? '正常' : '停用'}</Status></td>
-                <td><div className="row-actions"><Button onClick={() => openModal({ type: 'adminQuota', user, onSaved: () => load(keyword) })} variant="ghost" icon={WalletCards}>额度</Button><Button onClick={() => openModal({ type: 'adminPassword', user })} variant="ghost" icon={LockKeyhole}>密码</Button>{accountType(user) === 'merchant' && <Button icon={user.merchant_status === 'active' ? UserRoundX : UserRoundCheck} onClick={() => setMerchantStatus(user)} variant={user.merchant_status === 'active' ? 'danger' : 'ghost'}>{user.merchant_status === 'active' ? '撤销商户' : '恢复商户'}</Button>}<Button onClick={() => setStatus(user)} variant={Number(user.status) === 1 ? 'danger' : 'ghost'}>{Number(user.status) === 1 ? '封禁' : '解封'}</Button></div></td>
+                <td><ActionMenu items={[{ label: '额度', icon: WalletCards, onClick: () => openModal({ type: 'adminQuota', user, onSaved: () => load(keyword) }) }, { label: '密码', icon: LockKeyhole, onClick: () => openModal({ type: 'adminPassword', user }) }, accountType(user) === 'merchant' && { label: user.merchant_status === 'active' ? '撤销商户' : '恢复商户', icon: user.merchant_status === 'active' ? UserRoundX : UserRoundCheck, danger: user.merchant_status === 'active', onClick: () => setMerchantStatus(user) }, { label: Number(user.status) === 1 ? '封禁' : '解封', danger: Number(user.status) === 1, onClick: () => setStatus(user) }]} /></td>
               </tr>
             ))}
             {!loading && users.length === 0 && <tr><td className="table-message" colSpan="9">{error || '没有匹配用户'}</td></tr>}

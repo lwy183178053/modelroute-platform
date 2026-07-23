@@ -47,9 +47,6 @@ async function mockAdminAPI(targetPage, state, account = null) {
     if (url.pathname === '/api/models') {
       return json({ success: true, data: [{ id: 101, public_name: 'gpt-4o-mini', provider: 'OpenAI', protocol: 'chat_completions', status: 'active', adapter_hint: 'openai_compatible', price: { id: 501, version: 2, price_kind: 'text', tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 150000, output_price_micros: 600000, cache_read_price_micros: 75000, cache_write_price_micros: 200000 }] } }] });
     }
-    if (url.pathname === '/api/merchant/channel-defaults' && request.method() === 'GET') {
-      return json({ success: true, data: { configured: true, channel_type: 'openai_compatible', base_url: 'https://api.lwylink.xyz' } });
-    }
     if (url.pathname === '/api/offers') {
       return json({ success: true, data: [
         { offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, call_count: 32400, token_usage: 2600000000, last_called_at: new Date(Date.now() - 10 * 60_000).toISOString(), price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 108000, output_price_micros: 432000, cache_read_price_micros: 54000, cache_write_price_micros: 144000 }], channel_count: 1, health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 },
@@ -237,9 +234,9 @@ async function mockAdminAPI(targetPage, state, account = null) {
     }
     if (url.pathname === '/api/merchant/channels' && request.method() === 'GET') {
       return json({ success: true, data: { merchant: { user_id: 1, merchant_name: 'ModelRoute 官方', merchant_status: 'active', is_merchant: true }, reviews: [
-        { id: 21, user_id: 1, channel_name: 'OpenAI 主线路', base_url: 'https://api.merchant.example', status: 'approved', credential_configured: false, created_at: '2026-07-22T14:00:00Z' },
+        { id: 21, user_id: 1, channel_name: 'OpenAI 测试渠道', base_url: 'https://api.lwylink.xyz', status: 'approved', credential_configured: true, created_at: '2026-07-22T14:00:00Z' },
         { id: 24, user_id: 1, channel_name: 'Gemini 测试线路', base_url: 'https://api.gemini.example', status: 'rejected', credential_configured: false, review_reason: '模型响应异常', created_at: '2026-07-22T15:00:00Z' },
-      ], items: [{ id: 51, user_id: 1, merchant_name: 'ModelRoute 官方', review_id: 21, canonical_model_id: 101, model: 'gpt-4o-mini', matched_models: ['gpt-4o-mini'], provider: 'OpenAI', protocol: 'chat_completions', adapter_type: 'openai_compatible', channel_name: 'OpenAI 主线路', base_url: 'https://api.merchant.example', credential_fingerprint: 'a1b2c3...d4e5f6', status: 'active', health_state: 'healthy', created_at: '2026-07-22T14:00:00Z' }] } });
+      ], items: [{ id: 51, user_id: 1, merchant_name: 'ModelRoute 官方', review_id: 21, canonical_model_id: 101, model: 'gpt-4o-mini', matched_models: ['gpt-4o-mini'], provider: 'OpenAI', protocol: 'chat_completions', adapter_type: 'openai_compatible', channel_name: 'OpenAI 测试渠道', base_url: 'https://api.lwylink.xyz', credential_fingerprint: 'a1b2c3...d4e5f6', status: 'active', health_state: 'healthy', created_at: '2026-07-22T14:00:00Z' }] } });
     }
     if (url.pathname === '/api/admin/merchant-applications') {
       return json({ success: true, data: { page: 1, page_size: 20, total: 1, items: [{ id: 11, user_id: 7, display_name: '东海模型服务', website_url: 'https://merchant.example', business_description: '企业模型 API 服务', status: 'pending', created_at: '2026-07-22T14:00:00Z', initial_channel: { id: 21, user_id: 7, application_id: 11, canonical_model_id: 101, model: 'gpt-4o-mini', adapter_type: 'openai_compatible', channel_name: '主线路', base_url: 'https://api.merchant.example', status: 'pending', credential_configured: true, created_at: '2026-07-22T14:00:00Z' } }] } });
@@ -409,7 +406,8 @@ try {
   }
   assert(!(await page.locator('body').innerText()).includes('管理员账号当前未绑定商户资料'), '管理员仍显示专用商户缺失提示');
   await merchantSidebar.getByRole('button', { name: '渠道管理', exact: true }).click();
-  await page.getByText('OpenAI 主线路').last().waitFor();
+  await page.getByText('OpenAI 测试渠道').last().waitFor();
+  await page.getByText('https://api.lwylink.xyz', { exact: true }).waitFor();
   await page.getByRole('heading', { name: '渠道管理' }).waitFor();
   await page.getByText('51', { exact: true }).waitFor();
   await page.getByText('已审核', { exact: true }).waitFor();
@@ -417,7 +415,9 @@ try {
   const channelDialog = page.getByRole('dialog', { name: '提交新渠道' });
   await channelDialog.getByLabel('渠道名称').fill('企业多模型线路');
   await channelDialog.getByLabel('上游基础地址').waitFor();
-  assert(await channelDialog.getByLabel('上游基础地址').inputValue() === 'https://api.lwylink.xyz', '渠道弹窗没有读取本地默认上游地址');
+  assert(await channelDialog.getByLabel('上游基础地址').inputValue() === '', '商户新增渠道不应自动填充管理员测试地址');
+  await channelDialog.getByLabel('上游基础地址').fill('https://api.lwylink.xyz');
+  await channelDialog.getByLabel('上游 API 密钥').fill('sk-local-test-key');
   const channelPageURL = page.url();
   await channelDialog.getByRole('button', { name: '一键获取模型' }).click();
   await page.waitForTimeout(200);

@@ -2172,3 +2172,26 @@
 - `apps/web/scripts/ui-smoke.mjs`、`data/ui-preview/verify.mjs`：增加四列普通字重回归断言。
 - `apps/web/artifacts/market-desktop.png`、`apps/web/artifacts/market-mobile.png`：更新验收截图。
 - 回滚点：执行 `git revert <本轮提交哈希>` 可恢复原字重；本轮未上传或部署服务器。
+
+## 2026-07-23 - Task: 将 OpenAI 测试地址归入管理员商户渠道
+
+### What was done
+
+- 将本地预览管理员“ModelRoute 官方”商户的已导入渠道设为 `OpenAI 测试渠道`，地址显示为 `https://api.lwylink.xyz`，只保留密钥指纹。
+- 移除新增商户渠道弹窗的默认上游地址和默认密钥状态，新增渠道必须主动填写后再同步模型。
+- 同步管理员商户渠道夹具、模型报价渠道名称和新增渠道流程测试；密钥正文未写入代码、页面或日志。
+
+### Testing
+
+- `npm.cmd run test:ui` 通过，确认管理员渠道地址展示、新增渠道空白表单和显式填写同步流程。
+- `npm.cmd run capture` 通过，桌面与移动端截图生成完成。
+- `node data/ui-preview/verify.mjs` 通过，模型行数 `21`、渠道行数 `3`、运行时错误为 `0`。
+- `git diff --check` 通过。
+
+### Notes
+
+- `apps/web/src/Modals.jsx`：移除新增渠道表单对默认渠道配置接口的读取和自动填充。
+- `apps/web/scripts/ui-smoke.mjs`、`apps/web/scripts/capture.mjs`：同步管理员测试渠道夹具和显式填写测试。
+- `data/ui-preview/vite.config.mjs`：更新忽略目录中的管理员测试渠道与本地同步夹具。
+- `docs/模型报价路由与健康.md`：记录管理员专用测试渠道边界。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可恢复默认地址行为和旧渠道夹具；本轮未上传或部署服务器。

@@ -337,20 +337,11 @@ function ChannelModal({ close, config, notify }) {
   const [channelType, setChannelType] = useState('openai_compatible');
   const [baseURL, setBaseURL] = useState('');
   const [apiKey, setAPIKey] = useState('');
-  const [defaultConfigured, setDefaultConfigured] = useState(false);
   const [syncedModels, setSyncedModels] = useState([]);
   const [syncedAt, setSyncedAt] = useState('');
   const [busy, setBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    apiRequest('/api/merchant/channel-defaults').then((defaults) => {
-      if (defaults?.channel_type) setChannelType(defaults.channel_type);
-      if (defaults?.base_url) setBaseURL((current) => current || defaults.base_url);
-      setDefaultConfigured(Boolean(defaults?.configured));
-    }).catch(() => {});
-  }, []);
 
   const syncModels = async () => {
     setSyncing(true);
@@ -388,9 +379,9 @@ function ChannelModal({ close, config, notify }) {
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
       <Field label="渠道名称"><TextInput onChange={(event) => setChannelName(event.target.value)} placeholder="例如 OpenAI 企业线路" value={channelName} /></Field>
       <Field label="上游类型"><Select value={channelType} onChange={(event) => { setChannelType(event.target.value); setSyncedModels([]); }}><option value="openai_compatible">OpenAI 兼容</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option></Select></Field>
-      <Field label="上游基础地址"><TextInput onChange={(event) => { setBaseURL(event.target.value); setDefaultConfigured(false); setSyncedModels([]); }} placeholder="https://api.example.com/v1" value={baseURL} /></Field>
-      <Field label="上游 API 密钥"><TextInput onChange={(event) => { setAPIKey(event.target.value); if (!defaultConfigured) setSyncedModels([]); }} placeholder="保存后不再回显" type="password" value={apiKey} /></Field>
-      <div className="config-actions"><Button disabled={syncing || !baseURL.trim() || (!defaultConfigured && apiKey.trim().length < 8)} icon={ShieldCheck} onClick={syncModels} variant="primary">{syncing ? '获取中' : '一键获取模型'}</Button>{defaultConfigured && <InlineNotice>已使用本地开发默认上游</InlineNotice>}{syncedAt && <InlineNotice>同步于 {new Date(syncedAt).toLocaleString('zh-CN')}</InlineNotice>}</div>
+      <Field label="上游基础地址"><TextInput onChange={(event) => { setBaseURL(event.target.value); setSyncedModels([]); }} placeholder="https://api.example.com/v1" value={baseURL} /></Field>
+      <Field label="上游 API 密钥"><TextInput onChange={(event) => { setAPIKey(event.target.value); setSyncedModels([]); }} placeholder="保存后不再回显" type="password" value={apiKey} /></Field>
+      <div className="config-actions"><Button disabled={syncing || !baseURL.trim() || apiKey.trim().length < 8} icon={ShieldCheck} onClick={syncModels} variant="primary">{syncing ? '获取中' : '一键获取模型'}</Button>{syncedAt && <InlineNotice>同步于 {new Date(syncedAt).toLocaleString('zh-CN')}</InlineNotice>}</div>
       {syncedModels.length > 0 && <div className="model-sync-list"><strong>已匹配 {syncedModels.filter((model) => model.match_status === 'matched').length} 个模型</strong>{syncedModels.map((model) => <div key={model.upstream_model_name}><span>{model.upstream_model_name}</span><Status>{model.match_status === 'matched' ? '已收录' : '平台未收录'}</Status></div>)}</div>}
     </Modal>
   );

@@ -135,11 +135,11 @@ export default function MarketView({ navigate }) {
                   <td><Status>{healthNames[offer.health_state] || offer.health_state}</Status></td>
                   <td><strong className="success-text">{formatAvailability(offer.availability_ppm)}</strong></td>
                   <td>{formatLatency(offer.ttft_p95_ms)}</td>
-                  <td><strong>{formatCompactCount(offer.call_count)}</strong></td>
-                  <td><strong>{formatCompactCount(offer.token_usage)}</strong></td>
-                  <td><strong>{formatLastCalled(offer.last_called_at)}</strong></td>
+                  <td>{formatCompactCount(offer.call_count)}</td>
+                  <td>{formatCompactCount(offer.token_usage)}</td>
+                  <td>{formatLastCalled(offer.last_called_at)}</td>
                   <td><span className="price-multiple">{formatMultiplier(offer.multiplier_bps)}</span></td>
-                  <td><strong>{offer.channel_count || 0} 个</strong></td>
+                  <td>{offer.channel_count || 0} 个</td>
                 </tr>;
               })}
             </tbody>

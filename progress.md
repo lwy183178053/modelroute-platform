@@ -2152,3 +2152,23 @@
 - `apps/web/scripts/ui-smoke.mjs`、`data/ui-preview/verify.mjs`：增加重复文案回归断言。
 - `apps/web/artifacts/market-desktop.png`：更新桌面端市场截图。
 - 回滚点：执行 `git revert <本轮提交哈希>` 可恢复行内重复文案；本轮未上传或部署服务器。
+
+## 2026-07-23 - Task: 调整模型市场统计列字重
+
+### What was done
+
+- 将模型市场中的调用次数、Token 用量、最后调用和可用渠道数量改为普通字重，保持表头和其他重点状态样式不变。
+
+### Testing
+
+- `npm.cmd run test:ui` 通过，浏览器字重断言通过。
+- `npm.cmd run capture` 通过，桌面与移动端截图已更新。
+- `node data/ui-preview/verify.mjs` 通过，运行时错误为 `0`、根页面无横向溢出。
+- `git diff --check` 通过。
+
+### Notes
+
+- `apps/web/src/views/MarketView.jsx`：移除四个统计单元格的粗体标签。
+- `apps/web/scripts/ui-smoke.mjs`、`data/ui-preview/verify.mjs`：增加四列普通字重回归断言。
+- `apps/web/artifacts/market-desktop.png`、`apps/web/artifacts/market-mobile.png`：更新验收截图。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可恢复原字重；本轮未上传或部署服务器。

@@ -15,7 +15,7 @@ import {
   WalletCards,
 } from 'lucide-react';
 import { apiRequest, formatQuota } from '../api';
-import { ActionMenu, Button, CopyValue, Field, InlineNotice, Metric, PageHeader, Section, Status, TextInput } from '../ui';
+import { ActionMenu, Button, CopyValue, Field, InlineNotice, Metric, PageHeader, Pagination, Section, Status, TextInput } from '../ui';
 import { UsageLogTable, UsageTrend, useUsage } from './UsagePanels';
 
 const consoleSections = [
@@ -63,9 +63,14 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
   const [models, setModels] = useState([]);
   const [merchantApplication, setMerchantApplication] = useState(undefined);
   const [paymentOrders, setPaymentOrders] = useState([]);
+  const [paymentPage, setPaymentPage] = useState(1);
+  const [paymentPageSize, setPaymentPageSize] = useState(20);
+  const [paymentTotal, setPaymentTotal] = useState(0);
+  const [usagePage, setUsagePage] = useState(1);
+  const [usagePageSize, setUsagePageSize] = useState(20);
   const [redemptionCode, setRedemptionCode] = useState('');
   const [redeeming, setRedeeming] = useState(false);
-  const usage = useUsage('/api/usage');
+  const usage = useUsage(`/api/usage?p=${usagePage}&page_size=${usagePageSize}`);
   const displayName = account.display_name || account.username;
 
   const loadKeys = useCallback(async () => {
@@ -102,12 +107,14 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
 
   const loadPaymentOrders = useCallback(async () => {
     try {
-      const data = await apiRequest('/api/payment-orders?p=1&page_size=10');
+      const data = await apiRequest(`/api/payment-orders?p=${paymentPage}&page_size=${paymentPageSize}`);
       setPaymentOrders(data?.items || []);
+      setPaymentTotal(Number(data?.total || 0));
     } catch {
       setPaymentOrders([]);
+      setPaymentTotal(0);
     }
-  }, []);
+  }, [paymentPage, paymentPageSize]);
 
   useEffect(() => { loadKeys(); }, [loadKeys]);
   useEffect(() => { loadMerchantApplication(); }, [loadMerchantApplication]);
@@ -209,7 +216,7 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
             </div>
           </Section>}
 
-          {section === 'usage' && <UsageLogTable data={usage.data} error={usage.error} loading={usage.loading} onRefresh={usage.load} />}
+          {section === 'usage' && <UsageLogTable data={usage.data} error={usage.error} loading={usage.loading} onRefresh={usage.load} page={usagePage} pageSize={usagePageSize} total={usage.data?.logs?.total} onPageChange={setUsagePage} onPageSizeChange={(nextPageSize) => { setUsagePageSize(nextPageSize); setUsagePage(1); }} />}
 
           {section === 'recharge' && <>
             <Section title="账户充值" actions={<Button icon={Plus} variant="primary" onClick={() => openModal({ type: 'recharge', onSaved: loadPaymentOrders })}>立即充值</Button>}>
@@ -223,6 +230,7 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
                 {paymentOrders.map((order) => <tr key={order.id}><td><code>{order.id}</code></td><td><code>{order.order_no}</code></td><td>¥{(Number(order.amount_cny_cents || 0) / 100).toFixed(2)}</td><td>{formatQuota(order.newapi_quota)}</td><td><Status>{{ pending: '待支付', paid: '已支付', closed: '已关闭' }[order.payment_status] || order.payment_status}</Status></td><td><Status>{{ pending: '等待入账', processing: '入账中', succeeded: '已入账', failed: '入账异常', unknown: '结果未知' }[order.credit_status] || order.credit_status}</Status></td><td>{order.created_at ? new Date(order.created_at).toLocaleString('zh-CN', { hour12: false }) : '-'}</td></tr>)}
                 {paymentOrders.length === 0 && <tr><td className="table-message" colSpan="7">暂无充值订单</td></tr>}
               </tbody></table></div>
+              <Pagination page={paymentPage} pageSize={paymentPageSize} total={paymentTotal} onPageChange={setPaymentPage} onPageSizeChange={(nextPageSize) => { setPaymentPageSize(nextPageSize); setPaymentPage(1); }} />
             </Section>
           </>}
 

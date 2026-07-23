@@ -2272,3 +2272,53 @@
 - `docs/账号与管理员接口.md`：补充顶部昵称、首字符头像和身份文案规则。
 - `progress.md`：追加本轮验证和回滚记录。
 - 回滚点：执行 `git revert <本轮提交哈希>` 可回退顶部身份摘要代码、测试和文档；本轮仅本地修改，未上传服务器。
+
+## 2026-07-23 - Task: 为高记录量列表增加分页
+
+### What was done
+
+- 新增统一分页控件，默认每页 20 条，可切换 50 或 200 条，并提供首页、上一页、下一页和尾页。
+- 模型市场在筛选和排序结果上分页；用户调用记录、充值记录、管理员用户、渠道调用日志和管理员充值订单按接口页码重新读取。
+- 搜索、类型、商户和渠道筛选变化后自动回到第一页，移动端分页栏支持换行且不产生横向溢出。
+
+### Testing
+
+- `npm.cmd run test:ui` 通过，覆盖模型市场、用户调用记录、管理员渠道日志、用户列表和充值订单分页控件。
+- `npm.cmd run capture` 通过，桌面和移动端截图生成完成，根页面无横向溢出。
+- `node data/ui-preview/verify.mjs` 通过，运行时错误为 0。
+- `node data/ui-preview/account-settings-check.mjs` 通过，控制台桌面和移动端布局无横向溢出。
+- `node --check apps/web/scripts/ui-smoke.mjs; node --check apps/web/scripts/production-smoke.mjs` 通过。
+- `git diff --check` 通过。
+
+### Notes
+
+- `apps/web/src/ui.jsx`：新增可复用分页组件及首页、尾页图标按钮。
+- `apps/web/src/styles.css`：新增桌面和移动端分页布局样式。
+- `apps/web/src/views/MarketView.jsx`：增加模型市场筛选结果分页。
+- `apps/web/src/views/UsagePanels.jsx`：为调用日志表接入分页元数据和事件。
+- `apps/web/src/views/ConsoleView.jsx`：为用户调用记录和充值记录接入服务端分页。
+- `apps/web/src/views/admin/AdminUsers.jsx`：为用户管理接入关键词、类型筛选后的服务端分页。
+- `apps/web/src/views/admin/AdminUsage.jsx`：为渠道调用日志接入商户、渠道筛选后的服务端分页。
+- `apps/web/src/views/admin/AdminPayment.jsx`：为充值订单接入服务端分页。
+- `apps/web/scripts/ui-smoke.mjs`：增加分页栏、条数选项和四个跳页按钮回归断言。
+- `docs/账号与管理员接口.md`：记录分页参数和适用页面。
+- `apps/web/artifacts/*.png`：按本地构建更新受影响的桌面和移动端截图。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可回退分页组件、页面接入、测试、文档和截图；本轮仅本地修改，未上传服务器。
+
+## 2026-07-23 - Task: 补充分页跳页回归
+
+### What was done
+
+- 将用户管理冒烟数据扩展为多页场景，补充下一页到第 2/3 页以及首页返回第 1/3 页的自动化断言。
+
+### Testing
+
+- `npm.cmd run test:ui` 通过，实际完成用户列表下一页和首页跳转验证。
+- `node --check apps/web/scripts/ui-smoke.mjs; node --check apps/web/scripts/production-smoke.mjs` 通过。
+- `git diff --check` 通过。
+
+### Notes
+
+- `apps/web/scripts/ui-smoke.mjs`：增加多页用户列表分页跳转回归数据和断言。
+- `progress.md`：追加本次回归验证记录。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可回退分页跳页回归测试；本轮仅本地修改，未上传服务器。

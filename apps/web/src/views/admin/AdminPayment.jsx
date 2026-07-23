@@ -8,7 +8,7 @@ import {
   WalletCards,
 } from 'lucide-react';
 import { apiRequest, formatQuota } from '../../api';
-import { ActionMenu, Button, InlineNotice, Section, Status } from '../../ui';
+import { ActionMenu, Button, InlineNotice, Pagination, Section, Status } from '../../ui';
 
 const paymentMethodNames = { alipay: '支付宝', wxpay: '微信', qqpay: 'QQ 钱包' };
 const paymentStatusNames = { pending: '待支付', paid: '已支付', closed: '已关闭' };
@@ -26,6 +26,9 @@ function formatTime(value) {
 export default function AdminPayment({ notify, openModal }) {
   const [setting, setSetting] = useState(null);
   const [orders, setOrders] = useState([]);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -35,16 +38,17 @@ export default function AdminPayment({ notify, openModal }) {
     try {
       const [settingData, orderData] = await Promise.all([
         apiRequest('/api/admin/payment-settings'),
-        apiRequest('/api/admin/payment-orders?p=1&page_size=50'),
+        apiRequest(`/api/admin/payment-orders?p=${page}&page_size=${pageSize}`),
       ]);
       setSetting(settingData);
       setOrders(orderData?.items || []);
+      setTotal(Number(orderData?.total || 0));
     } catch (requestError) {
       setError(requestError.message || '读取支付数据失败');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, pageSize]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -95,6 +99,7 @@ export default function AdminPayment({ notify, openModal }) {
           {!loading && orders.length === 0 && <tr><td className="table-message" colSpan="11">暂无充值订单</td></tr>}
           {loading && <tr><td className="table-message" colSpan="11">正在读取充值订单</td></tr>}
         </tbody></table></div>
+        <Pagination page={page} pageSize={pageSize} total={total} onPageChange={setPage} onPageSizeChange={(nextPageSize) => { setPageSize(nextPageSize); setPage(1); }} disabled={loading} />
       </Section>
     </div>
   );

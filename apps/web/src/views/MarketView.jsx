@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Activity, Boxes, Clock3, Gauge, Search, Store } from 'lucide-react';
 import { apiRequest, formatCompactCount, formatLastCalled } from '../api';
-import { Button, InlineNotice, Metric, PageHeader, ProviderLogo, Section, Select, Status, TextInput } from '../ui';
+import { Button, InlineNotice, Metric, PageHeader, Pagination, ProviderLogo, Section, Select, Status, TextInput } from '../ui';
 
 const healthNames = {
   pending: '待探测', healthy: '健康', degraded: '降级', cooling: '冷却', recovering: '恢复中', disabled: '已停用',
@@ -40,6 +40,8 @@ export default function MarketView({ navigate }) {
   const [protocol, setProtocol] = useState('all');
   const [sort, setSort] = useState('stability');
   const [query, setQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -49,7 +51,7 @@ export default function MarketView({ navigate }) {
       .then(([modelData, offerData]) => {
         if (!active) return;
         setModels(modelData || []);
-        setMarketOffers(offerData || []);
+        setMarketOffers(offerData?.items || offerData || []);
       })
       .catch((requestError) => { if (active) setError(requestError.message || '读取模型市场失败'); })
       .finally(() => { if (active) setLoading(false); });
@@ -75,6 +77,10 @@ export default function MarketView({ navigate }) {
       return right.availability_ppm - left.availability_ppm || left.ttft_p95_ms - right.ttft_p95_ms || offerInputPrice(left) - offerInputPrice(right);
     });
   }, [marketOffers, modelMap, protocol, provider, query, sort]);
+
+  useEffect(() => { setPage(1); }, [provider, protocol, sort, query]);
+
+  const visibleOffers = offers.slice((page - 1) * pageSize, page * pageSize);
 
   const activeModels = new Set(marketOffers.map((offer) => offer.model)).size;
   const activeMerchants = new Set(marketOffers.map((offer) => offer.merchant_id)).size;
@@ -125,11 +131,11 @@ export default function MarketView({ navigate }) {
           <table className="data-table market-table">
             <thead><tr><th>ID</th><th>排名</th><th>模型与商户</th><th>协议</th><th>状态</th><th>可用率</th><th>P95 首字</th><th>调用次数</th><th>Token 用量</th><th>最后调用</th><th>倍率</th><th>可用渠道</th></tr></thead>
             <tbody>
-              {offers.map((offer, index) => {
+              {visibleOffers.map((offer, index) => {
                 const model = modelMap.get(offer.model);
                 return <tr key={offer.offer_id}>
                   <td><code>{offer.offer_id}</code></td>
-                  <td><span className={`rank rank-${Math.min(index + 1, 5)}`}>{index + 1}</span></td>
+                  <td><span className={`rank rank-${Math.min((page - 1) * pageSize + index + 1, 5)}`}>{(page - 1) * pageSize + index + 1}</span></td>
                   <td><div className="model-cell"><ProviderLogo provider={model?.provider || ''} size={23} /><div><strong>{offer.model}</strong><span>{offer.merchant_name}</span></div></div></td>
                   <td>{protocolNames[offer.protocol] || offer.protocol}</td>
                   <td><Status>{healthNames[offer.health_state] || offer.health_state}</Status></td>
@@ -147,6 +153,7 @@ export default function MarketView({ navigate }) {
           {!loading && !offers.length && <div className="table-empty">{error || '没有符合当前筛选条件的报价'}</div>}
           {loading && <div className="table-empty">正在读取真实报价</div>}
         </div>
+        <Pagination page={page} pageSize={pageSize} total={offers.length} onPageChange={setPage} onPageSizeChange={(nextPageSize) => { setPageSize(nextPageSize); setPage(1); }} disabled={loading} />
       </Section>
     </div>
   );

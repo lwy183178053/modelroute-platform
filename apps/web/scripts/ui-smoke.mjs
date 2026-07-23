@@ -24,6 +24,17 @@ async function clickRowAction(targetPage, label, index = 0) {
   await menu.getByRole('menuitem', { name: label, exact: true }).click();
 }
 
+async function assertPagination(targetPage) {
+  const pagination = targetPage.getByRole('navigation', { name: '分页' });
+  await pagination.waitFor();
+  assert(await pagination.getByLabel('每页条数').count() === 1, '分页缺少每页条数选择');
+  assert(await pagination.getByLabel('每页条数').locator('option').allTextContents().then((items) => items.join('|')) === '20 条|50 条|200 条', '分页条数选项不正确');
+  for (const label of ['首页', '上一页', '下一页', '尾页']) {
+    assert(await pagination.getByRole('button', { name: label, exact: true }).count() === 1, `分页缺少${label}按钮`);
+  }
+  return pagination;
+}
+
 const browser = await chromium.launch({ executablePath, headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 const pageErrors = [];
@@ -158,7 +169,7 @@ async function mockAdminAPI(targetPage, state, account = null) {
       ];
       const type = url.searchParams.get('type');
       const items = type ? allUsers.filter((user) => user.account_type === type) : allUsers;
-      return json({ success: true, data: { page: 1, page_size: 50, total: items.length, items } });
+      return json({ success: true, data: { page: Number(url.searchParams.get('p') || 1), page_size: Number(url.searchParams.get('page_size') || 20), total: 41, items } });
     }
     if (url.pathname === '/api/admin/overview' && request.method() === 'GET') {
       return json({ success: true, data: {
@@ -349,6 +360,7 @@ try {
   await page.getByText('32.4K', { exact: true }).waitFor();
   await page.getByText('2.6B', { exact: true }).waitFor();
   await page.getByText('10分钟前', { exact: true }).waitFor();
+  await assertPagination(page);
   assert(await page.getByText('可用渠道', { exact: true }).count() === 1, '模型市场行内重复显示可用渠道');
   for (const column of [7, 8, 9, 11]) {
     const weight = await page.locator('.market-table tbody tr').first().locator('td').nth(column).evaluate((cell) => Number.parseInt(getComputedStyle(cell).fontWeight, 10));
@@ -396,6 +408,7 @@ try {
   await consoleSidebar.getByRole('button', { name: '调用记录', exact: true }).click();
   await page.getByText('req-user-1001').waitFor();
   await page.getByText('缓存 1,200 Token').waitFor();
+  await assertPagination(page);
   assert(await page.locator('[aria-label="最近 7 天用量趋势"]').count() === 0, '调用记录页仍重复渲染用量趋势');
   assert(!(await page.locator('body').innerText()).includes('mkt-ov-'), '控制台泄露了内部报价别名');
   await consoleSidebar.getByRole('button', { name: '充值中心', exact: true }).click();
@@ -502,6 +515,7 @@ try {
   await page.getByRole('button', { name: '渠道调用日志' }).click();
   await page.getByText('req-admin-9001').waitFor();
   await page.getByText('alice', { exact: true }).waitFor();
+  await assertPagination(page);
   assert(await page.getByText('渠道 41', { exact: true }).count() === 0, '渠道日志仍显示内部渠道编号');
   await page.getByRole('button', { name: '模型与定价' }).click();
   await page.getByText('v2', { exact: true }).waitFor();
@@ -540,6 +554,11 @@ try {
   assert(adminMockState.modelDeleteCalls === 1, '模型删除或归档接口没有调用');
   await page.getByRole('button', { name: '用户管理' }).click();
   await page.getByText('alice@example.com').waitFor();
+  const userPagination = await assertPagination(page);
+  await userPagination.getByRole('button', { name: '下一页', exact: true }).click();
+  await page.getByText('第 2 / 3 页 · 共 41 条', { exact: true }).waitFor();
+  await userPagination.getByRole('button', { name: '首页', exact: true }).click();
+  await page.getByText('第 1 / 3 页 · 共 41 条', { exact: true }).waitFor();
   await page.getByRole('button', { name: '商户审核' }).click();
   await page.getByText('东海模型服务').waitFor();
   await clickRowAction(page, '验证');
@@ -603,6 +622,7 @@ try {
   const bodyText = await page.locator('body').innerText();
   assert(!/KEY[^\n]{0,24}[A-Za-z0-9]{24,}/.test(bodyText), '页面疑似显示了完整支付密钥');
   await page.getByText('MR202607220002').waitFor();
+  await assertPagination(page);
   await page.getByRole('button', { name: '编辑配置' }).click();
   const paymentDialog = page.getByRole('dialog', { name: '编辑易支付配置' });
   await paymentDialog.getByLabel('最低充值金额（人民币）').fill('2');

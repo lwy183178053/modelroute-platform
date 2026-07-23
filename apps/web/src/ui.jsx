@@ -4,6 +4,10 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   CircleDollarSign,
   Clock3,
   Copy,
@@ -213,6 +217,33 @@ export function Select({ children, ...props }) {
       <select className="select" {...props}>{children}</select>
       <ChevronDown size={15} />
     </span>
+  );
+}
+
+export function Pagination({ page = 1, pageSize = 20, total = 0, onPageChange, onPageSizeChange, disabled = false }) {
+  const safePageSize = [20, 50, 200].includes(Number(pageSize)) ? Number(pageSize) : 20;
+  const totalItems = Math.max(0, Number(total || 0));
+  const pageCount = Math.max(1, Math.ceil(totalItems / safePageSize));
+  const currentPage = Math.min(Math.max(Number(page) || 1, 1), pageCount);
+  const goTo = (nextPage) => {
+    if (disabled) return;
+    const target = Math.min(Math.max(nextPage, 1), pageCount);
+    if (target !== currentPage) onPageChange?.(target);
+  };
+
+  return (
+    <nav className="pagination" aria-label="分页">
+      <span className="pagination-summary">第 {currentPage} / {pageCount} 页 · 共 {totalItems} 条</span>
+      <label className="pagination-size"><span>每页</span><Select aria-label="每页条数" value={String(safePageSize)} onChange={(event) => onPageSizeChange?.(Number(event.target.value))}>
+        <option value="20">20 条</option><option value="50">50 条</option><option value="200">200 条</option>
+      </Select></label>
+      <div className="pagination-actions">
+        <button aria-label="首页" disabled={disabled || currentPage <= 1} onClick={() => goTo(1)} title="首页" type="button"><ChevronsLeft size={16} /></button>
+        <button aria-label="上一页" disabled={disabled || currentPage <= 1} onClick={() => goTo(currentPage - 1)} title="上一页" type="button"><ChevronLeft size={16} /></button>
+        <button aria-label="下一页" disabled={disabled || currentPage >= pageCount} onClick={() => goTo(currentPage + 1)} title="下一页" type="button"><ChevronRight size={16} /></button>
+        <button aria-label="尾页" disabled={disabled || currentPage >= pageCount} onClick={() => goTo(pageCount)} title="尾页" type="button"><ChevronsRight size={16} /></button>
+      </div>
+    </nav>
   );
 }
 

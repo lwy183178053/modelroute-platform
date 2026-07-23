@@ -7,6 +7,8 @@ export default function AdminUsage() {
   const [channels, setChannels] = useState([]);
   const [merchantUserID, setMerchantUserID] = useState('all');
   const [channelID, setChannelID] = useState('all');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [filterError, setFilterError] = useState('');
 
   useEffect(() => {
@@ -25,16 +27,17 @@ export default function AdminUsage() {
     [channels, merchantUserID],
   );
   const endpoint = useMemo(() => {
-    const query = new URLSearchParams();
+    const query = new URLSearchParams({ p: String(page), page_size: String(pageSize) });
     if (channelID !== 'all') query.set('channel_id', channelID);
     if (channelID !== 'all' && merchantUserID !== 'all') query.set('merchant_user_id', merchantUserID);
     return `/api/admin/channel-logs${query.toString() ? `?${query}` : ''}`;
-  }, [channelID, merchantUserID]);
+  }, [channelID, merchantUserID, page, pageSize]);
   const usage = useUsage(endpoint);
 
   const selectMerchant = (event) => {
     setMerchantUserID(event.target.value);
     setChannelID('all');
+    setPage(1);
   };
 
   return (
@@ -42,11 +45,11 @@ export default function AdminUsage() {
       {filterError && <InlineNotice tone="warning">{filterError}</InlineNotice>}
       <div className="filter-toolbar">
         <Select aria-label="筛选商户" value={merchantUserID} onChange={selectMerchant}><option value="all">全部商户</option>{merchants.map(([id, name]) => <option key={id} value={id}>{name} · 用户 ID {id}</option>)}</Select>
-        <Select aria-label="筛选渠道" value={channelID} onChange={(event) => setChannelID(event.target.value)}><option value="all">全部渠道</option>{availableChannels.map((channel) => <option key={channel.id} value={channel.id}>{channel.channel_name} · 渠道 ID {channel.id}</option>)}</Select>
+        <Select aria-label="筛选渠道" value={channelID} onChange={(event) => { setChannelID(event.target.value); setPage(1); }}><option value="all">全部渠道</option>{availableChannels.map((channel) => <option key={channel.id} value={channel.id}>{channel.channel_name} · 渠道 ID {channel.id}</option>)}</Select>
         <Select aria-label="日志范围"><option>最近 7 天</option></Select>
       </div>
       <UsageTrend data={usage.data} error={usage.error} loading={usage.loading} title="渠道调用趋势" />
-      <UsageLogTable admin data={usage.data} error={usage.error} loading={usage.loading} onRefresh={usage.load} title="渠道调用日志" />
+      <UsageLogTable admin data={usage.data} error={usage.error} loading={usage.loading} onRefresh={usage.load} title="渠道调用日志" page={page} pageSize={pageSize} total={usage.data?.logs?.total} onPageChange={setPage} onPageSizeChange={(nextPageSize) => { setPageSize(nextPageSize); setPage(1); }} />
     </div>
   );
 }

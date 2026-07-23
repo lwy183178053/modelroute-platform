@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, Coins, Gauge, RefreshCw } from 'lucide-react';
 import { apiRequest, formatQuota } from '../api';
-import { Button, EmptyNotice, InlineNotice, Section, Status } from '../ui';
+import { Button, EmptyNotice, InlineNotice, Pagination, Section, Status } from '../ui';
 
 const numberFormatter = new Intl.NumberFormat('zh-CN');
 
@@ -104,8 +104,9 @@ export function UsageTrend({ data, loading, error, title = '用量趋势', actio
   );
 }
 
-export function UsageLogTable({ data, loading, error, admin = false, title = '最近调用', onRefresh }) {
+export function UsageLogTable({ data, loading, error, admin = false, title = '最近调用', onRefresh, page, pageSize, total, onPageChange, onPageSizeChange }) {
   const logs = data?.logs?.items || [];
+  const pageInfo = data?.logs || {};
   return (
     <Section
       title={title}
@@ -131,6 +132,14 @@ export function UsageLogTable({ data, loading, error, admin = false, title = '�
         {!loading && logs.length === 0 && <tr><td className="table-message" colSpan={admin ? 10 : 9}>{error || '暂无调用记录'}</td></tr>}
         {loading && <tr><td className="table-message" colSpan={admin ? 10 : 9}>正在读取调用日志</td></tr>}
       </tbody></table></div>
+      <Pagination
+        page={page ?? pageInfo.page ?? 1}
+        pageSize={pageSize ?? pageInfo.page_size ?? 20}
+        total={total ?? pageInfo.total ?? logs.length}
+        onPageChange={onPageChange}
+        onPageSizeChange={onPageSizeChange}
+        disabled={loading}
+      />
     </Section>
   );
 }

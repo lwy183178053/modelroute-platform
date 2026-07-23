@@ -19,14 +19,14 @@ function RedemptionDialog({ close, config, notify }) {
   const editing = config.mode === 'edit';
   const item = config.item || {};
   const [name, setName] = useState(item.name || '');
-  const [quotaUSD, setQuotaUSD] = useState(editing ? String(Number(item.quota || 0) / 500_000) : '1');
+  const [quotaCNY, setQuotaCNY] = useState(editing ? String(Number(item.quota || 0) / 500_000) : '1');
   const [count, setCount] = useState('1');
   const [expiresAt, setExpiresAt] = useState(localDateTime(item.expired_time));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   const save = async () => {
-    const quota = Math.round(Number(quotaUSD) * 500_000);
+    const quota = Math.round(Number(quotaCNY) * 500_000);
     const quantity = Number(count);
     if (!name.trim() || !Number.isInteger(quota) || quota <= 0 || (!editing && (!Number.isInteger(quantity) || quantity < 1))) {
       setError('请填写有效的名称、额度和数量');
@@ -55,7 +55,7 @@ function RedemptionDialog({ close, config, notify }) {
   >
     <div className="form-stack">
       <Field label="名称"><TextInput maxLength="64" onChange={(event) => setName(event.target.value)} value={name} /></Field>
-      <Field label="单码额度（美元）"><TextInput min="0.01" onChange={(event) => setQuotaUSD(event.target.value)} step="0.01" type="number" value={quotaUSD} /></Field>
+      <Field label="单码额度（人民币）"><TextInput min="0.01" onChange={(event) => setQuotaCNY(event.target.value)} step="0.01" type="number" value={quotaCNY} /></Field>
       {!editing && <Field label="生成数量"><TextInput max="100" min="1" onChange={(event) => setCount(event.target.value)} type="number" value={count} /></Field>}
       <Field label="失效时间" hint="留空表示永不过期"><TextInput onChange={(event) => setExpiresAt(event.target.value)} type="datetime-local" value={expiresAt} /></Field>
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}

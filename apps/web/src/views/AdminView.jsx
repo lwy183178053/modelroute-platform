@@ -9,7 +9,6 @@ import {
   FileText,
   HeartPulse,
   Landmark,
-  Layers3,
   ListChecks,
   Megaphone,
   Settings2,
@@ -26,7 +25,6 @@ import AdminModels from './admin/AdminModels';
 import AdminWithdrawals from './admin/AdminWithdrawals';
 import AdminUsers from './admin/AdminUsers';
 import AdminAudit from './admin/AdminAudit';
-import AdminGroups from './admin/AdminGroups';
 import AdminRedemptions from './admin/AdminRedemptions';
 import AdminSettings from './admin/AdminSettings';
 import AdminTasks from './admin/AdminTasks';
@@ -39,7 +37,6 @@ const baseSections = [
   { id: 'users', label: '用户管理', icon: UserRoundCog },
   { id: 'merchants', label: '商户审核', icon: Building2 },
   { id: 'models', label: '模型与定价', icon: BadgeDollarSign },
-  { id: 'groups', label: '分组倍率', icon: Layers3 },
   { id: 'channels', label: '渠道与探活', icon: HeartPulse },
   { id: 'payment', label: '支付与充值', icon: CreditCard },
   { id: 'redemptions', label: '兑换码管理', icon: TicketCheck },
@@ -159,7 +156,6 @@ export default function AdminView({ section, setSection, openModal, notify }) {
           {section === 'users' && <AdminUsers notify={notify} openModal={openModal} />}
           {section === 'merchants' && <AdminMerchants notify={notify} />}
           {section === 'models' && <AdminModels notify={notify} />}
-          {section === 'groups' && <AdminGroups notify={notify} />}
           {section === 'channels' && <AdminChannels notify={notify} />}
           {section === 'payment' && <AdminPayment notify={notify} openModal={openModal} />}
           {section === 'redemptions' && <AdminRedemptions notify={notify} />}

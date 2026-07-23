@@ -72,16 +72,16 @@ export default function AdminMerchants({ notify }) {
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}
       <Section
         title="商户申请审核"
-        description="核对网站、模型列表和渠道验证结果"
+        description="核对网站、单模型渠道和自动检测结果"
         actions={<Button icon={RefreshCw} onClick={load}>刷新</Button>}
       >
         <div className="filter-toolbar slim-toolbar"><label className="search-box"><Search size={16} /><TextInput onChange={(event) => setKeyword(event.target.value)} placeholder="搜索申请人、网址或 UID" value={keyword} /></label><Button onClick={load} variant="primary">筛选</Button></div>
-        <div className="table-wrap"><table className="data-table"><thead><tr><th>申请</th><th>申请人</th><th>网站</th><th>初始渠道</th><th>拟售模型</th><th>凭据</th><th>状态</th><th>审核操作</th></tr></thead><tbody>
+        <div className="table-wrap"><table className="data-table"><thead><tr><th>申请</th><th>申请人</th><th>网站</th><th>初始渠道</th><th>模型</th><th>检测适配器</th><th>凭据</th><th>状态</th><th>审核操作</th></tr></thead><tbody>
           {applications.map((application) => {
             const review = application.initial_channel || {};
-            return <tr key={application.id}><td><code>A{application.id}</code><small>{application.created_at ? new Date(application.created_at).toLocaleString('zh-CN') : '-'}</small></td><td><strong>{application.display_name}</strong><small>UID {application.user_id}</small></td><td><a href={application.website_url} rel="noreferrer" target="_blank">{application.website_url}</a></td><td><strong>{review.channel_name || '-'}</strong><small>R{review.id || '-'} · 类型 {review.channel_type || '-'}</small></td><td>{review.requested_models?.join('、') || '-'}</td><td>{review.credential_configured ? '已加密保存' : '已清除正文'}</td><td><Status>{statusNames[application.status] || application.status}</Status></td><td><div className="row-actions"><Button disabled={Boolean(busyID) || !['pending', 'verified'].includes(application.status)} icon={ShieldCheck} onClick={() => operate(application, 'verify')} variant="ghost">验证</Button><Button disabled={Boolean(busyID) || application.status !== 'verified'} icon={Check} onClick={() => operate(application, 'approve')} variant="ghost">通过</Button><Button disabled={Boolean(busyID) || !['pending', 'verified'].includes(application.status)} icon={X} onClick={() => operate(application, 'reject')} variant="danger">驳回</Button></div></td></tr>;
+            return <tr key={application.id}><td><code>A{application.id}</code><small>{application.created_at ? new Date(application.created_at).toLocaleString('zh-CN') : '-'}</small></td><td><strong>{application.display_name}</strong><small>UID {application.user_id}</small></td><td><a href={application.website_url} rel="noreferrer" target="_blank">{application.website_url}</a></td><td><strong>{review.channel_name || '-'}</strong><small>R{review.id || '-'}</small></td><td>{review.model || '-'}</td><td>{review.adapter_type || '-'}</td><td>{review.credential_configured ? '已加密保存' : '已清除正文'}</td><td><Status>{statusNames[application.status] || application.status}</Status></td><td><div className="row-actions"><Button disabled={Boolean(busyID) || !['pending', 'verified'].includes(application.status)} icon={ShieldCheck} onClick={() => operate(application, 'verify')} variant="ghost">验证</Button><Button disabled={Boolean(busyID) || application.status !== 'verified'} icon={Check} onClick={() => operate(application, 'approve')} variant="ghost">通过</Button><Button disabled={Boolean(busyID) || !['pending', 'verified'].includes(application.status)} icon={X} onClick={() => operate(application, 'reject')} variant="danger">驳回</Button></div></td></tr>;
           })}
-          {applications.length === 0 && <tr><td className="table-message" colSpan="8">暂无商户申请</td></tr>}
+          {applications.length === 0 && <tr><td className="table-message" colSpan="9">暂无商户申请</td></tr>}
         </tbody></table></div>
       </Section>
 

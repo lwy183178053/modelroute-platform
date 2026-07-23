@@ -38,16 +38,14 @@ export async function apiRequest(path, { method = 'GET', body, signal } = {}) {
 
 export function formatQuota(value) {
   const quota = Number(value || 0);
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2,
+  return new Intl.NumberFormat('zh-CN', {
+    style: 'currency', currency: 'CNY', minimumFractionDigits: 2, maximumFractionDigits: 2,
   }).format(quota / 500_000);
 }
 
-export function formatPriceMicros(value, currency = 'USD') {
+export function formatPriceMicros(value) {
   if (value == null) return '-';
-  return new Intl.NumberFormat(currency === 'CNY' ? 'zh-CN' : 'en-US', {
-    style: 'currency',
-    currency,
+  return new Intl.NumberFormat('zh-CN', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 6,
   }).format(Number(value) / 1_000_000);
@@ -56,7 +54,13 @@ export function formatPriceMicros(value, currency = 'USD') {
 export function formatOfferPrice(tiers) {
   const tier = tiers?.[0];
   if (!tier) return '-';
-  const input = formatPriceMicros(tier.input_price_microusd);
-  const output = tier.output_price_microusd == null ? '' : ` / ${formatPriceMicros(tier.output_price_microusd)} 输出`;
+  const input = formatPriceMicros(tier.input_price_micros);
+  const output = tier.output_price_micros == null ? '' : ` / ${formatPriceMicros(tier.output_price_micros)} 输出`;
   return `${input} 输入${output}`;
+}
+
+export function formatImagePrice(items) {
+  if (!items?.length) return '-';
+  const minimum = Math.min(...items.map((item) => Number(item.price_micros || 0)));
+  return minimum === 0 ? '免费' : `${formatPriceMicros(minimum)} / 张起`;
 }

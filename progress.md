@@ -1375,3 +1375,78 @@
 - `apps/api/internal/modelseed/support_rc21_external_test.go`：增加源码 HEAD 校验并核对默认清单。
 - `progress.md`：追加本阶段实现、验证、文件清单和回滚点。
 - 回滚点：前一提交为 `e26e125`；执行 `git revert <本阶段提交>` 可回退后端代码。103 尚未重置，当前阶段回退不涉及生产数据；生产执行 V2 重置后须恢复同一备份点的平台库、New API 库、Redis 和受限配置。
+
+## 2026-07-23 - Task: 完成 V2 三套工作区、密钥路由与价格管理界面
+
+### What was done
+
+- 用户控制台改为账户概览、API 密钥与路由、调用记录、充值中心和账户设置五项侧栏；密钥创建后可在同一行配置智能或固定路由。
+- 商户中心保持与唯一管理员完全相同的六项侧栏，渠道提交只选择标准模型，报价按商户与模型唯一并支持 `0.00x..5.00x`。
+- 管理后台删除分组倍率入口，模型管理只保留固定厂商、对话/Responses/图片协议、文本阶梯和图片质量尺寸价格矩阵。
+- 余额、充值、账本、提现和运营报表统一显示人民币；模型价格只显示数值和计费单位，零倍率只显示“免费”。
+- 更新桌面和移动端截图矩阵，新增图片价格弹窗截图并删除旧分组截图。
+
+### Testing
+
+- 执行 `npm.cmd run test:ui`，Vite 生产构建及三套侧栏、单模型渠道、零至五倍报价、密钥路由、人民币支付、结算和人工提现交互全部通过。
+- 执行 `npm.cmd run build`，1614 个模块构建成功。
+- 执行 `npm.cmd run capture`，桌面和移动端截图全部生成，根页面无横向溢出。
+- 人工检查用户控制台、商户报价、文本价格和移动端图片矩阵截图，未见文字遮挡、控件重叠或异常裁切。
+
+### Notes
+
+- `apps/web/scripts/capture.mjs`：更新 V2 页面与弹窗截图场景。
+- `apps/web/scripts/ui-smoke.mjs`：覆盖侧栏、单模型、倍率边界、人民币和旧字段退出。
+- `apps/web/src/Modals.jsx`：重做密钥路由、渠道检测、唯一报价、充值与提现弹窗。
+- `apps/web/src/api.js`：统一人民币额度格式化并接入 V2 接口字段。
+- `apps/web/src/views/AdminView.jsx`：删除管理后台分组导航。
+- `apps/web/src/views/ConsoleView.jsx`：实现用户控制台五项侧栏和密钥路由同页。
+- `apps/web/src/views/MarketView.jsx`：显示无币种文本与图片价格和商户倍率。
+- `apps/web/src/views/MerchantView.jsx`：实现单模型渠道、唯一报价和人民币商户数据。
+- `apps/web/src/views/PaymentReturnView.jsx`：将充值结果统一为人民币。
+- `apps/web/src/views/admin/AdminChannels.jsx`：删除渠道类型与多模型字段展示。
+- `apps/web/src/views/admin/AdminGroups.jsx`：删除旧分组倍率页面。
+- `apps/web/src/views/admin/AdminMerchants.jsx`：显示单模型渠道审核信息。
+- `apps/web/src/views/admin/AdminModels.jsx`：实现模型删除、文本阶梯和图片价格矩阵。
+- `apps/web/src/views/admin/AdminPayment.jsx`：删除汇率并维护人民币充值范围。
+- `apps/web/src/views/admin/AdminRedemptions.jsx`：将兑换额度显示为人民币。
+- `apps/web/artifacts/admin-announcements-desktop.png`：更新管理员公告桌面回归图。
+- `apps/web/artifacts/admin-channels-desktop.png`：更新单模型渠道管理桌面回归图。
+- `apps/web/artifacts/admin-channels-mobile.png`：更新单模型渠道管理移动回归图。
+- `apps/web/artifacts/admin-desktop.png`：更新管理后台侧栏桌面回归图。
+- `apps/web/artifacts/admin-mobile.png`：更新管理后台侧栏移动回归图。
+- `apps/web/artifacts/admin-groups-desktop.png`：删除旧分组倍率桌面回归图。
+- `apps/web/artifacts/admin-groups-mobile.png`：删除旧分组倍率移动回归图。
+- `apps/web/artifacts/admin-model-price-desktop.png`：更新文本阶梯价格桌面回归图。
+- `apps/web/artifacts/admin-model-price-mobile.png`：更新文本阶梯价格移动回归图。
+- `apps/web/artifacts/admin-image-price-desktop.png`：新增图片价格矩阵桌面回归图。
+- `apps/web/artifacts/admin-image-price-mobile.png`：新增图片价格矩阵移动回归图。
+- `apps/web/artifacts/admin-models-desktop.png`：更新标准模型管理桌面回归图。
+- `apps/web/artifacts/admin-models-mobile.png`：更新标准模型管理移动回归图。
+- `apps/web/artifacts/admin-redemptions-desktop.png`：更新人民币兑换码桌面回归图。
+- `apps/web/artifacts/admin-redemptions-mobile.png`：更新人民币兑换码移动回归图。
+- `apps/web/artifacts/admin-settings-desktop.png`：更新平台设置桌面回归图。
+- `apps/web/artifacts/admin-settings-mobile.png`：更新平台设置移动回归图。
+- `apps/web/artifacts/admin-tasks-desktop.png`：更新系统任务桌面回归图。
+- `apps/web/artifacts/admin-usage-desktop.png`：更新人民币用量桌面回归图。
+- `apps/web/artifacts/admin-usage-mobile.png`：更新人民币用量移动回归图。
+- `apps/web/artifacts/admin-withdrawals-desktop.png`：更新人民币提现审核桌面回归图。
+- `apps/web/artifacts/admin-withdrawals-mobile.png`：更新人民币提现审核移动回归图。
+- `apps/web/artifacts/announcement-panel-desktop.png`：更新公告面板桌面回归图。
+- `apps/web/artifacts/announcement-panel-mobile.png`：更新公告面板移动回归图。
+- `apps/web/artifacts/console-desktop.png`：新增用户五项侧栏桌面回归状态。
+- `apps/web/artifacts/console-mobile.png`：新增用户五项侧栏移动回归状态。
+- `apps/web/artifacts/market-desktop.png`：更新 V2 模型市场桌面回归图。
+- `apps/web/artifacts/market-mobile.png`：更新 V2 模型市场移动回归图。
+- `apps/web/artifacts/merchant-desktop.png`：更新商户侧栏桌面回归图。
+- `apps/web/artifacts/merchant-mobile.png`：更新商户侧栏移动回归图。
+- `apps/web/artifacts/merchant-offers-desktop.png`：更新唯一模型报价桌面回归图。
+- `apps/web/artifacts/merchant-offers-mobile.png`：更新唯一模型报价移动回归图。
+- `apps/web/artifacts/payment-config-desktop.png`：更新人民币支付配置桌面回归图。
+- `apps/web/artifacts/payment-config-mobile.png`：更新人民币支付配置移动回归图。
+- `apps/web/artifacts/route-modal-desktop.png`：更新密钥路由桌面回归图。
+- `apps/web/artifacts/route-modal-mobile.png`：更新密钥路由移动回归图。
+- `apps/web/artifacts/withdrawal-modal-desktop.png`：更新人民币提现桌面回归图。
+- `apps/web/artifacts/withdrawal-modal-mobile.png`：更新人民币提现移动回归图。
+- `progress.md`：追加本阶段实现、验证、文件清单和回滚点。
+- 回滚点：前一提交为 `dbf128b`；执行 `git revert <本阶段提交>` 可回退 V2 前端与截图。该阶段不改生产数据。

@@ -36,8 +36,8 @@ export default function PaymentReturnView({ navigate }) {
     {loading && <InlineNotice>正在读取平台订单状态</InlineNotice>}
     {order && <>
       <div className="metrics-grid">
-        <Metric label="美元额度" value={`$${(Number(order.usd_cents || 0) / 100).toFixed(2)}`} hint="入账到 New API 余额" icon={WalletCards} />
-        <Metric label="人民币实付" value={`¥${(Number(order.cny_cents || 0) / 100).toFixed(2)}`} hint="订单创建时锁定" icon={CreditCard} tone="blue" />
+        <Metric label="人民币金额" value={`¥${(Number(order.amount_cny_cents || 0) / 100).toFixed(2)}`} hint="订单创建时锁定" icon={CreditCard} />
+        <Metric label="入账额度" value={`¥${(Number(order.newapi_quota || 0) / 500_000).toFixed(2)}`} hint="支付成功后入账" icon={WalletCards} tone="blue" />
       </div>
       <Section title="订单状态" description={`平台订单号 ${order.order_no}`} actions={<Button icon={RefreshCw} onClick={load}>刷新状态</Button>}>
         <div className="account-rows">

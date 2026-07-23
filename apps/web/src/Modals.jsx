@@ -8,12 +8,16 @@ function Footer({ cancel, submit, submitText, icon = Check }) {
   return <><Button onClick={cancel}>取消</Button><Button icon={icon} variant="primary" onClick={submit}>{submitText}</Button></>;
 }
 
+function StatusLine({ result }) {
+  return <InlineNotice>检测通过 · {result.adapter_type} · {result.latency_ms} ms</InlineNotice>;
+}
+
 function RouteModal({ close, config, notify }) {
   const policy = config.policy || {};
   const [mode, setMode] = useState(policy.mode || 'smart');
   const [priority, setPriority] = useState(policy.priority || 'stability');
-  const [minimum, setMinimum] = useState(String(Number(policy.minimum_multiplier_bps || 1) / 10_000));
-  const [maximum, setMaximum] = useState(String(Number(policy.maximum_multiplier_bps || 10_000) / 10_000));
+  const [minimum, setMinimum] = useState(String(Number(policy.minimum_multiplier_bps ?? 0) / 10_000));
+  const [maximum, setMaximum] = useState(String(Number(policy.maximum_multiplier_bps ?? 50_000) / 10_000));
   const [merchantIDs, setMerchantIDs] = useState(policy.merchant_ids || []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -25,8 +29,8 @@ function RouteModal({ close, config, notify }) {
   const submit = async () => {
     const minimumBPS = Math.round(Number(minimum) * 10_000);
     const maximumBPS = Math.round(Number(maximum) * 10_000);
-    if (!Number.isInteger(minimumBPS) || !Number.isInteger(maximumBPS) || minimumBPS < 1 || maximumBPS > 10_000 || minimumBPS > maximumBPS) {
-      setError('倍率区间必须在 0.0001x 到 1.0000x 之间');
+    if (!Number.isInteger(minimumBPS) || !Number.isInteger(maximumBPS) || minimumBPS < 0 || maximumBPS > 50_000 || minimumBPS > maximumBPS) {
+      setError('倍率区间必须在 0.00x 到 5.00x 之间');
       return;
     }
     if (mode === 'fixed' && merchantIDs.length === 0) {
@@ -69,8 +73,8 @@ function RouteModal({ close, config, notify }) {
       </div></div>
 
       <div className="form-grid two-column">
-        <Field label="最低成交倍率" hint="低于此倍率的报价不参与路由"><TextInput value={minimum} onChange={(event) => setMinimum(event.target.value)} min="0.0001" max="1" step="0.0001" type="number" /></Field>
-        <Field label="最高成交倍率" hint="平台强制不超过官方价格 1.0x"><TextInput value={maximum} onChange={(event) => setMaximum(event.target.value)} min="0.0001" max="1" step="0.0001" type="number" /></Field>
+        <Field label="最低成交倍率" hint="低于此倍率的报价不参与路由"><TextInput value={minimum} onChange={(event) => setMinimum(event.target.value)} min="0" max="5" step="0.01" type="number" /></Field>
+        <Field label="最高成交倍率" hint="高于此倍率的报价不参与路由"><TextInput value={maximum} onChange={(event) => setMaximum(event.target.value)} min="0" max="5" step="0.01" type="number" /></Field>
       </div>
 
       <div className="form-section"><h3>选择优先级</h3><div className="radio-row">
@@ -79,7 +83,7 @@ function RouteModal({ close, config, notify }) {
       </div></div>
 
       {mode === 'fixed' && <div className="form-section"><h3>固定商户范围</h3><div className="merchant-checks">
-        {(config.merchants || []).map((merchant) => <label key={merchant.id}><input aria-label={`选择商户 ${merchant.name}`} checked={merchantIDs.includes(merchant.id)} onChange={() => toggleMerchant(merchant.id)} type="checkbox" /><span><strong>{merchant.name}</strong><small>{(Number(merchant.availability_ppm || 0) / 10_000).toFixed(2)}% 可用率 · 最低 {(Number(merchant.minimum_multiplier_bps || 0) / 10_000).toFixed(4)}x</small></span></label>)}
+        {(config.merchants || []).map((merchant) => <label key={merchant.id}><input aria-label={`选择商户 ${merchant.name}`} checked={merchantIDs.includes(merchant.id)} onChange={() => toggleMerchant(merchant.id)} type="checkbox" /><span><strong>{merchant.name}</strong><small>{(Number(merchant.availability_ppm || 0) / 10_000).toFixed(2)}% 可用率 · 最低 {(Number(merchant.minimum_multiplier_bps || 0) / 10_000).toFixed(2)}x</small></span></label>)}
         {(config.merchants || []).length === 0 && <InlineNotice tone="warning">当前市场没有可选择的商户</InlineNotice>}
       </div></div>}
       <InlineNotice tone="warning">没有符合固定商户名单、倍率区间和健康条件的候选时，返回兼容 New API 的 503 错误且不扣费。</InlineNotice>
@@ -88,46 +92,43 @@ function RouteModal({ close, config, notify }) {
 }
 
 function QuoteModal({ close, config, notify }) {
-  const [modelID, setModelID] = useState(String(config.models?.[0]?.id || ''));
-  const [channelID, setChannelID] = useState(String(config.channels?.[0]?.id || ''));
-  const [discountPercent, setDiscountPercent] = useState('72');
+  const initialModel = config.models?.find((model) => model.public_name === config.offer?.model) || config.models?.[0];
+  const [modelID, setModelID] = useState(String(initialModel?.id || ''));
+  const [multiplier, setMultiplier] = useState(String(Number(config.offer?.multiplier_bps ?? 10_000) / 10_000));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const selectedModel = config.models?.find((model) => String(model.id) === modelID);
   const selectedTier = selectedModel?.price?.tiers?.[0];
-  const discountBPS = Math.round(Number(discountPercent) * 100);
-  const formatDiscounted = (value) => {
-    if (value == null || !Number.isInteger(discountBPS)) return '-';
-    const usdMicros = Math.round(Number(value) * Number(selectedModel?.price?.usd_exchange_rate_micros || 0) / 1_000_000);
-    return formatPriceMicros(Math.round(usdMicros * discountBPS / 10_000), 'USD');
+  const multiplierBPS = Math.round(Number(multiplier) * 10_000);
+  const formatAdjusted = (value) => {
+    if (value == null || !Number.isInteger(multiplierBPS)) return '-';
+    if (multiplierBPS === 0) return '免费';
+    return formatPriceMicros(Math.round(Number(value) * multiplierBPS / 10_000));
   };
   const submit = async () => {
-    if (!Number.isInteger(discountBPS) || discountBPS < 1 || discountBPS > 10_000) {
-      setError('官方价折扣必须在 0.01% 到 100.00% 之间');
+    if (!Number.isInteger(multiplierBPS) || multiplierBPS < 0 || multiplierBPS > 50_000) {
+      setError('报价倍率必须在 0.00x 到 5.00x 之间');
       return;
     }
     setBusy(true);
     setError('');
     try {
-      await apiRequest('/api/merchant/offers', { method: 'POST', body: {
-        merchant_channel_id: Number(channelID), canonical_model_id: Number(modelID), multiplier_bps: discountBPS,
-      } });
+      await apiRequest(`/api/merchant/offers/${modelID}`, { method: 'PUT', body: { multiplier_bps: multiplierBPS } });
       await config.onSaved?.();
       notify('新报价版本已生效');
       close();
     } catch (requestError) {
-      setError(requestError.message || '创建报价失败');
+      setError(requestError.message || '保存报价失败');
     } finally {
       setBusy(false);
     }
   };
   return (
-    <Modal title="创建模型报价" description="选择已审核渠道和标准模型，提交后同步 New API 价格与模型别名。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !modelID || !channelID} icon={Check} variant="primary" onClick={submit}>{busy ? '同步中' : '提交报价'}</Button></>}>
+    <Modal title="设置模型报价" description="同一模型只保留一个在售报价，并自动应用到该模型的全部已审核渠道。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !modelID} icon={Check} variant="primary" onClick={submit}>{busy ? '同步中' : '保存报价'}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
       <Field label="标准模型"><Select value={modelID} onChange={(event) => setModelID(event.target.value)}>{(config.models || []).map((model) => <option key={model.id} value={model.id}>{model.public_name} · {model.provider}</option>)}</Select></Field>
-      <Field label="商户渠道"><Select value={channelID} onChange={(event) => setChannelID(event.target.value)}>{(config.channels || []).map((channel) => <option key={channel.id} value={channel.id}>{channel.channel_name} · C{channel.id}</option>)}</Select></Field>
-      <div className="quote-summary"><div><span>官方价格版本</span><strong>v{selectedModel?.price?.version || '-'}</strong></div><div><span>官方首档价格</span><strong>{selectedTier ? `${formatPriceMicros(selectedTier.input_price_micros, selectedModel.price.currency)} 输入${selectedTier.output_price_micros == null ? '' : ` / ${formatPriceMicros(selectedTier.output_price_micros, selectedModel.price.currency)} 输出`}` : '-'}</strong></div><div><span>折后美元价格</span><strong>{selectedTier ? `${formatDiscounted(selectedTier.input_price_micros)} 输入${selectedTier.output_price_micros == null ? '' : ` / ${formatDiscounted(selectedTier.output_price_micros)} 输出`}` : '-'}</strong></div></div>
-      <Field label="官方价折扣" hint="允许范围 0.01% - 100.00%"><div className="suffix-input"><TextInput max="100" min="0.01" onChange={(event) => setDiscountPercent(event.target.value)} step="0.01" type="number" value={discountPercent} /><span>%</span></div></Field>
+      <div className="quote-summary"><div><span>价格版本</span><strong>v{selectedModel?.price?.version || '-'}</strong></div><div><span>首档基础价格</span><strong>{selectedTier ? `${formatPriceMicros(selectedTier.input_price_micros)} 输入${selectedTier.output_price_micros == null ? '' : ` / ${formatPriceMicros(selectedTier.output_price_micros)} 输出`}` : '图片价格矩阵'}</strong></div><div><span>倍率后价格</span><strong>{selectedTier ? `${formatAdjusted(selectedTier.input_price_micros)} 输入${selectedTier.output_price_micros == null ? '' : ` / ${formatAdjusted(selectedTier.output_price_micros)} 输出`}` : multiplierBPS === 0 ? '免费' : '按图片价格矩阵计算'}</strong></div></div>
+      <Field label="报价倍率" hint="允许范围 0.00x - 5.00x"><div className="suffix-input"><TextInput max="5" min="0" onChange={(event) => setMultiplier(event.target.value)} step="0.01" type="number" value={multiplier} /><span>x</span></div></Field>
       <InlineNotice>调价将创建不可变的新报价版本；已进入请求的价格不会变化。</InlineNotice>
     </Modal>
   );
@@ -140,18 +141,16 @@ function PaymentModal({ close, config, notify }) {
   const [merchantKey, setMerchantKey] = useState('');
   const [enabled, setEnabled] = useState(setting.enabled ?? true);
   const [methods, setMethods] = useState(setting.payment_methods || ['alipay', 'wxpay']);
-  const [minimumUSD, setMinimumUSD] = useState(String(Number(setting.minimum_usd_cents || 1000) / 100));
-  const [maximumUSD, setMaximumUSD] = useState(String(Number(setting.maximum_usd_cents || 2000000) / 100));
-  const [rate, setRate] = useState(String(Number(setting.exchange_rate_cny_cents_per_usd || 720) / 100));
+  const [minimumCNY, setMinimumCNY] = useState(String(Number(setting.minimum_cny_cents || 100) / 100));
+  const [maximumCNY, setMaximumCNY] = useState(String(Number(setting.maximum_cny_cents || 2000000) / 100));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const toggleMethod = (method) => setMethods((current) => current.includes(method) ? current.filter((item) => item !== method) : [...current, method]);
   const submit = async () => {
-    const minimumUSDCents = Math.round(Number(minimumUSD) * 100);
-    const maximumUSDCents = Math.round(Number(maximumUSD) * 100);
-    const exchangeRate = Math.round(Number(rate) * 100);
-    if (!gatewayURL.trim() || methods.length === 0 || !Number.isInteger(minimumUSDCents) || !Number.isInteger(maximumUSDCents) || !Number.isInteger(exchangeRate) || minimumUSDCents <= 0 || maximumUSDCents < minimumUSDCents || exchangeRate <= 0) {
-      setError('请检查网关、支付方式、额度范围和汇率');
+    const minimumCNYCents = Math.round(Number(minimumCNY) * 100);
+    const maximumCNYCents = Math.round(Number(maximumCNY) * 100);
+    if (!gatewayURL.trim() || methods.length === 0 || !Number.isInteger(minimumCNYCents) || !Number.isInteger(maximumCNYCents) || minimumCNYCents <= 0 || maximumCNYCents < minimumCNYCents) {
+      setError('请检查网关、支付方式和人民币充值范围');
       return;
     }
     setBusy(true);
@@ -159,8 +158,8 @@ function PaymentModal({ close, config, notify }) {
     try {
       await apiRequest('/api/admin/payment-settings', { method: 'PUT', body: {
         gateway_url: gatewayURL.trim(), merchant_pid: merchantPID.trim(), merchant_key: merchantKey,
-        enabled, payment_methods: methods, minimum_usd_cents: minimumUSDCents,
-        maximum_usd_cents: maximumUSDCents, exchange_rate_cny_cents_per_usd: exchangeRate,
+        enabled, payment_methods: methods, minimum_cny_cents: minimumCNYCents,
+        maximum_cny_cents: maximumCNYCents,
       } });
       await config.onSaved?.();
       notify('支付配置已保存为新版本');
@@ -179,9 +178,8 @@ function PaymentModal({ close, config, notify }) {
         <Field label="商户编号 PID" hint={setting.merchant_pid_masked ? `留空保持 ${setting.merchant_pid_masked}` : '首次配置必须填写'}><TextInput onChange={(event) => setMerchantPID(event.target.value)} placeholder={setting.merchant_pid_masked || '输入 PID'} value={merchantPID} /></Field>
         <Field label="商户密钥 KEY" hint="留空保持当前密钥；输入新值将轮换"><TextInput onChange={(event) => setMerchantKey(event.target.value)} placeholder={setting.key_configured ? '已配置，留空保持' : '输入 KEY'} type="password" value={merchantKey} /></Field>
         <Field label="支付状态"><Select onChange={(event) => setEnabled(event.target.value === 'enabled')} value={enabled ? 'enabled' : 'disabled'}><option value="enabled">启用</option><option value="disabled">停用</option></Select></Field>
-        <Field label="最低充值额度（美元）"><TextInput min="0.01" onChange={(event) => setMinimumUSD(event.target.value)} step="0.01" type="number" value={minimumUSD} /></Field>
-        <Field label="最高充值额度（美元）"><TextInput min="0.01" onChange={(event) => setMaximumUSD(event.target.value)} step="0.01" type="number" value={maximumUSD} /></Field>
-        <Field label="人民币兑美元汇率" hint="填写 1 美元对应的人民币金额"><TextInput min="0.01" onChange={(event) => setRate(event.target.value)} step="0.01" type="number" value={rate} /></Field>
+        <Field label="最低充值金额（人民币）"><TextInput min="0.01" onChange={(event) => setMinimumCNY(event.target.value)} step="0.01" type="number" value={minimumCNY} /></Field>
+        <Field label="最高充值金额（人民币）"><TextInput min="0.01" onChange={(event) => setMaximumCNY(event.target.value)} step="0.01" type="number" value={maximumCNY} /></Field>
       </div>
       <Field label="已启用支付方式"><div className="checkbox-line">{[['alipay', '支付宝'], ['wxpay', '微信'], ['qqpay', 'QQ 钱包']].map(([value, label]) => <label key={value}><input checked={methods.includes(value)} onChange={() => toggleMethod(value)} type="checkbox" />{label}</label>)}</div></Field>
       <InlineNotice tone="warning">保存会锁定为新配置版本；已创建订单继续使用原版本验签和金额。</InlineNotice>
@@ -191,28 +189,27 @@ function PaymentModal({ close, config, notify }) {
 
 function RechargeModal({ close, config, notify }) {
   const [setting, setSetting] = useState(null);
-  const [usd, setUSD] = useState('');
+  const [amount, setAmount] = useState('');
   const [paymentType, setPaymentType] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => {
     apiRequest('/api/payment-settings').then((data) => {
       setSetting(data);
-      setUSD(String(Number(data.minimum_usd_cents || 1000) / 100));
+      setAmount(String(Number(data.minimum_cny_cents || 100) / 100));
       setPaymentType(data.payment_methods?.[0] || '');
     }).catch((requestError) => setError(requestError.message || '读取充值配置失败'));
   }, []);
-  const usdCents = Math.round(Number(usd) * 100);
-  const cnyCents = setting && Number.isInteger(usdCents) ? Math.round(usdCents * Number(setting.exchange_rate_cny_cents_per_usd) / 100) : 0;
+  const amountCNYCents = Math.round(Number(amount) * 100);
   const submit = async () => {
-    if (!setting || !Number.isInteger(usdCents) || usdCents < setting.minimum_usd_cents || usdCents > setting.maximum_usd_cents || !paymentType) {
+    if (!setting || !Number.isInteger(amountCNYCents) || amountCNYCents < setting.minimum_cny_cents || amountCNYCents > setting.maximum_cny_cents || !paymentType) {
       setError('充值额度或支付方式不在允许范围');
       return;
     }
     setBusy(true);
     setError('');
     try {
-      const data = await apiRequest('/api/payment-orders', { method: 'POST', body: { usd_cents: usdCents, payment_type: paymentType } });
+      const data = await apiRequest('/api/payment-orders', { method: 'POST', body: { amount_cny_cents: amountCNYCents, payment_type: paymentType } });
       await config.onSaved?.(data.order);
       notify('充值订单已创建，正在进入支付页');
       window.location.assign(data.payment_url);
@@ -221,13 +218,13 @@ function RechargeModal({ close, config, notify }) {
       setBusy(false);
     }
   };
-  const presets = setting ? [...new Set([setting.minimum_usd_cents, 5000, 10000, 50000])].filter((value) => value >= setting.minimum_usd_cents && value <= setting.maximum_usd_cents) : [];
+  const presets = setting ? [...new Set([setting.minimum_cny_cents, 5000, 10000, 50000])].filter((value) => value >= setting.minimum_cny_cents && value <= setting.maximum_cny_cents) : [];
   return (
-    <Modal title="账户充值" description="选择美元额度，订单创建时锁定汇率和人民币应付金额。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !setting} icon={CreditCard} variant="primary" onClick={submit}>{busy ? '创建中' : '前往支付'}</Button></>}>
+    <Modal title="账户充值" description="充值金额与到账余额均按人民币计算。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !setting} icon={CreditCard} variant="primary" onClick={submit}>{busy ? '创建中' : '前往支付'}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
-      <Field label="充值额度（美元）"><div className="prefix-input"><span>$</span><TextInput min={Number(setting?.minimum_usd_cents || 1) / 100} max={Number(setting?.maximum_usd_cents || 1) / 100} onChange={(event) => setUSD(event.target.value)} step="0.01" type="number" value={usd} /></div></Field>
-      <div className="amount-presets">{presets.map((value) => <button className={value === usdCents ? 'active' : ''} key={value} onClick={() => setUSD(String(value / 100))} type="button">${(value / 100).toLocaleString('en-US')}</button>)}</div>
-      {setting && <div className="quote-summary"><div><span>当前汇率</span><strong>¥{(Number(setting.exchange_rate_cny_cents_per_usd) / 100).toFixed(2)} / $1</strong></div><div><span>人民币应付</span><strong>¥{(cnyCents / 100).toFixed(2)}</strong></div></div>}
+      <Field label="充值金额（人民币）"><div className="prefix-input"><span>¥</span><TextInput min={Number(setting?.minimum_cny_cents || 1) / 100} max={Number(setting?.maximum_cny_cents || 1) / 100} onChange={(event) => setAmount(event.target.value)} step="0.01" type="number" value={amount} /></div></Field>
+      <div className="amount-presets">{presets.map((value) => <button className={value === amountCNYCents ? 'active' : ''} key={value} onClick={() => setAmount(String(value / 100))} type="button">¥{(value / 100).toLocaleString('zh-CN')}</button>)}</div>
+      {setting && <div className="quote-summary"><div><span>人民币支付</span><strong>¥{(amountCNYCents / 100).toFixed(2)}</strong></div><div><span>预计到账</span><strong>¥{(amountCNYCents / 100).toFixed(2)}</strong></div></div>}
       <Field label="支付方式"><div className="payment-methods">{(setting?.payment_methods || []).map((method) => <label key={method}><input checked={paymentType === method} name="payment-method" onChange={() => setPaymentType(method)} type="radio" />{{ alipay: '支付宝', wxpay: '微信', qqpay: 'QQ 钱包' }[method] || method}</label>)}</div></Field>
       <InlineNotice>浏览器返回页只显示订单状态，额度入账只由已验签的异步回调触发。</InlineNotice>
     </Modal>
@@ -263,13 +260,33 @@ function MerchantApplyModal({ close, config, notify }) {
   const [displayName, setDisplayName] = useState('');
   const [websiteURL, setWebsiteURL] = useState('');
   const [channelName, setChannelName] = useState('主线路');
-  const [channelType, setChannelType] = useState('1');
+  const [modelID, setModelID] = useState(String(config.models?.[0]?.id || ''));
   const [baseURL, setBaseURL] = useState('');
   const [apiKey, setAPIKey] = useState('');
-  const [models, setModels] = useState('gpt-4o-mini');
+  const [testReceipt, setTestReceipt] = useState('');
+  const [testResult, setTestResult] = useState(null);
   const [description, setDescription] = useState('');
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [error, setError] = useState('');
+
+  const testChannel = async () => {
+    setTesting(true);
+    setError('');
+    setTestReceipt('');
+    setTestResult(null);
+    try {
+      const result = await apiRequest('/api/merchant/channel-tests', { method: 'POST', body: {
+        canonical_model_id: Number(modelID), base_url: baseURL.trim(), api_key: apiKey,
+      } });
+      setTestReceipt(result.test_receipt);
+      setTestResult(result);
+    } catch (requestError) {
+      setError(requestError.message || '渠道检测失败');
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const submit = async () => {
     setBusy(true);
@@ -279,8 +296,8 @@ function MerchantApplyModal({ close, config, notify }) {
         method: 'POST',
         body: {
           display_name: displayName.trim(), website_url: websiteURL.trim(), business_description: description.trim(),
-          channel_name: channelName.trim(), channel_type: Number(channelType), base_url: baseURL.trim(), api_key: apiKey,
-          models: models.split(/[\n,]/).map((value) => value.trim()).filter(Boolean),
+          channel_name: channelName.trim(), canonical_model_id: Number(modelID), test_receipt: testReceipt,
+          base_url: baseURL.trim(), api_key: apiKey,
         },
       });
       await config.onSaved?.(application);
@@ -293,17 +310,17 @@ function MerchantApplyModal({ close, config, notify }) {
     }
   };
   return (
-    <Modal title="申请成为商户" description="普通用户提交网站与渠道凭据，管理员验证通过后在同一账号开通商户中心。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy} icon={Send} onClick={submit} variant="primary">{busy ? '提交中' : '提交申请'}</Button></>} wide>
+    <Modal title="申请成为商户" description="选择一个标准模型并通过 hi 检测后提交。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !testReceipt} icon={Send} onClick={submit} variant="primary">{busy ? '提交中' : '提交申请'}</Button></>} wide>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
       <div className="form-grid two-column">
         <Field label="商户名称"><TextInput maxLength="80" onChange={(event) => setDisplayName(event.target.value)} placeholder="用于市场展示" value={displayName} /></Field>
         <Field label="网站地址"><TextInput onChange={(event) => setWebsiteURL(event.target.value)} placeholder="https://example.com" value={websiteURL} /></Field>
         <Field label="渠道名称"><TextInput maxLength="100" onChange={(event) => setChannelName(event.target.value)} value={channelName} /></Field>
-        <Field label="渠道类型"><Select onChange={(event) => setChannelType(event.target.value)} value={channelType}><option value="1">OpenAI 兼容</option><option value="14">Anthropic</option><option value="20">OpenRouter</option><option value="24">Gemini</option><option value="43">DeepSeek</option></Select></Field>
-        <Field label="上游基础地址"><TextInput onChange={(event) => setBaseURL(event.target.value)} placeholder="https://api.example.com/v1" value={baseURL} /></Field>
-        <Field label="上游 API 密钥" hint="提交后加密保存且不再回显"><TextInput onChange={(event) => setAPIKey(event.target.value)} placeholder="输入渠道密钥" type="password" value={apiKey} /></Field>
+        <Field label="标准模型"><Select onChange={(event) => { setModelID(event.target.value); setTestReceipt(''); }} value={modelID}>{(config.models || []).map((model) => <option key={model.id} value={model.id}>{model.public_name} · {model.provider}</option>)}</Select></Field>
+        <Field label="上游基础地址"><TextInput onChange={(event) => { setBaseURL(event.target.value); setTestReceipt(''); }} placeholder="https://api.example.com/v1" value={baseURL} /></Field>
+        <Field label="上游 API 密钥" hint="提交后加密保存且不再回显"><TextInput onChange={(event) => { setAPIKey(event.target.value); setTestReceipt(''); }} placeholder="输入渠道密钥" type="password" value={apiKey} /></Field>
       </div>
-      <Field label="拟售模型" hint="多个模型使用逗号或换行分隔"><textarea className="textarea" onChange={(event) => setModels(event.target.value)} rows="3" value={models} /></Field>
+      <div className="config-actions"><Button disabled={testing || !modelID || !baseURL.trim() || apiKey.trim().length < 8} icon={ShieldCheck} onClick={testChannel} variant="primary">{testing ? '检测中' : '发送 hi 检测'}</Button>{testResult && <StatusLine result={testResult} />}</div>
       <Field label="业务说明"><textarea className="textarea" onChange={(event) => setDescription(event.target.value)} placeholder="说明渠道来源、可售模型和服务能力" rows="4" value={description} /></Field>
     </Modal>
   );
@@ -311,19 +328,38 @@ function MerchantApplyModal({ close, config, notify }) {
 
 function ChannelModal({ close, config, notify }) {
   const [channelName, setChannelName] = useState('');
-  const [channelType, setChannelType] = useState('1');
+  const [modelID, setModelID] = useState(String(config.models?.[0]?.id || ''));
   const [baseURL, setBaseURL] = useState('');
   const [apiKey, setAPIKey] = useState('');
-  const [models, setModels] = useState('gpt-4o-mini');
+  const [testReceipt, setTestReceipt] = useState('');
+  const [testResult, setTestResult] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [error, setError] = useState('');
+  const testChannel = async () => {
+    setTesting(true);
+    setError('');
+    setTestReceipt('');
+    setTestResult(null);
+    try {
+      const result = await apiRequest('/api/merchant/channel-tests', { method: 'POST', body: {
+        canonical_model_id: Number(modelID), base_url: baseURL.trim(), api_key: apiKey,
+      } });
+      setTestReceipt(result.test_receipt);
+      setTestResult(result);
+    } catch (requestError) {
+      setError(requestError.message || '渠道检测失败');
+    } finally {
+      setTesting(false);
+    }
+  };
   const submitChannel = async () => {
     setBusy(true);
     setError('');
     try {
       await apiRequest('/api/merchant/channels', { method: 'POST', body: {
-        channel_name: channelName.trim(), channel_type: Number(channelType), base_url: baseURL.trim(), api_key: apiKey,
-        models: models.split(/[\n,]/).map((value) => value.trim()).filter(Boolean),
+        channel_name: channelName.trim(), canonical_model_id: Number(modelID), test_receipt: testReceipt,
+        base_url: baseURL.trim(), api_key: apiKey,
       } });
       await config.onSaved?.();
       notify('渠道已提交审核');
@@ -335,9 +371,13 @@ function ChannelModal({ close, config, notify }) {
     }
   };
   return (
-    <Modal title="提交新渠道" description="新渠道验证通过后才会导入 New API。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy} icon={Plus} onClick={submitChannel} variant="primary">{busy ? '提交中' : '提交渠道审核'}</Button></>}>
+    <Modal title="提交新渠道" description="每条渠道绑定一个标准模型，hi 检测结果 15 分钟内有效。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !testReceipt} icon={Plus} onClick={submitChannel} variant="primary">{busy ? '提交中' : '提交渠道审核'}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
-      <Field label="渠道名称"><TextInput onChange={(event) => setChannelName(event.target.value)} placeholder="例如 OpenAI 企业线路" value={channelName} /></Field><Field label="渠道类型"><Select onChange={(event) => setChannelType(event.target.value)} value={channelType}><option value="1">OpenAI 兼容</option><option value="14">Anthropic</option><option value="20">OpenRouter</option><option value="24">Gemini</option><option value="43">DeepSeek</option></Select></Field><Field label="上游基础地址"><TextInput onChange={(event) => setBaseURL(event.target.value)} placeholder="https://api.example.com/v1" value={baseURL} /></Field><Field label="上游 API 密钥"><TextInput onChange={(event) => setAPIKey(event.target.value)} placeholder="保存后不再回显" type="password" value={apiKey} /></Field><Field label="拟售模型"><textarea className="textarea" onChange={(event) => setModels(event.target.value)} rows="3" value={models} /></Field>
+      <Field label="渠道名称"><TextInput onChange={(event) => setChannelName(event.target.value)} placeholder="例如 OpenAI 企业线路" value={channelName} /></Field>
+      <Field label="标准模型"><Select onChange={(event) => { setModelID(event.target.value); setTestReceipt(''); }} value={modelID}>{(config.models || []).map((model) => <option key={model.id} value={model.id}>{model.public_name} · {model.provider}</option>)}</Select></Field>
+      <Field label="上游基础地址"><TextInput onChange={(event) => { setBaseURL(event.target.value); setTestReceipt(''); }} placeholder="https://api.example.com/v1" value={baseURL} /></Field>
+      <Field label="上游 API 密钥"><TextInput onChange={(event) => { setAPIKey(event.target.value); setTestReceipt(''); }} placeholder="保存后不再回显" type="password" value={apiKey} /></Field>
+      <div className="config-actions"><Button disabled={testing || !modelID || !baseURL.trim() || apiKey.trim().length < 8} icon={ShieldCheck} onClick={testChannel} variant="primary">{testing ? '检测中' : '发送 hi 检测'}</Button>{testResult && <StatusLine result={testResult} />}</div>
     </Modal>
   );
 }
@@ -379,7 +419,7 @@ function WithdrawalModal({ close, config, notify }) {
   return (
     <Modal title="申请人工提现" description="申请后立即冻结对应余额，由管理员审核并线下打款。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy} icon={Landmark} onClick={submit} variant="primary">{busy ? '提交中' : '提交提现申请'}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
-      <Field label="提现金额（美元）" hint={`当前可提现 ${formatQuota(availableQuota)}`}><div className="prefix-input"><span>$</span><TextInput min="0.01" onChange={(event) => setAmount(event.target.value)} step="0.01" type="number" value={amount} /></div></Field>
+      <Field label="提现金额（人民币）" hint={`当前可提现 ${formatQuota(availableQuota)}`}><div className="prefix-input"><span>¥</span><TextInput min="0.01" onChange={(event) => setAmount(event.target.value)} step="0.01" type="number" value={amount} /></div></Field>
       <Field label="收款方式"><Select onChange={(event) => setRecipientType(event.target.value)} value={recipientType}><option value="alipay">支付宝</option><option value="bank">银行卡</option><option value="other">其他</option></Select></Field>
       <Field label="收款账户" hint="账户信息加密保存，仅管理员处理打款时可见"><TextInput maxLength="256" onChange={(event) => setRecipientAccount(event.target.value)} value={recipientAccount} /></Field>
     </Modal>

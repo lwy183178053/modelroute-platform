@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Activity, BookOpen, Boxes, Clock3, Gauge, Search, Store } from 'lucide-react';
-import { apiRequest, formatOfferPrice } from '../api';
+import { apiRequest, formatImagePrice, formatOfferPrice } from '../api';
 import { Button, InlineNotice, Metric, PageHeader, ProviderLogo, Section, Select, Status, TextInput } from '../ui';
 
 const healthNames = {
@@ -8,7 +8,7 @@ const healthNames = {
 };
 
 const protocolNames = {
-  chat_completions: '聊天补全', responses: 'Responses', embeddings: '嵌入',
+  chat_completions: '聊天补全', responses: 'Responses', image_generation: '图片生成',
 };
 
 function formatAvailability(value) {
@@ -21,12 +21,20 @@ function formatLatency(value) {
   return milliseconds >= 1000 ? `${(milliseconds / 1000).toFixed(2)}s` : `${milliseconds}ms`;
 }
 
-function formatDiscount(value) {
-  return `${(Number(value || 0) / 100).toFixed(2)}%`;
+function formatMultiplier(value) {
+  const bps = Number(value || 0);
+  return bps === 0 ? '免费' : `${(bps / 10_000).toFixed(2)}x`;
 }
 
 function offerInputPrice(offer) {
-  return Number(offer.price_tiers?.[0]?.input_price_microusd ?? Number.MAX_SAFE_INTEGER);
+  if (offer.protocol === 'image_generation') {
+    return Math.min(...(offer.image_prices || []).map((item) => Number(item.price_micros)), Number.MAX_SAFE_INTEGER);
+  }
+  return Number(offer.price_tiers?.[0]?.input_price_micros ?? Number.MAX_SAFE_INTEGER);
+}
+
+function offerPrice(offer) {
+  return offer.protocol === 'image_generation' ? formatImagePrice(offer.image_prices) : `${formatOfferPrice(offer.price_tiers)} / 百万 Token`;
 }
 
 export default function MarketView({ navigate }) {
@@ -90,7 +98,7 @@ export default function MarketView({ navigate }) {
       <div className="metrics-row market-metrics">
         <Metric label="在售模型" value={String(activeModels)} hint={`已发布 ${models.length} 个标准模型`} icon={Boxes} />
         <Metric label="活跃商户" value={String(activeMerchants)} hint={`${marketOffers.length} 个有效报价`} icon={Store} tone="blue" />
-        <Metric label="健康报价" value={String(healthyOffers)} hint="来自主动探活与真实请求" icon={Activity} tone="green" />
+        <Metric label="健康报价" value={String(healthyOffers)} hint="来自真实请求与冷却恢复检测" icon={Activity} tone="green" />
         <Metric label="中位 P95 首字" value={formatLatency(medianP95)} hint="按当前有效报价统计" icon={Clock3} tone="amber" />
       </div>
 
@@ -101,7 +109,7 @@ export default function MarketView({ navigate }) {
             <TextInput aria-label="搜索模型或商户" placeholder="搜索模型、商户或渠道" value={query} onChange={(event) => setQuery(event.target.value)} />
           </label>
           <Select aria-label="接口协议" value={protocol} onChange={(event) => setProtocol(event.target.value)}>
-            <option value="all">全部协议</option><option value="chat_completions">聊天补全</option><option value="responses">Responses</option><option value="embeddings">嵌入</option>
+            <option value="all">全部协议</option><option value="chat_completions">聊天补全</option><option value="responses">Responses</option><option value="image_generation">图片生成</option>
           </Select>
           <Select aria-label="排序方式" value={sort} onChange={(event) => setSort(event.target.value)}>
             <option value="stability">稳定性优先</option><option value="price">价格从低到高</option><option value="availability">可用率从高到低</option>
@@ -118,7 +126,7 @@ export default function MarketView({ navigate }) {
 
         <div className="table-wrap market-table-wrap">
           <table className="data-table market-table">
-            <thead><tr><th>排名</th><th>模型与商户</th><th>协议</th><th>状态</th><th>可用率</th><th>P95 首字</th><th>折后价格 / 百万 Token</th><th>官方价折扣</th><th>渠道</th><th></th></tr></thead>
+            <thead><tr><th>排名</th><th>模型与商户</th><th>协议</th><th>状态</th><th>可用率</th><th>P95 首字</th><th>当前价格</th><th>倍率</th><th>渠道</th><th></th></tr></thead>
             <tbody>
               {offers.map((offer, index) => {
                 const model = modelMap.get(offer.model);
@@ -129,9 +137,9 @@ export default function MarketView({ navigate }) {
                   <td><Status>{healthNames[offer.health_state] || offer.health_state}</Status></td>
                   <td><strong className="success-text">{formatAvailability(offer.availability_ppm)}</strong></td>
                   <td>{formatLatency(offer.ttft_p95_ms)}</td>
-                  <td><strong>{formatOfferPrice(offer.price_tiers)}</strong>{offer.price_tiers?.length > 1 && <small>{offer.price_tiers.length} 个上下文阶梯</small>}</td>
-                  <td><span className="price-multiple">{formatDiscount(offer.discount_bps || offer.multiplier_bps)}</span></td>
-                  <td><strong>{offer.channel_name}</strong><small>C{offer.merchant_channel_id}</small></td>
+                  <td><strong>{offerPrice(offer)}</strong>{offer.price_tiers?.length > 1 && <small>{offer.price_tiers.length} 个上下文阶梯</small>}</td>
+                  <td><span className="price-multiple">{formatMultiplier(offer.multiplier_bps)}</span></td>
+                  <td><strong>{offer.channel_count || 0} 个</strong></td>
                   <td><Button variant="ghost" onClick={() => navigate('console')}>用于路由</Button></td>
                 </tr>;
               })}

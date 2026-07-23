@@ -3,6 +3,8 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -187,6 +189,7 @@ func TestMerchantChannelTestReturnsBoundReceiptWithoutPersistingCredential(t *te
 		return ChannelTestOutcome{AdapterType: "anthropic", Capabilities: []string{"responses"}, LatencyMS: 125}, nil
 	}}
 	repository := &merchantRepositoryStub{}
+	var savedReceiptHash string
 	repository.saveChannelTest = func(_ context.Context, command CreateChannelTest) (ChannelTest, error) {
 		if command.UserID != 7 || command.CanonicalModelID != 61 || command.AdapterType != "anthropic" || command.LatencyMS != 125 {
 			t.Fatalf("检测记录=%+v", command)
@@ -194,6 +197,7 @@ func TestMerchantChannelTestReturnsBoundReceiptWithoutPersistingCredential(t *te
 		if len(command.CredentialFingerprint) != 64 || len(command.ReceiptTokenHash) != 64 || strings.Contains(command.ReceiptTokenHash, "sk-upstream") {
 			t.Fatalf("检测摘要无效：%+v", command)
 		}
+		savedReceiptHash = command.ReceiptTokenHash
 		return ChannelTest{ID: 81, CanonicalModelID: 61, AdapterType: "anthropic", Capabilities: []string{"responses"}, LatencyMS: 125, ExpiresAt: time.Now().Add(15 * time.Minute)}, nil
 	}
 	services.Merchants = repository
@@ -210,6 +214,18 @@ func TestMerchantChannelTestReturnsBoundReceiptWithoutPersistingCredential(t *te
 	}
 	if strings.Contains(response.Body.String(), "sk-upstream-secret") || strings.Contains(response.Body.String(), "credential_fingerprint") {
 		t.Fatalf("检测响应泄露凭据：%s", response.Body.String())
+	}
+	var payload struct {
+		Data struct {
+			TestReceipt string `json:"test_receipt"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	receiptDigest := sha256.Sum256([]byte(payload.Data.TestReceipt))
+	if savedReceiptHash != hex.EncodeToString(receiptDigest[:]) {
+		t.Fatalf("检测凭证保存摘要=%q，提交事务期望=%q", savedReceiptHash, hex.EncodeToString(receiptDigest[:]))
 	}
 }
 

@@ -1590,3 +1590,27 @@
 - `docs/部署环境审计.md`：以 V2 生产数据库、种子、协议、备份和配置现状替换旧 V1 当前状态。
 - `progress.md`：追加本轮 V2 生产重置、完整验收、文件清单和回滚点。
 - 回滚点：代码前一提交为 `8257e228f367`；执行 `git revert <本阶段提交>` 可回退生产界面验收脚本和文档。数据级回滚使用重置前完整备份 `/opt/modelroute-platform/shared/backups/20260723T025901Z`，V2 当前数据恢复使用 `/opt/modelroute-platform/shared/backups/20260723T032444Z`。
+
+## 2026-07-23 - Task: 修复 hi 检测通过后渠道提交固定返回状态冲突
+
+### What was done
+
+- 根据生产截图、网关 409 记录和平台库检测记录定位渠道提交失败：检测凭证保存使用 HMAC-SHA256，提交领取使用 SHA-256，同一凭证的摘要必然不匹配。
+- 将检测凭证保存与提交领取收敛到同一个 SHA-256 摘要函数；渠道密钥继续使用独立 HMAC-SHA256 指纹，不改变密钥保护边界。
+- 增加检测响应随机凭证与数据库保存摘要必须一致的回归测试，防止两个阶段再次使用不同算法。
+
+### Testing
+
+- 生产只读核对确认管理员官方商户状态为 `active`，三条 `hi` 检测记录均在失败时有效且未消费，渠道审核记录为 `0`；网关记录四次 `POST /api/merchant/channels` 返回 `409`。
+- 新回归测试在修复前稳定失败，输出同一凭证的保存摘要与提交期望摘要不同；修复后该测试与渠道申请事务测试均通过。
+- 执行 `go test -p 1 -count=1 ./...`，全部 Go 包通过；执行 `go vet ./...` 和 `go build ./...` 通过。
+- 执行 `git diff --check`，未发现空白错误。
+
+### Notes
+
+- `apps/api/internal/httpapi/merchant_handlers.go`：检测记录改用与提交事务一致的凭证摘要函数。
+- `apps/api/internal/httpapi/merchant_store.go`：集中实现检测凭证 SHA-256 摘要并供领取逻辑复用。
+- `apps/api/internal/httpapi/merchant_handlers_test.go`：增加随机检测凭证保存摘要一致性回归测试。
+- `docs/商户与渠道审核接口.md`：说明检测凭证摘要与渠道密钥指纹的用途边界。
+- `progress.md`：追加生产故障证据、修复验证、文件清单和回滚点。
+- 回滚点：前一提交为 `b0a72023c84d`；执行 `git revert <本阶段提交>` 可回退本轮渠道凭证摘要修复。本轮不改数据库结构，修复前生成的检测凭证需重新发送 `hi` 获取。

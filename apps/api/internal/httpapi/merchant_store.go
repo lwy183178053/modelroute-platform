@@ -214,8 +214,7 @@ type claimedChannelTest struct {
 }
 
 func claimChannelTest(ctx context.Context, tx *sql.Tx, userID int, channel ChannelSubmission) (claimedChannelTest, error) {
-	digest := sha256.Sum256([]byte(channel.TestReceipt))
-	receiptHash := hex.EncodeToString(digest[:])
+	receiptHash := channelTestReceiptHash(channel.TestReceipt)
 	var result claimedChannelTest
 	err := tx.QueryRowContext(ctx, `
 SELECT t.id, t.adapter_type, cm.public_name, cm.provider, cm.protocol
@@ -239,6 +238,11 @@ FOR UPDATE OF t
 		return claimedChannelTest{}, fmt.Errorf("使用渠道检测凭证：%w", err)
 	}
 	return result, nil
+}
+
+func channelTestReceiptHash(receipt string) string {
+	digest := sha256.Sum256([]byte(receipt))
+	return hex.EncodeToString(digest[:])
 }
 
 func (s *SQLMerchantStore) ChannelsForUser(ctx context.Context, userID int) ([]MerchantChannel, error) {

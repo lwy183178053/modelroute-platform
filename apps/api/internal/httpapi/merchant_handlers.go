@@ -86,7 +86,7 @@ func (s *server) createMerchantChannelTest(w http.ResponseWriter, r *http.Reques
 		UserID: session.UserID, CanonicalModelID: model.ID, BaseURL: baseURL,
 		CredentialFingerprint: fingerprint, AdapterType: outcome.AdapterType,
 		Capabilities: outcome.Capabilities, LatencyMS: outcome.LatencyMS,
-		ReceiptTokenHash: s.services.Credentials.Fingerprint([]byte(receipt)), ExpiresAt: expiresAt,
+		ReceiptTokenHash: channelTestReceiptHash(receipt), ExpiresAt: expiresAt,
 	})
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "merchant_store_error", "保存渠道检测结果失败")

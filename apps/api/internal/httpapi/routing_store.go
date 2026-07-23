@@ -95,6 +95,9 @@ type MerchantOfferView struct {
 	Protocol        string             `json:"protocol"`
 	MultiplierBPS   int                `json:"multiplier_bps"`
 	ChannelCount    int                `json:"channel_count"`
+	CallCount       int64              `json:"call_count"`
+	TokenUsage      int64              `json:"token_usage"`
+	LastCalledAt    *time.Time         `json:"last_called_at,omitempty"`
 	PriceTiers      []OfferPriceTier   `json:"price_tiers"`
 	ImagePrices     []ImagePriceItem   `json:"image_prices,omitempty"`
 	Channels        []OfferChannelView `json:"channels"`
@@ -1222,9 +1225,31 @@ WITH latest AS (
     SELECT DISTINCT ON (merchant_profile_id, canonical_model_id) id
     FROM offer_versions
     ORDER BY merchant_profile_id, canonical_model_id, version DESC
+), usage_rows AS (
+    SELECT source_offer.merchant_profile_id, source_offer.canonical_model_id,
+           sources.source_type, sources.status, sources.source_created_at,
+           CASE WHEN other->>'prompt_tokens' ~ '^[0-9]+$' THEN (other->>'prompt_tokens')::bigint ELSE 0 END AS prompt_tokens,
+           CASE WHEN other->>'completion_tokens' ~ '^[0-9]+$' THEN (other->>'completion_tokens')::bigint ELSE 0 END AS completion_tokens,
+           CASE WHEN other->>'total_tokens' ~ '^[0-9]+$' THEN (other->>'total_tokens')::bigint ELSE 0 END AS total_tokens
+    FROM settlement_sources sources
+    JOIN offer_versions source_offer ON source_offer.id = sources.offer_version_id
+), usage_stats AS (
+    SELECT merchant_profile_id, canonical_model_id,
+           count(*) FILTER (WHERE source_type = 2 AND status = 'settled') AS call_count,
+           COALESCE(sum(
+               CASE WHEN source_type = 2 AND status = 'settled' THEN
+                   CASE WHEN prompt_tokens + completion_tokens > 0
+                        THEN prompt_tokens + completion_tokens
+                        ELSE total_tokens END
+               ELSE 0 END
+           ), 0) AS token_usage,
+           max(source_created_at) FILTER (WHERE source_type = 2 AND status = 'settled') AS last_called_at
+    FROM usage_rows
+    GROUP BY merchant_profile_id, canonical_model_id
 )
 SELECT o.id, cm.public_name, cm.protocol, o.multiplier_bps, o.status,
        COALESCE(o.sync_error, ''), o.official_price_version_id,
+       COALESCE(stats.call_count, 0), COALESCE(stats.token_usage, 0), stats.last_called_at,
        count(*) FILTER (WHERE mc.status = 'active' AND h.state IN ('healthy', 'degraded'))
            OVER (PARTITION BY o.id),
        mc.id, mc.channel_name, COALESCE(h.state, 'healthy'),
@@ -1236,6 +1261,8 @@ JOIN merchant_channels mc ON mc.id = aliases.merchant_channel_id
 JOIN merchant_profiles mp ON mp.id = mc.merchant_profile_id
 JOIN canonical_models cm ON cm.id = o.canonical_model_id
 LEFT JOIN channel_health h ON h.merchant_channel_id = mc.id
+LEFT JOIN usage_stats stats ON stats.merchant_profile_id = o.merchant_profile_id
+                           AND stats.canonical_model_id = o.canonical_model_id
 WHERE mp.newapi_user_id = $1
 ORDER BY o.id DESC, mc.id
 `, userID)
@@ -1248,14 +1275,19 @@ ORDER BY o.id DESC, mc.id
 	for rows.Next() {
 		var offer MerchantOfferView
 		var priceID int64
+		var lastCalledAt sql.NullTime
 		var channel OfferChannelView
 		if err := rows.Scan(
 			&offer.OfferID, &offer.Model, &offer.Protocol, &offer.MultiplierBPS,
-			&offer.OfferStatus, &offer.SyncError, &priceID, &offer.ChannelCount,
+			&offer.OfferStatus, &offer.SyncError, &priceID, &offer.CallCount, &offer.TokenUsage, &lastCalledAt, &offer.ChannelCount,
 			&channel.MerchantChannelID, &channel.ChannelName, &channel.HealthState,
 			&channel.AvailabilityPPM, &channel.TTFTP95MS,
 		); err != nil {
 			return nil, fmt.Errorf("解析商户报价：%w", err)
+		}
+		if lastCalledAt.Valid {
+			value := lastCalledAt.Time.UTC()
+			offer.LastCalledAt = &value
 		}
 		if index, exists := indexes[offer.OfferID]; exists {
 			offers[index].Channels = append(offers[index].Channels, channel)

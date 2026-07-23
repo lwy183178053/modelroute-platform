@@ -87,10 +87,10 @@ async function mockAdminAPI(targetPage, state, account = null) {
       return json({ success: true, data: 500000 });
     }
     if (url.pathname === '/api/merchant/offers' && request.method() === 'GET') {
-      return json({ success: true, data: [{ offer_id: 201, model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 108000, output_price_micros: 432000, cache_read_price_micros: 54000, cache_write_price_micros: 144000 }], channels: [{ merchant_channel_id: 51, channel_name: 'OpenAI 主线路', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }], offer_status: 'active', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] });
+      return json({ success: true, data: [{ offer_id: 201, model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, call_count: 32400, token_usage: 2600000000, last_called_at: new Date(Date.now() - 10 * 60_000).toISOString(), price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 108000, output_price_micros: 432000, cache_read_price_micros: 54000, cache_write_price_micros: 144000 }], channels: [{ merchant_channel_id: 51, channel_name: 'OpenAI 主线路', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }], offer_status: 'active', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] });
     }
     if (url.pathname === '/api/merchant/health' && request.method() === 'GET') {
-      return json({ success: true, data: [{ offer_id: 201, model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 108000, output_price_micros: 432000, cache_read_price_micros: 54000, cache_write_price_micros: 144000 }], channels: [{ merchant_channel_id: 51, channel_name: 'OpenAI 主线路', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }], offer_status: 'active', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] });
+      return json({ success: true, data: [{ offer_id: 201, model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 7200, call_count: 32400, token_usage: 2600000000, last_called_at: new Date(Date.now() - 10 * 60_000).toISOString(), price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 108000, output_price_micros: 432000, cache_read_price_micros: 54000, cache_write_price_micros: 144000 }], channels: [{ merchant_channel_id: 51, channel_name: 'OpenAI 主线路', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }], offer_status: 'active', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] });
     }
     if (url.pathname === '/api/merchant/balance' && request.method() === 'GET') {
       return json({ success: true, data: { merchant_id: 31, available_quota: 9000000, frozen_quota: 2500000, lifetime_earned_quota: 14000000, lifetime_refunded_quota: 500000, lifetime_paid_quota: 2000000 } });
@@ -420,8 +420,14 @@ try {
   await page.getByText('渠道已提交审核').waitFor();
   assert(adminMockState.channelSubmitCalls === 1 && adminMockState.channelSubmitBody.channel_name === '企业多模型线路', '渠道审核没有提交真实表单');
   await merchantSidebar.getByRole('button', { name: '模型报价', exact: true }).click();
+  for (const label of ['调用次数', 'Token 用量', '最后调用']) {
+    assert(await page.getByRole('columnheader', { name: label, exact: true }).count() === 1, `报价表缺少${label}列名`);
+  }
   await page.getByText('0.72x').waitFor();
-  await page.getByText('0.108 输入 / 0.432 输出 / 百万 Token').waitFor();
+  await page.getByText('32.4K', { exact: true }).waitFor();
+  await page.getByText('2.6B', { exact: true }).waitFor();
+  await page.getByText('10分钟前', { exact: true }).waitFor();
+  assert(await page.getByText('当前价格', { exact: true }).count() === 0, '模型报价仍显示当前价格');
   await merchantSidebar.getByRole('button', { name: '提现记录', exact: true }).click();
   await page.getByText('MW202607220001', { exact: true }).waitFor();
   await page.getByRole('button', { name: '申请提现' }).click();
@@ -608,7 +614,8 @@ try {
     assert(await ordinaryMerchantSidebar.getByRole('button', { name: label, exact: true }).count() === 1, `普通商户侧栏缺少${label}`);
   }
   await ordinaryMerchantSidebar.getByRole('button', { name: '模型报价', exact: true }).click();
-  await merchantPage.getByText('0.108 输入 / 0.432 输出 / 百万 Token').waitFor();
+  await merchantPage.getByText('2.6B', { exact: true }).waitFor();
+  await merchantPage.getByText('10分钟前', { exact: true }).waitFor();
   await merchantPage.close();
 
   const anonymousPage = await browser.newPage({ viewport: { width: 390, height: 844 } });

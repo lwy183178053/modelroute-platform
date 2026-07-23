@@ -41,14 +41,18 @@ func TestRefundSplitUsesOriginalCumulativeAllocation(t *testing.T) {
 }
 
 func TestDecodeSettlementLogPageKeepsNewAPIFinalQuotaAndCacheMetadata(t *testing.T) {
-	raw := json.RawMessage(`{"page":1,"page_size":100,"total":1,"items":[{"id":98,"user_id":7,"created_at":1784692800,"type":2,"model_name":"mkt-ov-42","quota":37,"channel":41,"token_id":9,"request_id":"req-cache","other":"{\"cache_tokens\":1200,\"cache_ratio\":0.5}"}]}`)
+	raw := json.RawMessage(`{"page":1,"page_size":100,"total":1,"items":[{"id":98,"user_id":7,"created_at":1784692800,"type":2,"model_name":"mkt-ov-42","quota":37,"channel":41,"token_id":9,"request_id":"req-cache","prompt_tokens":2400,"completion_tokens":680,"other":"{\"cache_tokens\":1200,\"cache_ratio\":0.5}"}]}`)
 	page, err := decodeSettlementLogPage(raw)
 	if err != nil || page.Total != 1 || len(page.Items) != 1 {
 		t.Fatalf("日志页解析结果=%+v err=%v", page, err)
 	}
 	item := page.Items[0]
-	if item.Quota != 37 || item.CacheTokens != 1200 || item.ModelName != "mkt-ov-42" || item.ChannelID != 41 {
+	if item.Quota != 37 || item.CacheTokens != 1200 || item.PromptTokens != 2400 || item.CompletionTokens != 680 || item.ModelName != "mkt-ov-42" || item.ChannelID != 41 {
 		t.Fatalf("最终日志字段被错误处理：%+v", item)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(item.Other, &metadata); err != nil || metadata["prompt_tokens"] != "2400" || metadata["completion_tokens"] != "680" {
+		t.Fatalf("Token 元数据没有合并到结算来源：%s err=%v", item.Other, err)
 	}
 }
 

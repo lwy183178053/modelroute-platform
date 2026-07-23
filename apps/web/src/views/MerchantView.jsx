@@ -3,7 +3,7 @@ import {
   BadgeDollarSign, CloudCog, HeartPulse, Landmark, LayoutDashboard,
   Plus, ReceiptText, ServerCog, WalletCards, Waypoints, RefreshCw, Trash2, Power,
 } from 'lucide-react';
-import { apiRequest, formatImagePrice, formatOfferPrice, formatQuota } from '../api';
+import { apiRequest, formatQuota } from '../api';
 import { Button, InlineNotice, Metric, PageHeader, Section, Status } from '../ui';
 
 const statusNames = {
@@ -56,8 +56,29 @@ function formatMultiplier(value) {
   return bps === 0 ? '免费' : `${(bps / 10_000).toFixed(2)}x`;
 }
 
-function formatOfferValue(offer) {
-  return offer.protocol === 'image_generation' ? formatImagePrice(offer.image_prices) : `${formatOfferPrice(offer.price_tiers)} / 百万 Token`;
+function formatCompactCount(value) {
+  const count = Math.max(0, Number(value || 0));
+  const units = [[1_000_000_000, 'B'], [1_000_000, 'M'], [1_000, 'K']];
+  for (const [threshold, suffix] of units) {
+    if (count >= threshold) {
+      const compact = count / threshold;
+      return `${compact >= 100 ? Math.round(compact) : compact.toFixed(1).replace(/\.0$/, '')}${suffix}`;
+    }
+  }
+  return String(Math.round(count));
+}
+
+function formatLastCalled(value) {
+  if (!value) return '暂无调用';
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) return '暂无调用';
+  const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60_000));
+  if (minutes < 1) return '刚刚';
+  if (minutes < 60) return `${minutes}分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}小时前`;
+  const days = Math.floor(hours / 24);
+  return `${days}天前`;
 }
 
 function channelLifecycleRows(reviews, channels) {
@@ -184,9 +205,9 @@ export default function MerchantView({ account, openModal }) {
           </Section>}
 
           {section === 'offers' && <Section title="模型报价" actions={canSubmit && <Button disabled={!channels.length || !models.length} icon={BadgeDollarSign} variant="primary" onClick={() => openModal({ type: 'quote', models: models.filter((model) => model.status === 'active'), onSaved: load })}>设置报价</Button>}>
-            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>模型</th><th>倍率</th><th>当前价格</th><th>可用渠道</th><th>状态</th><th>健康</th><th>操作</th></tr></thead><tbody>
-              {offers.map((offer) => <tr key={offer.offer_id}><td><code>{offer.offer_id}</code></td><td><strong>{offer.model}</strong><small>{protocolNames[offer.protocol] || offer.protocol}</small></td><td><span className="price-multiple">{formatMultiplier(offer.multiplier_bps)}</span></td><td><strong>{formatOfferValue(offer)}</strong>{offer.price_tiers?.length > 1 && <small>{offer.price_tiers.length} 个上下文阶梯</small>}</td><td><strong>{offer.channel_count || 0} 个</strong><small>{offer.channels?.map((channel) => `${channel.channel_name} · ID ${channel.merchant_channel_id}`).join('、') || '-'}</small></td><td><Status>{offer.offer_status === 'active' ? '在售' : statusNames[offer.offer_status] || offer.offer_status}</Status></td><td><Status>{healthNames[offer.health_state] || offer.health_state}</Status></td><td><div className="row-actions"><Button variant="ghost" onClick={() => openModal({ type: 'quote', models, offer, onSaved: load })}>调整倍率</Button><Button variant="danger" onClick={() => retireOffer(offer)}>取消报价</Button></div></td></tr>)}
-              {!loading && offers.length === 0 && <tr><td className="table-message" colSpan="8">暂无报价版本</td></tr>}
+            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>模型</th><th>倍率</th><th>调用次数</th><th>Token 用量</th><th>最后调用</th><th>可用渠道</th><th>状态</th><th>健康</th><th>操作</th></tr></thead><tbody>
+              {offers.map((offer) => <tr key={offer.offer_id}><td><code>{offer.offer_id}</code></td><td><strong>{offer.model}</strong><small>{protocolNames[offer.protocol] || offer.protocol}</small></td><td><span className="price-multiple">{formatMultiplier(offer.multiplier_bps)}</span></td><td><strong>{formatCompactCount(offer.call_count)}</strong></td><td><strong>{formatCompactCount(offer.token_usage)}</strong></td><td><strong>{formatLastCalled(offer.last_called_at)}</strong></td><td><strong>{offer.channel_count || 0} 个</strong><small>{offer.channels?.map((channel) => `${channel.channel_name} · ID ${channel.merchant_channel_id}`).join('、') || '-'}</small></td><td><Status>{offer.offer_status === 'active' ? '在售' : statusNames[offer.offer_status] || offer.offer_status}</Status></td><td><Status>{healthNames[offer.health_state] || offer.health_state}</Status></td><td><div className="row-actions"><Button variant="ghost" onClick={() => openModal({ type: 'quote', models, offer, onSaved: load })}>调整倍率</Button><Button variant="danger" onClick={() => retireOffer(offer)}>取消报价</Button></div></td></tr>)}
+              {!loading && offers.length === 0 && <tr><td className="table-message" colSpan="10">暂无报价版本</td></tr>}
             </tbody></table></div>
           </Section>}
 

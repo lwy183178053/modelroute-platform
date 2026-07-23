@@ -2034,3 +2034,58 @@
 - `apps/web/src/views/ConsoleView.jsx`：调用记录分支仅渲染 `UsageLogTable`。
 - `docs/运营管理与升级验收.md`：同步账户概览与调用记录页的展示边界。
 - 回滚点：执行 `git revert <本轮提交哈希>` 可恢复调用记录页趋势区域；本轮未上传或部署服务器。
+
+## 2026-07-23 - Task: 商户报价改为显示调用统计
+
+### What was done
+
+- 删除商户模型报价表中的“当前价格”，改为显示调用次数、Token 用量和最后调用时间。
+- 调用次数与 Token 用量按“商户 + 模型”关联的最终消费日志累计，调整倍率后统计不清零；千以内不带单位，之后依次使用小写 `k/m/b`，最后调用使用整数分钟、小时或天的相对时间。
+- 结算同步保留最终日志中的输入、输出和总 Token 元数据，继续以核心服务最终日志为事实来源，不改计费和分账逻辑。
+
+### Testing
+
+- PostgreSQL 集成测试通过：真实结算来源汇总为 `1` 次调用、`2.6B` Token，返回对应最后调用时间，并在调整倍率生成新报价版本后保持统计不变。
+- `go test -p=1 -count=1 ./...`、`go vet ./...`、`go build ./...` 通过；PostgreSQL 集成包串行使用同一测试库。
+- `npm.cmd run test:ui` 通过，确认商户报价显示 `32.4k`、`2.6b`、`10分钟前`，且不再出现“当前价格”。
+- `npm.cmd run capture` 通过，桌面和移动端商户报价截图已更新，根页面无横向溢出。
+- `node data/ui-preview/verify.mjs` 通过，浏览器运行时错误为 0。
+- `git diff --check` 通过。
+
+### Notes
+
+- `apps/api/internal/httpapi/routing_store.go`：商户报价响应增加调用次数、Token 用量和最后调用时间，并按商户与模型聚合已结算消费来源。
+- `apps/api/internal/httpapi/routing_store_postgres_test.go`：增加商户调用统计的真实 PostgreSQL 回归。
+- `apps/api/internal/httpapi/settlement_domain.go`：保留最终日志中的 Token 元数据供报价统计使用。
+- `apps/api/internal/httpapi/settlement_domain_test.go`：增加输入、输出 Token 元数据解析回归。
+- `apps/web/src/views/MerchantView.jsx`：模型报价表改为三项调用统计和整数相对时间。
+- `apps/web/src/styles.css`：增加商户报价调用统计布局。
+- `apps/web/scripts/ui-smoke.mjs`、`apps/web/scripts/capture.mjs`：更新交互与截图验收契约。
+- `apps/web/artifacts/merchant-offers-desktop.png`、`apps/web/artifacts/merchant-offers-mobile.png`：更新商户报价桌面和移动端截图。
+- `docs/模型报价路由与健康.md`：记录商户报价统计字段及来源。
+- `data/ui-preview/vite.config.mjs`、`data/ui-preview/verify.mjs`：更新 Git 忽略的本地预览统计数据与浏览器断言。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可恢复价格展示和旧接口；本轮未上传或部署服务器。
+
+## 2026-07-23 - Task: 调整商户报价统计列与单位大小写
+
+### What was done
+
+- 将调用次数、Token 用量、最后调用从报价行内的统计块拆为三个独立表格列，列名直接显示在表头。
+- 调用量紧凑单位统一为大写 `K/M/B`，千以内保持无单位；相对时间继续使用整数分钟、小时或天。
+- 同步前端烟熏断言、截图验收和模型报价说明，移除不再使用的统计块样式与图标导入。
+
+### Testing
+
+- `npm.cmd run test:ui` 通过。
+- `npm.cmd run capture` 通过，桌面与移动端截图确认独立列和 `32.4K`、`2.6B`、`10分钟前`。
+- `node data/ui-preview/verify.mjs` 通过，模型行数 `21`、渠道行数 `3`、运行时错误 `0`、根页面无横向溢出。
+- `git diff --check` 通过。
+
+### Notes
+
+- `apps/web/src/views/MerchantView.jsx`：报价表拆分统计列并统一大写紧凑单位。
+- `apps/web/src/styles.css`：删除已无引用的统计块样式。
+- `apps/web/scripts/ui-smoke.mjs`、`apps/web/scripts/capture.mjs`、`data/ui-preview/verify.mjs`：更新大小写和独立列验收断言。
+- `docs/模型报价路由与健康.md`：记录统计独立列及 `K/M/B` 展示规则。
+- `apps/web/artifacts/merchant-offers-desktop.png`、`apps/web/artifacts/merchant-offers-mobile.png`：更新本地验收截图。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可撤销本轮表格展示调整；本轮未上传或部署服务器。

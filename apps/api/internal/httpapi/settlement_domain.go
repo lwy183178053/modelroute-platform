@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math/big"
+	"strconv"
 	"time"
 )
 
@@ -14,19 +15,22 @@ const (
 )
 
 type SettlementLog struct {
-	ID          int64           `json:"id"`
-	UserID      int             `json:"user_id"`
-	CreatedAt   int64           `json:"created_at"`
-	Type        int             `json:"type"`
-	ModelName   string          `json:"model_name"`
-	Quota       int64           `json:"quota"`
-	ChannelID   int             `json:"channel"`
-	TokenID     int             `json:"token_id"`
-	RequestID   string          `json:"request_id"`
-	OtherText   string          `json:"other"`
-	Other       json.RawMessage `json:"-"`
-	TaskID      string          `json:"-"`
-	CacheTokens int64           `json:"-"`
+	ID               int64           `json:"id"`
+	UserID           int             `json:"user_id"`
+	CreatedAt        int64           `json:"created_at"`
+	Type             int             `json:"type"`
+	ModelName        string          `json:"model_name"`
+	Quota            int64           `json:"quota"`
+	ChannelID        int             `json:"channel"`
+	TokenID          int             `json:"token_id"`
+	RequestID        string          `json:"request_id"`
+	OtherText        string          `json:"other"`
+	PromptTokens     int64           `json:"prompt_tokens"`
+	CompletionTokens int64           `json:"completion_tokens"`
+	TotalTokens      int64           `json:"total_tokens"`
+	Other            json.RawMessage `json:"-"`
+	TaskID           string          `json:"-"`
+	CacheTokens      int64           `json:"-"`
 }
 
 type settlementLogPage struct {
@@ -72,14 +76,39 @@ func decodeSettlementLogPage(data json.RawMessage) (settlementLogPage, error) {
 			item.Other = json.RawMessage(`{}`)
 		}
 		var metadata struct {
-			TaskID      string `json:"task_id"`
-			CacheTokens int64  `json:"cache_tokens"`
+			TaskID           string `json:"task_id"`
+			CacheTokens      int64  `json:"cache_tokens"`
+			PromptTokens     int64  `json:"prompt_tokens"`
+			CompletionTokens int64  `json:"completion_tokens"`
+			TotalTokens      int64  `json:"total_tokens"`
 		}
 		_ = json.Unmarshal(item.Other, &metadata)
 		item.TaskID = metadata.TaskID
 		item.CacheTokens = metadata.CacheTokens
+		item.Other = mergeSettlementTokenMetadata(item.Other, item.PromptTokens, item.CompletionTokens, item.TotalTokens, item.CacheTokens)
 	}
 	return page, nil
+}
+
+func mergeSettlementTokenMetadata(raw json.RawMessage, prompt, completion, total, cache int64) json.RawMessage {
+	metadata := map[string]any{}
+	if len(raw) > 0 && json.Valid(raw) {
+		_ = json.Unmarshal(raw, &metadata)
+	}
+	for key, value := range map[string]int64{
+		"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": total, "cache_tokens": cache,
+	} {
+		if value > 0 {
+			if _, exists := metadata[key]; !exists {
+				metadata[key] = strconv.FormatInt(value, 10)
+			}
+		}
+	}
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return encoded
 }
 
 func settlementWindow(lastSyncedThrough int64, now time.Time) (int64, int64) {

@@ -143,8 +143,21 @@ WHERE merchant_channel_id = $1
 	if err != nil || len(market) != 1 || market[0].ChannelCount != 1 {
 		t.Fatalf("降级渠道应作为可用渠道展示：报价=%+v，错误=%v", market, err)
 	}
+	lastCalledAt := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Second)
+	if _, err := database.ExecContext(ctx, `
+INSERT INTO settlement_sources
+    (newapi_log_id, newapi_user_id, source_created_at, source_type, model_name,
+     newapi_channel_id, newapi_token_id, request_id, gross_quota, other, status,
+     merchant_profile_id, offer_version_id, offer_channel_alias_id, merchant_quota,
+     platform_quota, processed_at)
+VALUES (9001, 21, $1, 2, $2, 41, 9, 'req-merchant-stats', 1000,
+        '{"prompt_tokens":"2000000000","completion_tokens":"600000000"}'::jsonb,
+        'settled', $3, $4, $5, 900, 100, now())
+`, lastCalledAt, offer.Aliases[0].InternalAlias, merchantID, offer.ID, offer.Aliases[0].ID); err != nil {
+		t.Fatalf("创建商户调用统计来源：%v", err)
+	}
 	merchantOffers, err := store.ListMerchantOffers(ctx, 7)
-	if err != nil || len(merchantOffers) != 1 || merchantOffers[0].ChannelCount != 1 || len(merchantOffers[0].Channels) != 1 || len(merchantOffers[0].PriceTiers) != 1 || merchantOffers[0].PriceTiers[0].OutputPriceMicros == nil || *merchantOffers[0].PriceTiers[0].OutputPriceMicros != 3_456_000 {
+	if err != nil || len(merchantOffers) != 1 || merchantOffers[0].ChannelCount != 1 || merchantOffers[0].CallCount != 1 || merchantOffers[0].TokenUsage != 2_600_000_000 || merchantOffers[0].LastCalledAt == nil || !merchantOffers[0].LastCalledAt.Equal(lastCalledAt) || len(merchantOffers[0].Channels) != 1 || len(merchantOffers[0].PriceTiers) != 1 || merchantOffers[0].PriceTiers[0].OutputPriceMicros == nil || *merchantOffers[0].PriceTiers[0].OutputPriceMicros != 3_456_000 {
 		t.Fatalf("商户折后价格=%+v，错误=%v", merchantOffers, err)
 	}
 
@@ -204,5 +217,16 @@ SELECT state, next_probe_at FROM channel_health WHERE merchant_channel_id = $1
 	}
 	if state != "healthy" || nextProbe.Valid {
 		t.Fatalf("探活恢复不正确：状态=%s 下次探活=%v", state, nextProbe)
+	}
+	repricedOffer, err := store.CreateOffer(ctx, CreateOfferCommand{UserID: 7, CanonicalModelID: model.ID, MultiplierBPS: 8500})
+	if err != nil {
+		t.Fatalf("创建调价报价：%v", err)
+	}
+	if err := store.ActivateOffer(ctx, repricedOffer.ID); err != nil {
+		t.Fatalf("激活调价报价：%v", err)
+	}
+	merchantOffers, err = store.ListMerchantOffers(ctx, 7)
+	if err != nil || len(merchantOffers) != 1 || merchantOffers[0].OfferID != repricedOffer.ID || merchantOffers[0].MultiplierBPS != 8500 || merchantOffers[0].CallCount != 1 || merchantOffers[0].TokenUsage != 2_600_000_000 || merchantOffers[0].LastCalledAt == nil || !merchantOffers[0].LastCalledAt.Equal(lastCalledAt) {
+		t.Fatalf("调价后商户调用统计丢失：报价=%+v，错误=%v", merchantOffers, err)
 	}
 }

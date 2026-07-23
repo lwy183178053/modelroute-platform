@@ -55,7 +55,7 @@ async function captureSet(viewport, suffix) {
       logs: { page: 1, page_size: 20, total: 1, items: [{ id: 901, created_at: 1784692800, type: 2, model_name: 'gpt-4o-mini', quota: 500000, prompt_tokens: 2400, completion_tokens: 680, token_name: '生产主密钥', request_id: 'req-user-1001', other: '{"cache_tokens":1200}' }] },
     } });
     if (url.pathname === '/api/merchant/channels') return fulfill({ success: true, data: { merchant: { user_id: 1, merchant_name: 'ModelRoute 官方', merchant_status: 'active', is_merchant: true }, items: [{ id: 51, user_id: 1, merchant_name: 'ModelRoute 官方', review_id: 21, channel_name: 'OpenAI 主线路', matched_models: ['gpt-4o-mini'], adapter_type: 'openai_compatible', base_url: 'https://api.merchant.example', credential_fingerprint: 'a1b2c3...d4e5f6', status: 'active', health_state: 'healthy', created_at: '2026-07-22T14:00:00Z' }], reviews: [{ id: 21, user_id: 1, channel_name: 'OpenAI 主线路', adapter_type: 'openai_compatible', base_url: 'https://api.merchant.example', status: 'approved', credential_configured: false, created_at: '2026-07-22T14:00:00Z' }] } });
-    if (url.pathname === '/api/merchant/offers' || url.pathname === '/api/merchant/health') return fulfill({ success: true, data: [{ offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 12000, price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 180000, output_price_micros: 720000, cache_read_price_micros: 90000, cache_write_price_micros: 240000 }], offer_status: 'active', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200, channels: [{ merchant_channel_id: 51, channel_name: 'OpenAI 主线路', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] }] });
+    if (url.pathname === '/api/merchant/offers' || url.pathname === '/api/merchant/health') return fulfill({ success: true, data: [{ offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', model: 'gpt-4o-mini', protocol: 'chat_completions', multiplier_bps: 12000, call_count: 32400, token_usage: 2600000000, last_called_at: new Date(Date.now() - 10 * 60_000).toISOString(), price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 180000, output_price_micros: 720000, cache_read_price_micros: 90000, cache_write_price_micros: 240000 }], offer_status: 'active', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200, channels: [{ merchant_channel_id: 51, channel_name: 'OpenAI 主线路', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200 }] }] });
     if (url.pathname === '/api/merchant/balance') return fulfill({ success: true, data: { merchant_id: 31, available_quota: 9000000, frozen_quota: 2500000, lifetime_earned_quota: 14000000, lifetime_refunded_quota: 500000, lifetime_paid_quota: 2000000 } });
     if (url.pathname === '/api/merchant/ledger') return fulfill({ success: true, data: { page: 1, page_size: 50, total: 2, items: [
       { id: 81, merchant_id: 31, entry_type: 'earning', available_delta: 900000, frozen_delta: 0, available_after: 9000000, frozen_after: 2500000, description: '模型调用结算', newapi_log_id: 1001, source_type: 2, model_name: 'gpt-4o-mini', gross_quota: 1000000, created_at: '2026-07-22T15:00:00Z' },
@@ -185,7 +185,10 @@ async function captureSet(viewport, suffix) {
   await openNavigation(page, '商户中心');
   const merchantSidebar = page.getByRole('complementary', { name: '商户功能' });
   await merchantSidebar.getByRole('button', { name: '模型报价', exact: true }).click();
-  await page.getByText('0.18 输入 / 0.72 输出 / 百万 Token').waitFor();
+  for (const label of ['调用次数', 'Token 用量', '最后调用']) await page.getByRole('columnheader', { name: label, exact: true }).waitFor();
+  await page.getByText('32.4K', { exact: true }).waitFor();
+  await page.getByText('2.6B', { exact: true }).waitFor();
+  await page.getByText('10分钟前', { exact: true }).waitFor();
   await verifyLayout(page, `merchant-offers-${suffix}`);
   path = `${outputDir}merchant-offers-${suffix}.png`;
   await page.screenshot({ path, fullPage: true });

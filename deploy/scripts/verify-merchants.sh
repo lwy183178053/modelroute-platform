@@ -207,7 +207,7 @@ model = next(
     item
     for item in models["data"]
     if item.get("status") == "active"
-    and item.get("protocol") in {"chat_completions", "responses"}
+    and item.get("price", {}).get("price_kind") == "text"
 )
 user_id = int(sys.argv[2])
 stamp = int(time.time())
@@ -237,15 +237,13 @@ with open(sys.argv[3], "w", encoding="utf-8") as output:
     json.dump(channel_test, output)
 with open(sys.argv[4], "w", encoding="utf-8") as output:
     json.dump(payload, output, ensure_ascii=False)
-protocol = model["protocol"]
-assert protocol in {"chat_completions", "responses"}
 sql = f"""
 INSERT INTO merchant_channel_tests
     (newapi_user_id, canonical_model_id, base_url, credential_fingerprint,
      adapter_type, capabilities, latency_ms, receipt_token_hash, expires_at)
 VALUES
     ({user_id}, {int(model['id'])}, '{base_url}', '{credential_fingerprint}',
-     'openai_compatible', '["{protocol}"]'::jsonb, 1, '{receipt_token_hash}',
+     'openai_compatible', '["text"]'::jsonb, 1, '{receipt_token_hash}',
      now() + interval '15 minutes');
 """
 with open(sys.argv[5], "w", encoding="utf-8") as output:

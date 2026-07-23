@@ -7,10 +7,6 @@ const healthNames = {
   pending: '待探测', healthy: '健康', degraded: '降级', cooling: '冷却', recovering: '恢复中', disabled: '已停用',
 };
 
-const protocolNames = {
-  chat_completions: '聊天补全', responses: 'Responses', image_generation: '图片生成',
-};
-
 function formatAvailability(value) {
   return `${(Number(value || 0) / 10_000).toFixed(2)}%`;
 }
@@ -27,13 +23,13 @@ function formatMultiplier(value) {
 }
 
 function formatCacheHit(offer) {
-  if (offer.protocol === 'image_generation') return '-';
+  if (offer.image_prices?.length) return '-';
   if (!offer.cache_weight_ready) return '样本不足';
   return `${(Number(offer.cache_hit_ppm || 0) / 10_000).toFixed(2)}%`;
 }
 
 function offerInputPrice(offer) {
-  if (offer.protocol === 'image_generation') {
+  if (offer.image_prices?.length) {
     return Math.min(...(offer.image_prices || []).map((item) => Number(item.price_micros)), Number.MAX_SAFE_INTEGER);
   }
   return Number(offer.price_tiers?.[0]?.input_price_micros ?? Number.MAX_SAFE_INTEGER);
@@ -43,7 +39,6 @@ export default function MarketView({ navigate }) {
   const [models, setModels] = useState([]);
   const [marketOffers, setMarketOffers] = useState([]);
   const [provider, setProvider] = useState('全部');
-  const [protocol, setProtocol] = useState('all');
   const [sort, setSort] = useState('stability');
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
@@ -74,7 +69,6 @@ export default function MarketView({ navigate }) {
       if (Number(offer.channel_count || 0) <= 0) return false;
       const model = modelMap.get(offer.model);
       return (provider === '全部' || model?.provider === provider)
-        && (protocol === 'all' || offer.protocol === protocol)
         && `${offer.model}${offer.merchant_name}${offer.channel_name}`.toLowerCase().includes(query.trim().toLowerCase());
     });
     return [...filtered].sort((left, right) => {
@@ -82,9 +76,9 @@ export default function MarketView({ navigate }) {
       if (sort === 'availability') return right.availability_ppm - left.availability_ppm;
       return right.availability_ppm - left.availability_ppm || left.ttft_p95_ms - right.ttft_p95_ms || offerInputPrice(left) - offerInputPrice(right);
     });
-  }, [marketOffers, modelMap, protocol, provider, query, sort]);
+  }, [marketOffers, modelMap, provider, query, sort]);
 
-  useEffect(() => { setPage(1); }, [provider, protocol, sort, query]);
+  useEffect(() => { setPage(1); }, [provider, sort, query]);
 
   const visibleOffers = offers.slice((page - 1) * pageSize, page * pageSize);
 
@@ -117,9 +111,6 @@ export default function MarketView({ navigate }) {
             <Search size={17} />
             <TextInput aria-label="搜索模型或商户" placeholder="搜索模型、商户或渠道" value={query} onChange={(event) => setQuery(event.target.value)} />
           </label>
-          <Select aria-label="接口协议" value={protocol} onChange={(event) => setProtocol(event.target.value)}>
-            <option value="all">全部协议</option><option value="chat_completions">聊天补全</option><option value="responses">Responses</option><option value="image_generation">图片生成</option>
-          </Select>
           <Select aria-label="排序方式" value={sort} onChange={(event) => setSort(event.target.value)}>
             <option value="stability">稳定性优先</option><option value="price">价格从低到高</option><option value="availability">可用率从高到低</option>
           </Select>
@@ -135,7 +126,7 @@ export default function MarketView({ navigate }) {
 
         <div className="table-wrap market-table-wrap">
           <table className="data-table market-table">
-            <thead><tr><th>ID</th><th>排名</th><th>模型与商户</th><th>协议</th><th>状态</th><th>可用率</th><th>P95 首字</th><th>缓存命中率</th><th>调用次数</th><th>Token 用量</th><th>最后调用</th><th>倍率</th><th>可用渠道</th></tr></thead>
+            <thead><tr><th>ID</th><th>排名</th><th>模型与商户</th><th>状态</th><th>可用率</th><th>P95 首字</th><th>缓存命中率</th><th>调用次数</th><th>Token 用量</th><th>最后调用</th><th>倍率</th><th>可用渠道</th></tr></thead>
             <tbody>
               {visibleOffers.map((offer, index) => {
                 const model = modelMap.get(offer.model);
@@ -143,7 +134,6 @@ export default function MarketView({ navigate }) {
                   <td><code>{offer.offer_id}</code></td>
                   <td><span className={`rank rank-${Math.min((page - 1) * pageSize + index + 1, 5)}`}>{(page - 1) * pageSize + index + 1}</span></td>
                   <td><div className="model-cell"><ProviderLogo provider={model?.provider || ''} size={23} /><div><strong>{offer.model}</strong><span>{offer.merchant_name}</span></div></div></td>
-                  <td>{protocolNames[offer.protocol] || offer.protocol}</td>
                   <td><Status>{healthNames[offer.health_state] || offer.health_state}</Status></td>
                   <td><strong className="success-text">{formatAvailability(offer.availability_ppm)}</strong></td>
                   <td>{formatLatency(offer.ttft_p95_ms)}</td>

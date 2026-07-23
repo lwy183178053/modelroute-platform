@@ -456,8 +456,8 @@ func seedSettlementOffer(t *testing.T, database *sql.DB, newAPIChannelID int, al
 	t.Helper()
 	var modelID, priceID int64
 	if err := database.QueryRow(`
-INSERT INTO canonical_models (public_name, provider, protocol)
-VALUES ('gpt-test', 'OpenAI', 'chat_completions') RETURNING id
+INSERT INTO canonical_models (public_name, provider)
+VALUES ('gpt-test', 'OpenAI') RETURNING id
 `).Scan(&modelID); err != nil {
 		t.Fatal(err)
 	}

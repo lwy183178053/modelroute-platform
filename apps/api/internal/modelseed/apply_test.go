@@ -30,7 +30,7 @@ func (s *repositoryStub) CreateCanonicalModel(_ context.Context, command httpapi
 	s.nextModelID++
 	model := httpapi.CanonicalModel{
 		ID: commandID(s.nextModelID), PublicName: command.PublicName, Provider: command.Provider,
-		Protocol: command.Protocol, Status: "active", Price: command.Price,
+		Status: "active", Price: command.Price,
 	}
 	model.Price.Version = 1
 	s.created = append(s.created, command)

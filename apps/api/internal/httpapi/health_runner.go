@@ -98,14 +98,10 @@ func (r *HealthRunner) executeProbe(ctx context.Context, probe HealthProbe, key 
 
 func probeRequest(probe HealthProbe) (string, []byte) {
 	model := strings.ReplaceAll(probe.InternalAlias, `"`, "")
-	switch probe.Protocol {
-	case "chat_completions":
-		return "/v1/chat/completions", []byte(fmt.Sprintf(`{"model":"%s","messages":[{"role":"user","content":"ping"}],"max_tokens":1,"stream":false}`, model))
-	case "image_generation":
+	if probe.PriceKind == "image" {
 		return "/v1/images/generations", []byte(fmt.Sprintf(`{"model":"%s","prompt":"hi","n":1,"quality":"auto","size":"auto"}`, model))
-	default:
-		return "/v1/responses", []byte(fmt.Sprintf(`{"model":"%s","input":"ping","max_output_tokens":1}`, model))
 	}
+	return "/v1/chat/completions", []byte(fmt.Sprintf(`{"model":"%s","messages":[{"role":"user","content":"ping"}],"max_tokens":1,"stream":false}`, model))
 }
 
 func parseRetryAfter(raw string, now time.Time) time.Duration {

@@ -6,7 +6,6 @@
     {
       "public_name": "gpt-5.6-sol",
       "provider": "OpenAI",
-      "protocol": "responses",
       "evidence_url": "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
       "price": { "tiers": [
         { "minimum_input_tokens": 0, "maximum_input_tokens": 272000, "input_price_micros": 5000000, "output_price_micros": 30000000, "cache_read_price_micros": 500000 },
@@ -16,7 +15,6 @@
     {
       "public_name": "gpt-5.6-terra",
       "provider": "OpenAI",
-      "protocol": "responses",
       "evidence_url": "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
       "price": { "tiers": [
         { "minimum_input_tokens": 0, "maximum_input_tokens": 272000, "input_price_micros": 2500000, "output_price_micros": 15000000, "cache_read_price_micros": 250000 },
@@ -26,7 +24,6 @@
     {
       "public_name": "gpt-5.6-luna",
       "provider": "OpenAI",
-      "protocol": "responses",
       "evidence_url": "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
       "price": { "tiers": [
         { "minimum_input_tokens": 0, "maximum_input_tokens": 272000, "input_price_micros": 1000000, "output_price_micros": 6000000, "cache_read_price_micros": 100000 },
@@ -36,7 +33,6 @@
     {
       "public_name": "gpt-5.5",
       "provider": "OpenAI",
-      "protocol": "responses",
       "evidence_url": "https://developers.openai.com/api/docs/models/gpt-5.5",
       "price": { "tiers": [
         { "minimum_input_tokens": 0, "maximum_input_tokens": 272000, "input_price_micros": 5000000, "output_price_micros": 30000000, "cache_read_price_micros": 500000 },
@@ -46,7 +42,6 @@
     {
       "public_name": "gpt-5.4",
       "provider": "OpenAI",
-      "protocol": "responses",
       "evidence_url": "https://developers.openai.com/api/docs/models/gpt-5.4",
       "price": { "tiers": [
         { "minimum_input_tokens": 0, "maximum_input_tokens": 272000, "input_price_micros": 2500000, "output_price_micros": 15000000, "cache_read_price_micros": 250000 },
@@ -56,7 +51,6 @@
     {
       "public_name": "gpt-image-1",
       "provider": "OpenAI",
-      "protocol": "image_generation",
       "evidence_url": "https://developers.openai.com/api/docs/guides/image-generation#image-generation-costs",
       "price": { "image_prices": [
         { "quality": "low", "size": "1024x1024", "price_micros": 11000 },
@@ -73,7 +67,6 @@
     {
       "public_name": "gpt-image-1.5",
       "provider": "OpenAI",
-      "protocol": "image_generation",
       "evidence_url": "https://developers.openai.com/api/docs/guides/image-generation#image-generation-costs",
       "price": { "image_prices": [
         { "quality": "low", "size": "1024x1024", "price_micros": 9000 },
@@ -90,7 +83,6 @@
     {
       "public_name": "gpt-image-2",
       "provider": "OpenAI",
-      "protocol": "image_generation",
       "evidence_url": "https://developers.openai.com/api/docs/guides/image-generation#image-generation-costs",
       "price": { "image_prices": [
         { "quality": "low", "size": "1024x1024", "price_micros": 6000 },
@@ -107,7 +99,6 @@
     {
       "public_name": "claude-opus-4-8",
       "provider": "Anthropic",
-      "protocol": "chat_completions",
       "evidence_url": "https://platform.claude.com/docs/en/about-claude/pricing",
       "price": { "tiers": [
         { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 5000000, "output_price_micros": 25000000, "cache_read_price_micros": 500000, "cache_write_price_micros": 6250000 }
@@ -116,7 +107,6 @@
     {
       "public_name": "claude-opus-4-7",
       "provider": "Anthropic",
-      "protocol": "chat_completions",
       "evidence_url": "https://platform.claude.com/docs/en/about-claude/pricing",
       "price": { "tiers": [
         { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 5000000, "output_price_micros": 25000000, "cache_read_price_micros": 500000, "cache_write_price_micros": 6250000 }
@@ -125,7 +115,6 @@
     {
       "public_name": "claude-opus-4-6",
       "provider": "Anthropic",
-      "protocol": "chat_completions",
       "evidence_url": "https://platform.claude.com/docs/en/about-claude/pricing",
       "price": { "tiers": [
         { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 5000000, "output_price_micros": 25000000, "cache_read_price_micros": 500000, "cache_write_price_micros": 6250000 }
@@ -134,7 +123,6 @@
     {
       "public_name": "claude-sonnet-5",
       "provider": "Anthropic",
-      "protocol": "chat_completions",
       "evidence_url": "https://platform.claude.com/docs/en/about-claude/pricing",
       "price": { "tiers": [
         { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 3000000, "output_price_micros": 15000000, "cache_read_price_micros": 300000, "cache_write_price_micros": 3750000 }
@@ -143,7 +131,6 @@
     {
       "public_name": "gemini-3.1-pro-preview",
       "provider": "Gemini",
-      "protocol": "chat_completions",
       "evidence_url": "https://ai.google.dev/gemini-api/docs/pricing",
       "price": { "tiers": [
         { "minimum_input_tokens": 0, "maximum_input_tokens": 200000, "input_price_micros": 2000000, "output_price_micros": 12000000, "cache_read_price_micros": 200000 },
@@ -153,7 +140,6 @@
     {
       "public_name": "gemini-3-flash-preview",
       "provider": "Gemini",
-      "protocol": "chat_completions",
       "evidence_url": "https://ai.google.dev/gemini-api/docs/pricing",
       "price": { "tiers": [
         { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 500000, "output_price_micros": 3000000, "cache_read_price_micros": 50000 }
@@ -162,7 +148,6 @@
     {
       "public_name": "gemini-2.5-pro",
       "provider": "Gemini",
-      "protocol": "chat_completions",
       "evidence_url": "https://ai.google.dev/gemini-api/docs/pricing",
       "price": { "tiers": [
         { "minimum_input_tokens": 0, "maximum_input_tokens": 200000, "input_price_micros": 1250000, "output_price_micros": 10000000, "cache_read_price_micros": 125000 },
@@ -172,7 +157,6 @@
     {
       "public_name": "gemini-2.5-flash",
       "provider": "Gemini",
-      "protocol": "chat_completions",
       "evidence_url": "https://ai.google.dev/gemini-api/docs/pricing",
       "price": { "tiers": [
         { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 300000, "output_price_micros": 2500000, "cache_read_price_micros": 30000 }
@@ -181,7 +165,6 @@
     {
       "public_name": "gemini-2.5-flash-lite",
       "provider": "Gemini",
-      "protocol": "chat_completions",
       "evidence_url": "https://ai.google.dev/gemini-api/docs/pricing",
       "price": { "tiers": [
         { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 100000, "output_price_micros": 400000, "cache_read_price_micros": 10000 }
@@ -190,7 +173,6 @@
     {
       "public_name": "deepseek-v4-flash",
       "provider": "DeepSeek",
-      "protocol": "chat_completions",
       "evidence_url": "https://api-docs.deepseek.com/quick_start/pricing",
       "price": { "tiers": [
         { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 140000, "output_price_micros": 280000, "cache_read_price_micros": 2800 }
@@ -199,7 +181,6 @@
     {
       "public_name": "deepseek-v4-pro",
       "provider": "DeepSeek",
-      "protocol": "chat_completions",
       "evidence_url": "https://api-docs.deepseek.com/quick_start/pricing",
       "price": { "tiers": [
         { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 435000, "output_price_micros": 870000, "cache_read_price_micros": 3625 }
@@ -208,7 +189,6 @@
     {
       "public_name": "qwen-max",
       "provider": "Qwen",
-      "protocol": "chat_completions",
       "evidence_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
       "price": { "tiers": [
         { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 1600000, "output_price_micros": 6400000 }
@@ -217,7 +197,6 @@
     {
       "public_name": "kimi-k3",
       "provider": "Moonshot",
-      "protocol": "chat_completions",
       "evidence_url": "https://platform.kimi.com/docs/pricing/chat-k3",
       "price": { "tiers": [
         { "minimum_input_tokens": 0, "maximum_input_tokens": null, "input_price_micros": 20000000, "output_price_micros": 100000000, "cache_read_price_micros": 2000000 }

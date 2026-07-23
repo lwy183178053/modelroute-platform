@@ -2699,3 +2699,133 @@
 - `docs/账号与管理员接口.md`：删除旧路由商户接口说明。
 - `progress.md`：追加本轮实现、验证、文件清单和回滚点。
 - 回滚点：执行 `git revert <本轮提交哈希>` 可整体恢复固定路由实现；本轮未发布服务器。
+
+## 2026-07-24 - Task: 删除平台模型协议配置并复用核心协议处理
+
+### What was done
+
+- 标准模型目录删除接口协议和无实际用途的模型适配提示，只保留模型名称、厂商、状态与价格版本；文本或图片类型由价格结构唯一确定。
+- 文本模型统一允许 Chat Completions 与 Responses 入口进入同一条智能路由，平台只替换模型别名并保留原始请求入口，具体上游转发继续交给核心服务。
+- 模型市场删除协议筛选和协议列，商户渠道、上架模型、管理员渠道审核及模型管理删除协议和内部适配器展示。
+- 管理员创建模型改为选择文本 Token 或图片按张的计费类型；检测接口只接收价格类型，创建接口不再提交协议字段。
+- 模型种子、本地预览夹具和商户部署验收脚本同步使用价格类型，不再读取或生成模型协议字段。
+
+### Testing
+
+- `go test ./... -count=1`：通过，全部 Go 包测试无失败。
+- `go vet ./...`：通过，无静态检查问题。
+- `go build ./cmd/api ./cmd/worker`：通过，API 与 Worker 可构建。
+- 全新临时 PostgreSQL 17 执行 `go test ./internal/httpapi -run TestSQLRoutingStoreAgainstPostgres -count=1 -v`：通过，V2 空库迁移、模型创建、报价与路由查询完成真实数据库验证；临时容器已删除。
+- `npm.cmd run test:quota`：通过，动态额度单位专项测试正常。
+- `npm.cmd run test:ui`：通过，创建与检测请求不含协议字段，模型市场、商户渠道和管理员模型表均无协议列。
+- `npm.cmd run build`：通过，生产前端构建成功。
+- `npm.cmd run capture`：通过，桌面与移动端截图无横向溢出；人工查看模型市场、商户上架模型、管理员模型和移动渠道页均无重叠。
+- `python -m unittest discover -s deploy/tests -p 'test_*.py'`：通过，共 `27` 个部署测试。
+- `docker compose --env-file .env.example config --quiet`：通过，Compose 配置有效。
+- `git diff --check`：通过，无空白错误。
+
+### Notes
+
+- `apps/api/internal/httpapi/absolute_pricing.go`：按价格内容推导文本或图片类型并删除协议参数。
+- `apps/api/internal/httpapi/absolute_pricing_test.go`：覆盖无协议文本和图片价格校验。
+- `apps/api/internal/httpapi/channel_detector.go`：渠道检测能力改用价格类型。
+- `apps/api/internal/httpapi/channel_detector_test.go`：更新价格类型检测夹具。
+- `apps/api/internal/httpapi/channel_models.go`：上游模型匹配响应删除协议字段。
+- `apps/api/internal/httpapi/health_runner.go`：恢复探测按价格类型选择请求入口。
+- `apps/api/internal/httpapi/health_runner_test.go`：更新价格类型探测断言。
+- `apps/api/internal/httpapi/merchant_handlers.go`：管理员复检使用价格类型构造模型。
+- `apps/api/internal/httpapi/merchant_handlers_test.go`：更新商户检测和审批夹具。
+- `apps/api/internal/httpapi/merchant_store.go`：商户渠道查询和检测存储改为价格类型。
+- `apps/api/internal/httpapi/merchant_store_test.go`：更新商户存储 SQL 断言。
+- `apps/api/internal/httpapi/merchant_types.go`：商户审核内部字段由协议调整为价格类型。
+- `apps/api/internal/httpapi/overview_store_postgres_test.go`：更新真实数据库模型插入结构。
+- `apps/api/internal/httpapi/pricing_sync.go`：报价表达式生成按价格类型分支。
+- `apps/api/internal/httpapi/pricing_sync_test.go`：更新文本和图片同步测试。
+- `apps/api/internal/httpapi/routing_domain.go`：路由选择按价格类型应用缓存边界。
+- `apps/api/internal/httpapi/routing_domain_test.go`：更新图片路由选择夹具。
+- `apps/api/internal/httpapi/routing_handlers.go`：模型创建和检测接口删除协议输入。
+- `apps/api/internal/httpapi/routing_handlers_test.go`：覆盖模型接口不返回协议字段及检测价格类型。
+- `apps/api/internal/httpapi/routing_proxy.go`：文本模型共用 Chat 与 Responses 入口，图片模型保持图片入口。
+- `apps/api/internal/httpapi/routing_proxy_test.go`：覆盖同一文本路由的两个入口和图片入口保护。
+- `apps/api/internal/httpapi/routing_store.go`：标准模型、市场、报价和路由 SQL 删除协议与模型适配提示。
+- `apps/api/internal/httpapi/routing_store_postgres_test.go`：用文本价格类型完成空库路由集成验证。
+- `apps/api/internal/httpapi/routing_store_test.go`：更新模型创建与查询 SQL 夹具。
+- `apps/api/internal/httpapi/settlement_store_postgres_test.go`：更新历史调用关联的模型结构。
+- `apps/api/internal/migrations/migrate_test.go`：锁定 V2 基线不再包含模型协议和适配提示列。
+- `apps/api/internal/migrations/sql/000001_v2_baseline.sql`：删除标准模型协议和适配提示列。
+- `apps/api/internal/modelseed/apply.go`：种子导入按厂商和价格类型比对。
+- `apps/api/internal/modelseed/apply_test.go`：更新种子导入测试夹具。
+- `apps/api/internal/modelseed/catalog.go`：种子模型结构删除协议字段。
+- `apps/api/internal/modelseed/catalog_test.go`：覆盖无协议种子和价格类型推导。
+- `apps/api/internal/modelseed/data/2026-07-23-v2.json`：删除全部模型协议配置。
+- `apps/web/scripts/capture.mjs`：截图夹具删除模型协议字段。
+- `apps/web/scripts/ui-smoke.mjs`：增加协议列、筛选和请求字段删除断言。
+- `apps/web/src/Modals.jsx`：渠道检测结果不再显示内部适配器。
+- `apps/web/src/views/MarketView.jsx`：删除协议筛选和协议列。
+- `apps/web/src/views/MerchantView.jsx`：删除渠道协议列和上架模型协议副标题。
+- `apps/web/src/views/admin/AdminChannels.jsx`：管理员渠道列表不再显示内部适配器。
+- `apps/web/src/views/admin/AdminMerchants.jsx`：商户审核列表删除检测适配器列。
+- `apps/web/src/views/admin/AdminModels.jsx`：模型表单改为计费类型并删除协议列与协议请求字段。
+- `apps/web/artifacts/admin-announcements-desktop.png`：刷新当前管理员公告桌面验收图。
+- `apps/web/artifacts/admin-channels-desktop.png`：刷新无内部适配器的管理员渠道桌面验收图。
+- `apps/web/artifacts/admin-channels-mobile.png`：刷新无内部适配器的管理员渠道移动验收图。
+- `apps/web/artifacts/admin-desktop.png`：刷新当前管理后台桌面验收图。
+- `apps/web/artifacts/admin-image-price-desktop.png`：刷新图片计费类型桌面验收图。
+- `apps/web/artifacts/admin-mobile.png`：刷新当前管理后台移动验收图。
+- `apps/web/artifacts/admin-model-price-desktop.png`：刷新文本计费类型桌面验收图。
+- `apps/web/artifacts/admin-models-desktop.png`：刷新无协议列的管理员模型桌面验收图。
+- `apps/web/artifacts/admin-models-mobile.png`：刷新无协议列的管理员模型移动验收图。
+- `apps/web/artifacts/admin-redemptions-desktop.png`：刷新当前兑换码管理桌面验收图。
+- `apps/web/artifacts/admin-settings-desktop.png`：刷新当前平台设置桌面验收图。
+- `apps/web/artifacts/admin-settings-mobile.png`：刷新当前平台设置移动验收图。
+- `apps/web/artifacts/admin-usage-desktop.png`：刷新当前管理员调用记录桌面验收图。
+- `apps/web/artifacts/admin-withdrawals-desktop.png`：刷新当前提现审核桌面验收图。
+- `apps/web/artifacts/admin-withdrawals-mobile.png`：刷新当前提现审核移动验收图。
+- `apps/web/artifacts/announcement-panel-desktop.png`：刷新当前公告面板桌面验收图。
+- `apps/web/artifacts/announcement-panel-mobile.png`：刷新当前公告面板移动验收图。
+- `apps/web/artifacts/console-desktop.png`：刷新当前控制台桌面验收图。
+- `apps/web/artifacts/console-keys-desktop.png`：刷新当前密钥页面桌面验收图。
+- `apps/web/artifacts/console-mobile.png`：刷新当前控制台移动验收图。
+- `apps/web/artifacts/console-settings-desktop.png`：刷新当前账户设置桌面验收图。
+- `apps/web/artifacts/console-usage-desktop.png`：刷新当前用户调用记录桌面验收图。
+- `apps/web/artifacts/market-desktop.png`：刷新无协议筛选和协议列的市场桌面验收图。
+- `apps/web/artifacts/market-mobile.png`：刷新无协议筛选和协议列的市场移动验收图。
+- `apps/web/artifacts/merchant-channel-health-desktop.png`：刷新当前渠道健康详情桌面验收图。
+- `apps/web/artifacts/merchant-desktop.png`：刷新当前商户中心桌面验收图。
+- `apps/web/artifacts/merchant-mobile.png`：刷新当前商户中心移动验收图。
+- `apps/web/artifacts/merchant-offers-desktop.png`：刷新无协议副标题的上架模型桌面验收图。
+- `apps/web/artifacts/merchant-offers-mobile.png`：刷新无协议副标题的上架模型移动验收图。
+- `apps/web/artifacts/merchant-usage-desktop.png`：刷新当前商户调用记录桌面验收图。
+- `apps/web/artifacts/payment-config-desktop.png`：刷新当前支付设置桌面验收图。
+- `apps/web/artifacts/route-modal-desktop.png`：刷新当前智能路由桌面验收图。
+- `apps/web/artifacts/route-modal-mobile.png`：刷新当前智能路由移动验收图。
+- `apps/web/artifacts/withdrawal-modal-desktop.png`：刷新当前提现弹窗桌面验收图。
+- `apps/web/artifacts/withdrawal-modal-mobile.png`：刷新当前提现弹窗移动验收图。
+- `deploy/scripts/verify-merchants.sh`：商户验收按价格类型选择文本模型。
+- `docs/V2数据基线.md`：记录标准模型不保存协议和适配提示。
+- `docs/商户与渠道审核接口.md`：明确内部适配结果只供服务端使用。
+- `docs/官方模型种子.md`：将协议目录改为文本或图片价格类型目录。
+- `docs/模型报价路由与健康.md`：记录入口透传和核心协议处理边界。
+- `docs/绝对价格与分层计费.md`：同步无协议模型目录的计费口径。
+- `docs/账号与管理员接口.md`：删除模型市场协议筛选说明。
+- `data/ui-preview/vite.config.mjs`：本地预览夹具删除模型协议和模型适配字段；该文件位于 Git 忽略目录。
+- `progress.md`：追加本轮实现、验证、文件清单和回滚点。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可整体恢复平台模型协议字段、界面和验收脚本；本轮未发布服务器。本地预览夹具可重新从当前种子生成。
+
+## 2026-07-24 - Task: 校准本地预览路由数据
+
+### What was done
+
+- 本地预览路由数据删除已废弃的固定路由模式、商户名单和商户选择接口，与当前单一智能路由接口保持一致。
+
+### Testing
+
+- 请求 `GET /api/routing-policies`：通过，返回数据不含 `mode` 和 `merchant_ids`。
+- 请求 `GET /api/routing-merchants`：通过，旧接口返回 `404`。
+- Playwright 直接访问 `http://127.0.0.1:57723/`：通过，模型市场无协议控件，路由页无固定路由和商户选择，无横向溢出或页面运行错误。
+
+### Notes
+
+- `data/ui-preview/vite.config.mjs`：清理旧固定路由预览数据和接口；该文件位于 Git 忽略目录，仅用于当前本地预览。
+- `progress.md`：追加本地预览校准和浏览器验收证据。
+- 回滚方式：将 `data/ui-preview/vite.config.mjs` 的路由样例重置为当前提交的预览配置；本轮未改动服务器。

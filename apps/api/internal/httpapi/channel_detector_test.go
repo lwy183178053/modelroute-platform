@@ -51,13 +51,13 @@ func TestNewAPIChannelDetectorFallsBackAndAlwaysDeletesTemporaryChannels(t *test
 	admin := &channelDetectorAdminStub{}
 	detector := NewNewAPIChannelDetector(admin)
 	outcome, err := detector.Test(context.Background(), ChannelTestRequest{
-		Model:   CanonicalModel{ID: 61, PublicName: "claude-fable-5", Provider: "Anthropic", Protocol: "responses"},
+		Model:   CanonicalModel{ID: 61, PublicName: "claude-fable-5", Provider: "Anthropic", Price: OfficialPrice{PriceKind: "text"}},
 		BaseURL: "https://api.merchant.example", APIKey: "sk-upstream-secret",
 	})
 	if err != nil {
 		t.Fatalf("检测失败：%v", err)
 	}
-	if outcome.AdapterType != "openai_compatible" || len(outcome.Capabilities) != 1 || outcome.Capabilities[0] != "responses" {
+	if outcome.AdapterType != "openai_compatible" || len(outcome.Capabilities) != 1 || outcome.Capabilities[0] != "text" {
 		t.Fatalf("检测结果=%+v", outcome)
 	}
 	if fmt.Sprint(admin.createdTypes) != "[14 1]" {

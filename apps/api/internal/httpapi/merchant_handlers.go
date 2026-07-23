@@ -347,7 +347,7 @@ func (s *server) adminVerifyReviewID(w http.ResponseWriter, r *http.Request, rev
 	outcome, verifyErr := s.services.ChannelTests.Test(r.Context(), ChannelTestRequest{
 		Model: CanonicalModel{
 			ID: review.CanonicalModelID, PublicName: review.Model, Provider: review.Provider,
-			Protocol: review.Protocol, Status: "active",
+			Status: "active", Price: OfficialPrice{PriceKind: review.PriceKind},
 		},
 		BaseURL: review.BaseURL, APIKey: string(credential),
 	})

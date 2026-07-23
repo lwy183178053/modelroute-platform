@@ -38,7 +38,7 @@ func (d *NewAPIChannelDetector) Test(ctx context.Context, request ChannelTestReq
 			continue
 		}
 		return ChannelTestOutcome{
-			AdapterType: adapter.name, Capabilities: []string{request.Model.Protocol}, LatencyMS: latency,
+			AdapterType: adapter.name, Capabilities: []string{request.Model.Price.PriceKind}, LatencyMS: latency,
 		}, nil
 	}
 	return ChannelTestOutcome{}, fmt.Errorf("全部适配器检测失败：%w", errors.Join(attempts...))

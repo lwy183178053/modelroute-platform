@@ -144,7 +144,8 @@ func TestSmartCacheFloorTreatsInsufficientSampleAsNeutral(t *testing.T) {
 			}
 		})
 	}
-	if !routeCandidateMeetsCacheFloor(selection, RouteCandidate{Protocol: "image_generation"}) {
+	selection.PriceKind = "image"
+	if !routeCandidateMeetsCacheFloor(selection, RouteCandidate{}) {
 		t.Fatal("图片模型不应应用缓存命中率阈值")
 	}
 }

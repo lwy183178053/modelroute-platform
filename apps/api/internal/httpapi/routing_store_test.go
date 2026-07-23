@@ -164,17 +164,17 @@ func TestResolveRouteKeepsInsufficientCacheSampleAndFiltersKnownLowValue(t *test
 	fingerprint := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 	mock.ExpectQuery(regexp.QuoteMeta("JOIN routing_policies p ON p.id = b.routing_policy_id")).
 		WithArgs(fingerprint, "gpt-5.6").
-		WillReturnRows(sqlmock.NewRows([]string{"binding_id", "policy_id", "model_id", "priority", "protocol", "minimum_cache_hit_ppm"}).
-			AddRow(81, 91, 61, "cache", "responses", 600_000))
+		WillReturnRows(sqlmock.NewRows([]string{"binding_id", "policy_id", "model_id", "priority", "price_kind", "minimum_cache_hit_ppm"}).
+			AddRow(81, 91, 61, "cache", "text", 600_000))
 	mock.ExpectQuery(regexp.QuoteMeta("WITH merchant_metrics AS")).
 		WithArgs(int64(91), int64(61)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"offer_id", "alias_id", "merchant_id", "channel_id", "upstream_channel_id", "model_id", "internal_alias",
-			"public_name", "protocol", "multiplier_bps", "health_state", "availability_ppm", "average_ttft_ms",
+			"public_name", "multiplier_bps", "health_state", "availability_ppm", "average_ttft_ms",
 			"request_count", "cache_hit_ppm", "prompt_tokens", "cache_weight_ready", "merchant_cache_hit_ppm", "merchant_cache_weight_ready",
 		}).
-			AddRow(41, 81, 31, 51, 71, 61, "mkt-o41-c51", "gpt-5.6", "responses", 8000, "healthy", 990000, 800, 100, 900000, 999999, false, 900000, false).
-			AddRow(42, 82, 32, 52, 72, 61, "mkt-o42-c52", "gpt-5.6", "responses", 8500, "healthy", 980000, 900, 100, 500000, 2000000, true, 500000, true))
+			AddRow(41, 81, 31, 51, 71, 61, "mkt-o41-c51", "gpt-5.6", 8000, "healthy", 990000, 800, 100, 900000, 999999, false, 900000, false).
+			AddRow(42, 82, 32, 52, 72, 61, "mkt-o42-c52", "gpt-5.6", 8500, "healthy", 980000, 900, 100, 500000, 2000000, true, 500000, true))
 
 	selection, err := NewSQLRoutingStore(database).ResolveRoute(context.Background(), fingerprint, "gpt-5.6")
 	if err != nil || len(selection.Candidates) != 1 || selection.Candidates[0].MerchantID != 31 {
@@ -229,8 +229,8 @@ func TestCreateCanonicalModelStoresAbsolutePriceAndTiersAtomically(t *testing.T)
 	cacheWrite := int64(3_750_000)
 	price := normalizeOfficialPrice(OfficialPrice{Tiers: []PriceTier{{MinimumInputTokens: 0, MaximumInputTokens: &maximum, InputPriceMicros: 3_000_000, OutputPriceMicros: &output, CacheReadPriceMicros: &cacheRead, CacheWritePriceMicros: &cacheWrite}, {MinimumInputTokens: 200_001, InputPriceMicros: 6_000_000, OutputPriceMicros: &output}}})
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO canonical_models (public_name, provider, protocol, adapter_hint, status)")).
-		WithArgs("claude-sonnet", "Anthropic", "responses", "auto", "active").
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO canonical_models (public_name, provider, status)")).
+		WithArgs("claude-sonnet", "Anthropic", "active").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "created_at"}).AddRow(61, "active", createdAt))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO official_price_versions")).
 		WithArgs(int64(61), 1, "text", 1).
@@ -247,7 +247,7 @@ func TestCreateCanonicalModelStoresAbsolutePriceAndTiersAtomically(t *testing.T)
 
 	store := NewSQLRoutingStore(database)
 	model, err := store.CreateCanonicalModel(context.Background(), CreateCanonicalModelCommand{
-		PublicName: "claude-sonnet", Provider: "Anthropic", Protocol: "responses", AdminID: 1, Price: price,
+		PublicName: "claude-sonnet", Provider: "Anthropic", AdminID: 1, Price: price,
 	})
 	if err != nil || model.ID != 61 || model.Price.ID != 71 || len(model.Price.Tiers) != 2 {
 		t.Fatalf("创建模型=%+v，错误=%v", model, err)
@@ -265,8 +265,8 @@ func TestCreateOfferRequiresOwnedActiveChannelAndCurrentOfficialPrice(t *testing
 	defer database.Close()
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT mp.id, cm.current_official_price_version_id")).
-		WithArgs(7, int64(61)).WillReturnRows(sqlmock.NewRows([]string{"merchant_id", "price_id", "public_name", "protocol", "previous_id", "version"}).
-		AddRow(31, 71, "gpt-5.6", "responses", 40, 2))
+		WithArgs(7, int64(61)).WillReturnRows(sqlmock.NewRows([]string{"merchant_id", "price_id", "public_name", "price_kind", "previous_id", "version"}).
+		AddRow(31, 71, "gpt-5.6", "text", 40, 2))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, newapi_channel_id, channel_name FROM merchant_channels")).
 		WithArgs(int64(31), int64(61)).WillReturnRows(sqlmock.NewRows([]string{"id", "newapi_channel_id", "channel_name"}).
 		AddRow(51, 41, "主线路").AddRow(52, 42, "备用线路"))
@@ -358,8 +358,8 @@ func TestAliasPricesReturnsEverySyncedOrPendingImmutableAlias(t *testing.T) {
 	defer database.Close()
 	mock.ExpectQuery(regexp.QuoteMeta("FROM offer_channel_aliases aliases")).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"internal_alias", "protocol", "multiplier_bps", "price_id",
-		}).AddRow("mkt-o42-c51", "responses", 4000, 71))
+			"internal_alias", "price_kind", "multiplier_bps", "price_id",
+		}).AddRow("mkt-o42-c51", "text", 4000, 71))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, version, price_kind, published_at")).
 		WithArgs(int64(71)).WillReturnRows(sqlmock.NewRows([]string{"id", "version", "price_kind", "published_at"}).
 		AddRow(71, 2, "text", time.Now()))
@@ -369,7 +369,7 @@ func TestAliasPricesReturnsEverySyncedOrPendingImmutableAlias(t *testing.T) {
 	}).AddRow(81, 1, 0, nil, 1250000, 3000000, 100000, 1250000))
 	store := NewSQLRoutingStore(database)
 	prices, err := store.AliasPrices(context.Background())
-	if err != nil || len(prices) != 1 || prices[0].Protocol != "responses" || len(prices[0].Price.Tiers) != 1 || prices[0].Price.Tiers[0].InputPriceMicros != 1_250_000 {
+	if err != nil || len(prices) != 1 || prices[0].PriceKind != "text" || len(prices[0].Price.Tiers) != 1 || prices[0].Price.Tiers[0].InputPriceMicros != 1_250_000 {
 		t.Fatalf("别名价格=%+v，错误=%v", prices, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -456,8 +456,8 @@ func TestPublishOfficialPriceRetiresOldOffersButKeepsImmutableAliases(t *testing
 	}
 	defer database.Close()
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT protocol FROM canonical_models WHERE id = $1 FOR UPDATE")).
-		WithArgs(int64(61)).WillReturnRows(sqlmock.NewRows([]string{"protocol"}).AddRow("responses"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT current.price_kind")).
+		WithArgs(int64(61)).WillReturnRows(sqlmock.NewRows([]string{"price_kind"}).AddRow("text"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(max(version), 0) + 1 FROM official_price_versions")).
 		WithArgs(int64(61)).WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(2))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO official_price_versions")).

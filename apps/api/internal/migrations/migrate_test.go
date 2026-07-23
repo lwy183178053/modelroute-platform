@@ -41,7 +41,6 @@ func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
 		"multiplier_bps BETWEEN 0 AND 50000",
 		"offer_versions_one_active_per_merchant_model_idx",
 		"UNIQUE (offer_version_id, merchant_channel_id)",
-		"protocol IN ('chat_completions', 'responses', 'image_generation')",
 		"input_price_micros", "cache_write_price_micros",
 		"quality varchar(32)", "size varchar(32)", "price_micros",
 		"minimum_multiplier_bps BETWEEN 0 AND 50000",
@@ -60,7 +59,7 @@ func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
 	for _, removed := range []string{
 		"requested_models", "lifecycle", "original_currency",
 		"usd_exchange_rate_micros", "source_url", "checked_at", "usd_cents",
-		"exchange_rate_cny_cents_per_usd", "embeddings",
+		"exchange_rate_cny_cents_per_usd", "embeddings", "protocol text",
 	} {
 		if strings.Contains(file.SQL, removed) {
 			t.Fatalf("V2 基线仍包含已删除字段或能力 %q", removed)

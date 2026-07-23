@@ -19,7 +19,7 @@ type HealthProbe struct {
 	CanonicalModelID    int64
 	NewAPIChannelID     int
 	InternalAlias       string
-	Protocol            string
+	PriceKind           string
 	State               string
 	ConsecutiveFailures int
 	CooldownLevel       int
@@ -35,7 +35,6 @@ type RouteCandidate struct {
 	CanonicalModelID         int64  `json:"canonical_model_id"`
 	InternalAlias            string `json:"-"`
 	PublicModel              string `json:"model"`
-	Protocol                 string `json:"protocol"`
 	MultiplierBPS            int    `json:"multiplier_bps"`
 	HealthState              string `json:"health_state"`
 	AvailabilityPPM          int    `json:"availability_ppm"`
@@ -49,7 +48,7 @@ type RouteCandidate struct {
 }
 
 func routeCandidateMeetsCacheFloor(selection RouteSelection, candidate RouteCandidate) bool {
-	if selection.MinimumCacheHitPPM == nil || candidate.Protocol == "image_generation" || !candidate.MerchantCacheWeightReady {
+	if selection.MinimumCacheHitPPM == nil || selection.PriceKind == "image" || !candidate.MerchantCacheWeightReady {
 		return true
 	}
 	return candidate.MerchantCacheHitPPM >= *selection.MinimumCacheHitPPM

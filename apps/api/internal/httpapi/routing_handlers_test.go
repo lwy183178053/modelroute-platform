@@ -148,24 +148,24 @@ func TestAdminCreatesCanonicalModelWithIntegerOfficialPrice(t *testing.T) {
 	}))
 	repository := &routingRepositoryStub{}
 	repository.createModel = func(_ context.Context, command CreateCanonicalModelCommand) (CanonicalModel, error) {
-		if command.PublicName != "gpt-5.5" || command.Provider != "OpenAI" || command.Protocol != "responses" {
+		if command.PublicName != "gpt-5.5" || command.Provider != "OpenAI" {
 			t.Fatalf("标准模型参数=%+v", command)
 		}
 		if len(command.Price.Tiers) != 1 || command.Price.Tiers[0].InputPriceMicros != 1_250_000 || command.Price.Tiers[0].CacheReadPriceMicros == nil || *command.Price.Tiers[0].CacheReadPriceMicros != 100_000 {
 			t.Fatalf("官方价格参数=%+v", command.Price)
 		}
-		return CanonicalModel{ID: 61, PublicName: command.PublicName, Provider: command.Provider, Protocol: command.Protocol, Status: "active", Price: command.Price}, nil
+		return CanonicalModel{ID: 61, PublicName: command.PublicName, Provider: command.Provider, Status: "active", Price: command.Price}, nil
 	}
 	services.Routing = repository
 	token := createPlatformSession(t, services, 1, 100)
 	handler := NewServerWithServices("test", Dependencies{}, services)
-	body := `{"public_name":"gpt-5.5","provider":"OpenAI","protocol":"responses","price":{"tiers":[{"minimum_input_tokens":0,"maximum_input_tokens":null,"input_price_micros":1250000,"output_price_micros":3000000,"cache_read_price_micros":100000}]}}`
+	body := `{"public_name":"gpt-5.5","provider":"OpenAI","price":{"tiers":[{"minimum_input_tokens":0,"maximum_input_tokens":null,"input_price_micros":1250000,"output_price_micros":3000000,"cache_read_price_micros":100000}]}}`
 	request := httptest.NewRequest(http.MethodPost, "/api/admin/models", strings.NewReader(body))
 	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"id":61`) {
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"id":61`) || strings.Contains(response.Body.String(), `"protocol"`) {
 		t.Fatalf("创建响应=%d %s", response.Code, response.Body.String())
 	}
 }
@@ -180,14 +180,14 @@ func TestAdminDetectsCustomModelWithoutPersistingCredentials(t *testing.T) {
 	}
 	services.Routing = repository
 	services.ChannelTests = channelTesterStub{test: func(_ context.Context, request ChannelTestRequest) (ChannelTestOutcome, error) {
-		if request.Model.PublicName != "custom-chat-v1" || request.Model.Provider != "OpenAI" || request.Model.Protocol != "chat_completions" || request.BaseURL != "https://api.example.com" || request.APIKey != "sk-custom-secret" {
+		if request.Model.PublicName != "custom-chat-v1" || request.Model.Provider != "OpenAI" || request.Model.Price.PriceKind != "text" || request.BaseURL != "https://api.example.com" || request.APIKey != "sk-custom-secret" {
 			t.Fatalf("模型检测参数=%+v", request)
 		}
-		return ChannelTestOutcome{AdapterType: "openai_compatible", Capabilities: []string{"chat_completions"}, LatencyMS: 123}, nil
+		return ChannelTestOutcome{AdapterType: "openai_compatible", Capabilities: []string{"text"}, LatencyMS: 123}, nil
 	}}
 	token := createPlatformSession(t, services, 1, 100)
 	handler := NewServerWithServices("test", Dependencies{}, services)
-	request := httptest.NewRequest(http.MethodPost, "/api/admin/models/detect", strings.NewReader(`{"public_name":"custom-chat-v1","provider":"OpenAI","protocol":"chat_completions","base_url":"https://api.example.com","api_key":"sk-custom-secret"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/admin/models/detect", strings.NewReader(`{"public_name":"custom-chat-v1","provider":"OpenAI","price_kind":"text","base_url":"https://api.example.com","api_key":"sk-custom-secret"}`))
 	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()

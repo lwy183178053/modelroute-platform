@@ -36,8 +36,8 @@ func TestSQLMerchantStoreCreatesApplicationAndInitialReviewAtomically(t *testing
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT t.id, t.adapter_type")).
 		WithArgs(hex.EncodeToString(receiptDigest[:]), 7, int64(61), "https://api.merchant.example", command.Channel.CredentialFingerprint).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "adapter_type", "public_name", "provider", "protocol"}).
-			AddRow(81, "openai_compatible", "gpt-5.6", "OpenAI", "responses"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "adapter_type", "public_name", "provider", "price_kind"}).
+			AddRow(81, "openai_compatible", "gpt-5.6", "OpenAI", "text"))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE merchant_channel_tests SET consumed_at = now() WHERE id = $1")).
 		WithArgs(int64(81)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO merchant_applications")).
@@ -170,9 +170,9 @@ func TestSQLMerchantStoreListsChannelHealthForAdministrator(t *testing.T) {
 		WithArgs("", 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "merchant_profile_id", "merchant_user_id", "merchant_name", "review_id", "newapi_channel_id", "channel_name", "canonical_model_id",
-			"public_name", "provider", "protocol", "adapter_type", "base_url", "credential_fingerprint", "status", "created_at",
+			"public_name", "provider", "adapter_type", "base_url", "credential_fingerprint", "status", "created_at",
 			"health_state", "availability_ppm", "ttft_p95_ms", "consecutive_failures", "cooldown_until",
-		}).AddRow(51, 31, 7, "北辰云智", 21, 41, "主线路", 61, "gpt-5.6", "OpenAI", "responses", "openai_compatible",
+		}).AddRow(51, 31, 7, "北辰云智", 21, 41, "主线路", 61, "gpt-5.6", "OpenAI", "openai_compatible",
 			"https://api.merchant.example", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "active", createdAt,
 			"cooling", 975000, 680, 3, cooldownUntil))
 
@@ -198,9 +198,9 @@ func TestSQLMerchantStoreFindsPlatformChannelByID(t *testing.T) {
 	createdAt := time.Date(2026, 7, 22, 14, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(regexp.QuoteMeta("WHERE c.id = $1")).WithArgs(int64(51)).WillReturnRows(sqlmock.NewRows([]string{
 		"id", "merchant_profile_id", "merchant_user_id", "merchant_name", "review_id", "newapi_channel_id", "channel_name", "canonical_model_id",
-		"public_name", "provider", "protocol", "adapter_type", "base_url", "credential_fingerprint", "status", "created_at",
+		"public_name", "provider", "adapter_type", "base_url", "credential_fingerprint", "status", "created_at",
 		"health_state", "availability_ppm", "ttft_p95_ms", "consecutive_failures", "cooldown_until",
-	}).AddRow(51, 31, 7, "北辰云智", 21, 41, "主线路", 61, "gpt-5.6", "OpenAI", "responses", "openai_compatible",
+	}).AddRow(51, 31, 7, "北辰云智", 21, 41, "主线路", 61, "gpt-5.6", "OpenAI", "openai_compatible",
 		"https://api.merchant.example", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "active", createdAt,
 		"healthy", 999000, 520, 0, nil))
 	channel, err := store.Channel(context.Background(), 51)
@@ -221,7 +221,7 @@ func TestSQLMerchantStoreClaimsReviewWithAtomicStateTransition(t *testing.T) {
 	store := NewSQLMerchantStore(database)
 	createdAt := time.Date(2026, 7, 22, 14, 0, 0, 0, time.UTC)
 	rows := sqlmock.NewRows(reviewColumns()).AddRow(
-		21, 7, 11, 0, "主线路", 61, "gpt-5.6", "OpenAI", "responses", 81, "openai_compatible",
+		21, 7, 11, 0, "主线路", 61, "gpt-5.6", "OpenAI", "text", 81, "openai_compatible",
 		"https://api.merchant.example", []byte("ciphertext"), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "verifying", "", "", nil, nil, createdAt,
 	)
 	mock.ExpectQuery(regexp.QuoteMeta("WITH claimed AS")).WithArgs(int64(21)).WillReturnRows(rows)
@@ -298,5 +298,5 @@ func TestSQLMerchantStoreRejectsApplicationAndReleasesReservedName(t *testing.T)
 }
 
 func reviewColumns() []string {
-	return []string{"id", "merchant_newapi_user_id", "application_id", "replaces_channel_id", "channel_name", "canonical_model_id", "public_name", "provider", "protocol", "channel_test_id", "adapter_type", "base_url", "encrypted_credential", "credential_fingerprint", "status", "verification_error", "review_reason", "verified_at", "reviewed_at", "created_at"}
+	return []string{"id", "merchant_newapi_user_id", "application_id", "replaces_channel_id", "channel_name", "canonical_model_id", "public_name", "provider", "price_kind", "channel_test_id", "adapter_type", "base_url", "encrypted_credential", "credential_fingerprint", "status", "verification_error", "review_reason", "verified_at", "reviewed_at", "created_at"}
 }

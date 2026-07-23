@@ -130,7 +130,7 @@ export default function AdminChannels({ notify }) {
             return <tr key={`${item.kind}-${item.id}`}>
               <td><code>{item.id}</code><small>{item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : '-'}</small></td>
               <td><strong>{item.merchant_name || `用户 ${item.user_id}`}</strong><small>用户 ID {item.user_id}</small></td>
-              <td><strong>{item.channel_name}</strong><small>{item.adapter_type || '-'}</small></td>
+              <td><strong>{item.channel_name}</strong></td>
               <td>{item.kind === 'review' && item.models?.length ? item.models.map((binding) => <div key={binding.id} className="model-review-row"><span>{binding.upstream_model_name}</span>{binding.match_status === 'matched' && <Button disabled={Boolean(busyID)} variant="ghost" onClick={() => testModel(item, binding)}>hi 检查</Button>}</div>) : (item.matched_models?.length ? item.matched_models.map((model) => <span className="tag" key={model}>{model}</span>) : item.model || '-')}</td>
               <td><code>{item.base_url}</code></td>
               <td><Status>{displayStatus(item)}</Status><small>{item.verification_error || item.review_reason || ''}</small></td>

@@ -4,9 +4,6 @@ import { apiRequest, formatImagePrice, formatPriceMicros } from '../../api';
 import { ActionMenu, Button, Field, InlineNotice, Modal, ProviderLogo, Section, Select, Status, TextInput } from '../../ui';
 
 const providers = ['OpenAI', 'Anthropic', 'Gemini', 'DeepSeek', 'Qwen', 'Moonshot'];
-const protocolNames = {
-  chat_completions: 'Chat Completions', responses: 'Responses', image_generation: 'Image Generation',
-};
 const imageQualities = ['low', 'medium', 'high', 'standard'];
 const imageSizes = ['1024x1024', '1024x1536', '1536x1024'];
 
@@ -45,7 +42,7 @@ function tierMinimum(tiers, index) {
 }
 
 function formatOfficialPrice(model) {
-  if (model.protocol === 'image_generation') return formatImagePrice(model.price?.image_prices);
+  if (model.price?.price_kind === 'image') return formatImagePrice(model.price?.image_prices);
   const tier = model.price?.tiers?.[0];
   if (!tier) return '-';
   return `${formatPriceMicros(tier.input_price_micros)} 输入 / ${formatPriceMicros(tier.output_price_micros)} 输出`;
@@ -56,7 +53,7 @@ function ModelDialog({ config, close, notify }) {
   const price = model?.price || {};
   const [publicName, setPublicName] = useState('');
   const [provider, setProvider] = useState(model?.provider || 'OpenAI');
-  const [protocol, setProtocol] = useState(model?.protocol || 'chat_completions');
+  const [priceKind, setPriceKind] = useState(price.price_kind || (price.image_prices?.length ? 'image' : 'text'));
   const [tiers, setTiers] = useState(price.tiers?.length ? price.tiers.map(tierState) : [tierState()]);
   const [imagePrices, setImagePrices] = useState(price.image_prices?.length ? price.image_prices.map(imageState) : [imageState()]);
   const [baseURL, setBaseURL] = useState('');
@@ -95,7 +92,7 @@ function ModelDialog({ config, close, notify }) {
     resetDetection();
     try {
       const result = await apiRequest('/api/admin/models/detect', { method: 'POST', body: {
-        public_name: publicName.trim(), provider, protocol, base_url: baseURL.trim(), api_key: apiKey,
+        public_name: publicName.trim(), provider, price_kind: priceKind, base_url: baseURL.trim(), api_key: apiKey,
       } });
       setDetected(true);
       setDetectResult(result);
@@ -107,7 +104,7 @@ function ModelDialog({ config, close, notify }) {
   };
 
   const buildPrice = () => {
-    if (protocol === 'image_generation') {
+    if (priceKind === 'image') {
       const items = imagePrices.map((item) => ({ quality: item.quality.trim(), size: item.size.trim(), price_micros: toMicros(item.price) }));
       const keys = new Set(items.map((item) => `${item.quality}\u0000${item.size}`));
       if (items.some((item) => !item.quality || !item.size || !Number.isSafeInteger(item.price_micros) || item.price_micros <= 0) || keys.size !== items.length) {
@@ -151,7 +148,7 @@ function ModelDialog({ config, close, notify }) {
         await apiRequest(`/api/admin/models/${model.id}/prices`, { method: 'POST', body: officialPrice });
         notify('模型价格新版本已发布');
       } else {
-        await apiRequest('/api/admin/models', { method: 'POST', body: { public_name: publicName.trim(), provider, protocol, price: officialPrice } });
+        await apiRequest('/api/admin/models', { method: 'POST', body: { public_name: publicName.trim(), provider, price: officialPrice } });
         notify('标准模型已创建');
       }
       await config.onSaved?.();
@@ -170,14 +167,14 @@ function ModelDialog({ config, close, notify }) {
         <div className="form-grid two-column model-identity-grid">
           <Field label="模型名称"><TextInput value={publicName} onChange={(event) => { setPublicName(event.target.value); resetDetection(); }} placeholder="例如 gpt-5.4" /></Field>
           <Field label="模型厂商"><div className="provider-select-field"><ProviderLogo provider={provider} size={20} /><Select value={provider} onChange={(event) => { setProvider(event.target.value); resetDetection(); }}>{providers.map((item) => <option key={item} value={item}>{item}</option>)}</Select></div></Field>
-          <Field label="协议"><Select value={protocol} onChange={(event) => { setProtocol(event.target.value); resetDetection(); }}>{Object.entries(protocolNames).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></Field>
+          <Field label="计费类型"><Select value={priceKind} onChange={(event) => { setPriceKind(event.target.value); resetDetection(); }}><option value="text">文本 Token 计费</option><option value="image">图片按张计费</option></Select></Field>
           <Field label="检测基础地址"><TextInput value={baseURL} onChange={(event) => { setBaseURL(event.target.value); resetDetection(); }} placeholder="https://api.example.com/v1" /></Field>
           <Field label="检测 API 密钥"><TextInput value={apiKey} onChange={(event) => { setAPIKey(event.target.value); resetDetection(); }} type="password" /></Field>
         </div>
-        <div className="config-actions"><Button disabled={detecting || !publicName.trim() || !baseURL.trim() || apiKey.trim().length < 8} icon={ShieldCheck} onClick={detect} variant="primary">{detecting ? '检测中' : '发送 hi 检测'}</Button>{detectResult && <InlineNotice>检测通过 · {detectResult.adapter_type} · {detectResult.latency_ms} ms</InlineNotice>}</div>
+        <div className="config-actions"><Button disabled={detecting || !publicName.trim() || !baseURL.trim() || apiKey.trim().length < 8} icon={ShieldCheck} onClick={detect} variant="primary">{detecting ? '检测中' : '发送 hi 检测'}</Button>{detectResult && <InlineNotice>检测通过 · {detectResult.latency_ms} ms</InlineNotice>}</div>
       </>}
 
-      {protocol === 'image_generation' ? <>
+      {priceKind === 'image' ? <>
         <div className="price-tier-heading"><div><h3>图片单张价格矩阵</h3></div><Button icon={Plus} onClick={() => setImagePrices((current) => [...current, imageState()])}>新增价格组合</Button></div>
         <div className="price-tier-list">{imagePrices.map((item, index) => <div className="price-tier-row" key={index}>
           <div className="price-tier-row-header"><strong>组合 {index + 1}</strong>{imagePrices.length > 1 && <Button aria-label={`删除组合 ${index + 1}`} icon={Trash2} variant="danger" onClick={() => removeImage(index)}>删除</Button>}</div>
@@ -238,9 +235,9 @@ export default function AdminModels({ notify }) {
     <div className="admin-section-stack">
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}
       <Section title="标准模型与基础价格" actions={<><Button icon={RefreshCw} onClick={load}>刷新</Button><Button icon={Plus} variant="primary" onClick={() => setDialog({ onSaved: load })}>新增标准模型</Button></>}>
-        <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>模型与厂商</th><th>协议</th><th>首档价格</th><th>价格结构</th><th>价格版本</th><th>状态</th><th>操作</th></tr></thead><tbody>
-          {models.map((model) => <tr key={model.id}><td><code>{model.id}</code></td><td><div className="model-cell"><ProviderLogo provider={model.provider} size={22} /><div><strong>{model.public_name}</strong><span>{model.provider}</span></div></div></td><td>{protocolNames[model.protocol] || model.protocol}</td><td><strong>{formatOfficialPrice(model)}</strong></td><td>{model.protocol === 'image_generation' ? `${model.price.image_prices?.length || 0} 个组合` : `${model.price.tiers?.length || 0} 档`}</td><td><strong>v{model.price.version}</strong></td><td><Status>{model.status === 'active' ? '已启用' : model.status === 'archived' ? '已归档' : model.status}</Status></td><td><ActionMenu items={[{ label: '发布价格', icon: BadgeDollarSign, onClick: () => setDialog({ model, onSaved: load }) }, { label: '删除', icon: Trash2, danger: true, onClick: () => remove(model) }]} /></td></tr>)}
-          {models.length === 0 && <tr><td className="table-message" colSpan="8">暂无标准模型</td></tr>}
+        <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>模型与厂商</th><th>首档价格</th><th>价格结构</th><th>价格版本</th><th>状态</th><th>操作</th></tr></thead><tbody>
+          {models.map((model) => <tr key={model.id}><td><code>{model.id}</code></td><td><div className="model-cell"><ProviderLogo provider={model.provider} size={22} /><div><strong>{model.public_name}</strong><span>{model.provider}</span></div></div></td><td><strong>{formatOfficialPrice(model)}</strong></td><td>{model.price?.price_kind === 'image' ? `${model.price.image_prices?.length || 0} 个组合` : `${model.price.tiers?.length || 0} 档`}</td><td><strong>v{model.price.version}</strong></td><td><Status>{model.status === 'active' ? '已启用' : model.status === 'archived' ? '已归档' : model.status}</Status></td><td><ActionMenu items={[{ label: '发布价格', icon: BadgeDollarSign, onClick: () => setDialog({ model, onSaved: load }) }, { label: '删除', icon: Trash2, danger: true, onClick: () => remove(model) }]} /></td></tr>)}
+          {models.length === 0 && <tr><td className="table-message" colSpan="7">暂无标准模型</td></tr>}
         </tbody></table></div>
       </Section>
       {dialog && <ModelDialog close={() => setDialog(null)} config={dialog} notify={notify} />}

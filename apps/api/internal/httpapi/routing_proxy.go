@@ -128,11 +128,11 @@ func (s *server) modelProxy(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusServiceUnavailable, code, "当前密钥没有可用路由策略")
 		return
 	}
-	if !protocolMatchesPath(selection.Protocol, r.URL.Path) {
+	if !priceKindMatchesPath(selection.PriceKind, r.URL.Path) {
 		writeOpenAIError(w, http.StatusBadRequest, "unsupported_model_protocol", "模型不支持当前接口协议")
 		return
 	}
-	if selection.Protocol == "image_generation" {
+	if selection.PriceKind == "image" {
 		prices, priceErr := s.services.Routing.ImagePriceItems(r.Context(), selection.CanonicalModelID)
 		if priceErr != nil {
 			writeOpenAIError(w, http.StatusServiceUnavailable, "image_pricing_unavailable", "图片模型价格配置不可用")
@@ -170,7 +170,7 @@ func (s *server) modelProxy(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			observation := RouteObservation{Candidate: candidate, Outcome: "temporary_failure", RequestID: requestID, Summary: "核心服务连接失败"}
 			_ = s.services.Routing.RecordRouteObservation(r.Context(), observation)
-			if selection.Protocol != "image_generation" && index+1 < len(selection.Candidates) {
+			if selection.PriceKind != "image" && index+1 < len(selection.Candidates) {
 				continue
 			}
 			_ = s.services.Routing.CompleteRouteDecision(r.Context(), RouteDecisionResult{RequestID: requestID, OfferChannelAliasID: candidate.OfferChannelAliasID, Attempts: index + 1, Result: "transport_error"})
@@ -239,10 +239,11 @@ func bearerToken(header string) (string, bool) {
 	return parts[1], true
 }
 
-func protocolMatchesPath(protocol string, path string) bool {
-	return (protocol == "chat_completions" && path == "/v1/chat/completions") ||
-		(protocol == "responses" && path == "/v1/responses") ||
-		(protocol == "image_generation" && path == "/v1/images/generations")
+func priceKindMatchesPath(priceKind string, path string) bool {
+	if priceKind == "image" {
+		return path == "/v1/images/generations"
+	}
+	return priceKind == "text" && (path == "/v1/chat/completions" || path == "/v1/responses")
 }
 
 func retryableStatus(status int) bool { return status == http.StatusTooManyRequests || status >= 500 }

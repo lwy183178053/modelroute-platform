@@ -39,12 +39,13 @@ func (s probeTokenSourceStub) ProbeToken(context.Context) (newapi.ProbeToken, er
 
 func TestHealthRunnerMovesThirdTemporaryFailureIntoCooldown(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/responses" || r.Header.Get("Authorization") != "Bearer sk-probe" {
+		if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer sk-probe" {
 			t.Fatalf("探活请求=%s，鉴权=%q", r.URL.Path, r.Header.Get("Authorization"))
 		}
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body["model"] != "mkt-ov-42" || body["input"] != "ping" {
+		messages, _ := body["messages"].([]any)
+		if body["model"] != "mkt-ov-42" || len(messages) != 1 {
 			t.Fatalf("探活正文=%v", body)
 		}
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -53,7 +54,7 @@ func TestHealthRunnerMovesThirdTemporaryFailureIntoCooldown(t *testing.T) {
 	defer upstream.Close()
 	repository := &healthRepositoryStub{probes: []HealthProbe{{
 		OfferChannelAliasID: 81, OfferID: 42, MerchantChannelID: 51, CanonicalModelID: 61, NewAPIChannelID: 41,
-		InternalAlias: "mkt-ov-42", Protocol: "responses", State: "healthy", ConsecutiveFailures: 2,
+		InternalAlias: "mkt-ov-42", PriceKind: "text", State: "healthy", ConsecutiveFailures: 2,
 	}}}
 	runner := NewHealthRunner(repository, probeTokenSourceStub{token: newapi.ProbeToken{ID: 77, Key: "sk-probe"}}, newapi.NewClient(upstream.URL, time.Second), &adminNewAPIStub{})
 	now := time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC)

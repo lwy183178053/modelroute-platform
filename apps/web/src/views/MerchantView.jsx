@@ -16,7 +16,6 @@ const withdrawalStatusNames = { pending: '待审核', approved: '待打款', pai
 const healthNames = {
   pending: '待调用', healthy: '健康', degraded: '降级', cooling: '冷却', recovering: '恢复中', disabled: '已停用',
 };
-const protocolNames = { chat_completions: '聊天补全', responses: 'Responses', image_generation: '图片生成' };
 const merchantSections = [
   { id: 'overview', label: '经营概览', icon: LayoutDashboard },
   { id: 'channels', label: '渠道管理', icon: Waypoints },
@@ -45,8 +44,8 @@ function formatMultiplier(value) {
   return bps === 0 ? '免费' : `${(bps / 10_000).toFixed(2)}x`;
 }
 
-function formatCacheHit(value, ready, protocol = '') {
-  if (protocol === 'image_generation') return '-';
+function formatCacheHit(value, ready, isImage = false) {
+  if (isImage) return '-';
   if (!ready) return '样本不足';
   return `${(Number(value || 0) / 10_000).toFixed(2)}%`;
 }
@@ -189,10 +188,10 @@ export default function MerchantView({ account, openModal }) {
           </>}
 
           {section === 'channels' && <Section title="渠道管理" description="审核中、已审核、不通过和已下架渠道统一展示" actions={canSubmit && <Button icon={Plus} variant="primary" onClick={() => openModal({ type: 'channel', models: models.filter((model) => model.status === 'active'), onSaved: load })}>提交新渠道</Button>}>
-            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>渠道</th><th>模型</th><th>协议</th><th>基础地址</th><th>状态</th><th>结果</th><th>操作</th></tr></thead><tbody>
-              {lifecycleRows.map((item) => <tr key={`${item.kind}-${item.id}`}><td><code>{item.id}</code></td><td><strong>{item.channel_name}</strong>{item.kind === 'channel' && <small>密钥 {item.credential_fingerprint || '-'}</small>}</td><td>{item.kind === 'review' && item.models?.length ? item.models.map((binding) => <span className="tag" key={binding.id}>{binding.upstream_model_name}</span>) : item.matched_models?.length ? item.matched_models.map((model) => <span className="tag" key={model}>{model}</span>) : (item.model || '-')}</td><td>{item.adapter_type || '-'}</td><td><code>{item.base_url}</code></td><td><Status>{item.kind === 'channel' && item.status === 'disabled' ? '已下架' : statusNames[item.status] || item.status}</Status></td><td>{item.verification_error || item.review_reason || '-'}</td><td>{item.kind === 'channel' ? <ActionMenu items={[{ label: '同步模型', disabled: busyChannel === item.id, onClick: () => syncChannel(item) }, { label: item.status === 'active' ? '下架' : '重新启用', disabled: busyChannel === item.id || item.status === 'archived', onClick: () => toggleChannel(item) }, { label: '删除', danger: true, disabled: busyChannel === item.id, onClick: () => deleteChannel(item) }]} /> : <ActionMenu items={[['pending', 'verified'].includes(item.status) && { label: '撤销审核', onClick: () => deleteReview(item) }, item.status === 'rejected' && { label: '删除记录', danger: true, onClick: () => deleteReview(item) }]} />}</td></tr>)}
-              {!loading && lifecycleRows.length === 0 && <tr><td className="table-message" colSpan="8">暂无渠道</td></tr>}
-              {loading && <tr><td className="table-message" colSpan="8">正在读取渠道</td></tr>}
+            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>渠道</th><th>模型</th><th>基础地址</th><th>状态</th><th>结果</th><th>操作</th></tr></thead><tbody>
+              {lifecycleRows.map((item) => <tr key={`${item.kind}-${item.id}`}><td><code>{item.id}</code></td><td><strong>{item.channel_name}</strong>{item.kind === 'channel' && <small>密钥 {item.credential_fingerprint || '-'}</small>}</td><td>{item.kind === 'review' && item.models?.length ? item.models.map((binding) => <span className="tag" key={binding.id}>{binding.upstream_model_name}</span>) : item.matched_models?.length ? item.matched_models.map((model) => <span className="tag" key={model}>{model}</span>) : (item.model || '-')}</td><td><code>{item.base_url}</code></td><td><Status>{item.kind === 'channel' && item.status === 'disabled' ? '已下架' : statusNames[item.status] || item.status}</Status></td><td>{item.verification_error || item.review_reason || '-'}</td><td>{item.kind === 'channel' ? <ActionMenu items={[{ label: '同步模型', disabled: busyChannel === item.id, onClick: () => syncChannel(item) }, { label: item.status === 'active' ? '下架' : '重新启用', disabled: busyChannel === item.id || item.status === 'archived', onClick: () => toggleChannel(item) }, { label: '删除', danger: true, disabled: busyChannel === item.id, onClick: () => deleteChannel(item) }]} /> : <ActionMenu items={[['pending', 'verified'].includes(item.status) && { label: '撤销审核', onClick: () => deleteReview(item) }, item.status === 'rejected' && { label: '删除记录', danger: true, onClick: () => deleteReview(item) }]} />}</td></tr>)}
+              {!loading && lifecycleRows.length === 0 && <tr><td className="table-message" colSpan="7">暂无渠道</td></tr>}
+              {loading && <tr><td className="table-message" colSpan="7">正在读取渠道</td></tr>}
             </tbody></table></div>
           </Section>}
 
@@ -220,8 +219,9 @@ export default function MerchantView({ account, openModal }) {
 }
 
 function FragmentOfferRow({ offer, expanded, actions }) {
+  const isImage = Boolean(offer.image_prices?.length);
   return <>
-    <tr><td><code>{offer.offer_id}</code></td><td><strong>{offer.model}</strong><small>{protocolNames[offer.protocol] || offer.protocol}</small></td><td><span className="price-multiple">{formatMultiplier(offer.multiplier_bps)}</span></td><td>{formatCompactCount(offer.call_count)}</td><td>{formatCompactCount(offer.token_usage)}</td><td>{formatCacheHit(offer.cache_hit_ppm, offer.cache_weight_ready, offer.protocol)}</td><td>{formatLastCalled(offer.last_called_at)}</td><td>{offer.channel_count || 0} 个</td><td><Status>{offer.offer_status === 'active' ? '已上架' : statusNames[offer.offer_status] || offer.offer_status}</Status></td><td><Status>{healthNames[offer.health_state] || offer.health_state}</Status></td><td>{actions}</td></tr>
-    {expanded && <tr className="offer-channel-detail"><td colSpan="11"><div className="table-wrap"><table className="data-table compact-table"><thead><tr><th>渠道 ID</th><th>渠道名称</th><th>状态</th><th>可用率</th><th>P95 首字</th><th>缓存命中率</th></tr></thead><tbody>{(offer.channels || []).map((channel) => <tr key={channel.merchant_channel_id}><td><code>{channel.merchant_channel_id}</code></td><td>{channel.channel_name}</td><td><Status>{healthNames[channel.health_state] || channel.health_state}</Status></td><td>{formatAvailability(channel.availability_ppm)}</td><td>{formatLatency(channel.ttft_p95_ms)}</td><td>{formatCacheHit(channel.cache_hit_ppm, channel.cache_weight_ready, offer.protocol)}</td></tr>)}</tbody></table></div></td></tr>}
+    <tr><td><code>{offer.offer_id}</code></td><td><strong>{offer.model}</strong></td><td><span className="price-multiple">{formatMultiplier(offer.multiplier_bps)}</span></td><td>{formatCompactCount(offer.call_count)}</td><td>{formatCompactCount(offer.token_usage)}</td><td>{formatCacheHit(offer.cache_hit_ppm, offer.cache_weight_ready, isImage)}</td><td>{formatLastCalled(offer.last_called_at)}</td><td>{offer.channel_count || 0} 个</td><td><Status>{offer.offer_status === 'active' ? '已上架' : statusNames[offer.offer_status] || offer.offer_status}</Status></td><td><Status>{healthNames[offer.health_state] || offer.health_state}</Status></td><td>{actions}</td></tr>
+    {expanded && <tr className="offer-channel-detail"><td colSpan="11"><div className="table-wrap"><table className="data-table compact-table"><thead><tr><th>渠道 ID</th><th>渠道名称</th><th>状态</th><th>可用率</th><th>P95 首字</th><th>缓存命中率</th></tr></thead><tbody>{(offer.channels || []).map((channel) => <tr key={channel.merchant_channel_id}><td><code>{channel.merchant_channel_id}</code></td><td>{channel.channel_name}</td><td><Status>{healthNames[channel.health_state] || channel.health_state}</Status></td><td>{formatAvailability(channel.availability_ppm)}</td><td>{formatLatency(channel.ttft_p95_ms)}</td><td>{formatCacheHit(channel.cache_hit_ppm, channel.cache_weight_ready, isImage)}</td></tr>)}</tbody></table></div></td></tr>}
   </>;
 }

@@ -18,7 +18,7 @@ var newAPIPriceOptionKeys = []string{
 
 type aliasPrice struct {
 	Alias         string
-	Protocol      string
+	PriceKind     string
 	MultiplierBPS int
 	Price         OfficialPrice
 }
@@ -233,10 +233,10 @@ func buildAliasPriceOptions(existing map[string]string, offers []aliasPrice) (ma
 		}
 		var expression string
 		var err error
-		if offer.Protocol == "image_generation" {
+		if offer.PriceKind == "image" {
 			expression, _, err = buildImageExpression(offer.Price.ImagePrices, offer.MultiplierBPS)
 		} else {
-			expression, _, err = buildTieredExpression(offer.Price, offer.MultiplierBPS, offer.Protocol)
+			expression, _, err = buildTieredExpression(offer.Price, offer.MultiplierBPS)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("报价 %s 的绝对价格无效：%w", offer.Alias, err)

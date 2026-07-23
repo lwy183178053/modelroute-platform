@@ -158,7 +158,7 @@ VALUES ($1, $2, $3, $4, 'pending')
 	review := MerchantChannelReview{
 		UserID: command.UserID, ApplicationID: application.ID, ChannelName: command.Channel.ChannelName,
 		CanonicalModelID: command.Channel.CanonicalModelID, Model: test.Model, Provider: test.Provider,
-		Protocol: test.Protocol, AdapterType: test.AdapterType, ChannelTestID: test.ID,
+		PriceKind: test.PriceKind, AdapterType: test.AdapterType, ChannelTestID: test.ID,
 		BaseURL: command.Channel.BaseURL, Status: "pending", CredentialConfigured: true,
 	}
 	err = tx.QueryRowContext(ctx, `
@@ -211,7 +211,7 @@ func (s *SQLMerchantStore) CreateChannelReview(ctx context.Context, command Crea
 	review := MerchantChannelReview{
 		UserID: command.UserID, ChannelName: command.Channel.ChannelName,
 		CanonicalModelID: command.Channel.CanonicalModelID, Model: test.Model, Provider: test.Provider,
-		Protocol: test.Protocol, AdapterType: test.AdapterType, ChannelTestID: test.ID,
+		PriceKind: test.PriceKind, AdapterType: test.AdapterType, ChannelTestID: test.ID,
 		BaseURL: command.Channel.BaseURL, Status: "pending", CredentialConfigured: true,
 	}
 	err = tx.QueryRowContext(ctx, `
@@ -267,7 +267,7 @@ func (s *SQLMerchantStore) CreateMultiModelChannelReview(ctx context.Context, co
 	review := MerchantChannelReview{
 		UserID: command.UserID, ChannelName: command.Channel.ChannelName,
 		CanonicalModelID: primary.CanonicalModelID, Model: primary.Model,
-		Provider: primary.Provider, Protocol: primary.Protocol, AdapterType: adapter,
+		Provider: primary.Provider, AdapterType: adapter,
 		BaseURL: command.Channel.BaseURL, Status: "pending", CredentialConfigured: true,
 	}
 	err = tx.QueryRowContext(ctx, `
@@ -446,23 +446,24 @@ type claimedChannelTest struct {
 	AdapterType string
 	Model       string
 	Provider    string
-	Protocol    string
+	PriceKind   string
 }
 
 func claimChannelTest(ctx context.Context, tx *sql.Tx, userID int, channel ChannelSubmission) (claimedChannelTest, error) {
 	receiptHash := channelTestReceiptHash(channel.TestReceipt)
 	var result claimedChannelTest
 	err := tx.QueryRowContext(ctx, `
-SELECT t.id, t.adapter_type, cm.public_name, cm.provider, cm.protocol
+SELECT t.id, t.adapter_type, cm.public_name, cm.provider, price.price_kind
 FROM merchant_channel_tests t
 JOIN canonical_models cm ON cm.id = t.canonical_model_id
+JOIN official_price_versions price ON price.id = cm.current_official_price_version_id
 WHERE t.receipt_token_hash = $1 AND t.newapi_user_id = $2
   AND t.canonical_model_id = $3 AND t.base_url = $4
   AND t.credential_fingerprint = $5 AND t.expires_at > now()
   AND t.consumed_at IS NULL AND cm.status = 'active'
 FOR UPDATE OF t
 `, receiptHash, userID, channel.CanonicalModelID, channel.BaseURL, channel.CredentialFingerprint).Scan(
-		&result.ID, &result.AdapterType, &result.Model, &result.Provider, &result.Protocol,
+		&result.ID, &result.AdapterType, &result.Model, &result.Provider, &result.PriceKind,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return claimedChannelTest{}, ErrMerchantInvalidState
@@ -664,12 +665,13 @@ WITH claimed AS (
     WHERE a.id = claimed.application_id
 )
 SELECT c.id, c.merchant_newapi_user_id, COALESCE(c.application_id, 0), COALESCE(c.replaces_channel_id, 0),
-	   c.channel_name, c.canonical_model_id, cm.public_name, cm.provider, cm.protocol,
+       c.channel_name, c.canonical_model_id, cm.public_name, cm.provider, price.price_kind,
 	   COALESCE(c.channel_test_id, 0), c.adapter_type, c.base_url, c.encrypted_credential,
 	   c.credential_fingerprint, c.status, COALESCE(c.verification_error, ''),
 	   COALESCE(c.review_reason, ''), c.verified_at, c.reviewed_at, c.created_at
 FROM claimed c
 JOIN canonical_models cm ON cm.id = c.canonical_model_id
+JOIN official_price_versions price ON price.id = cm.current_official_price_version_id
 `
 	review, err := scanMerchantReview(s.database.QueryRowContext(ctx, query, reviewID))
 	if errors.Is(err, ErrMerchantNotFound) {
@@ -1048,28 +1050,30 @@ const applicationSelect = `
 SELECT a.id, a.newapi_user_id, a.display_name, a.website_url, a.business_description,
        a.status, COALESCE(a.review_reason, ''), a.reviewed_at, a.created_at,
        r.id, r.merchant_newapi_user_id, COALESCE(r.application_id, 0), COALESCE(r.replaces_channel_id, 0),
-	   r.channel_name, r.canonical_model_id, cm.public_name, cm.provider, cm.protocol,
+	   r.channel_name, r.canonical_model_id, cm.public_name, cm.provider, price.price_kind,
 	   COALESCE(r.channel_test_id, 0), r.adapter_type, r.base_url, r.encrypted_credential,
 	   r.credential_fingerprint, r.status, COALESCE(r.verification_error, ''),
 	   COALESCE(r.review_reason, ''), r.verified_at, r.reviewed_at, r.created_at
 FROM merchant_applications a
 JOIN merchant_channel_reviews r ON r.id = a.initial_channel_review_id
 JOIN canonical_models cm ON cm.id = r.canonical_model_id
+JOIN official_price_versions price ON price.id = cm.current_official_price_version_id
 `
 
 const reviewSelect = `
 SELECT r.id, r.merchant_newapi_user_id, COALESCE(r.application_id, 0), COALESCE(r.replaces_channel_id, 0),
-	   r.channel_name, r.canonical_model_id, cm.public_name, cm.provider, cm.protocol,
+	   r.channel_name, r.canonical_model_id, cm.public_name, cm.provider, price.price_kind,
 	   COALESCE(r.channel_test_id, 0), r.adapter_type, r.base_url, r.encrypted_credential,
 	   r.credential_fingerprint, r.status, COALESCE(r.verification_error, ''),
 	   COALESCE(r.review_reason, ''), r.verified_at, r.reviewed_at, r.created_at
 FROM merchant_channel_reviews r
 JOIN canonical_models cm ON cm.id = r.canonical_model_id
+JOIN official_price_versions price ON price.id = cm.current_official_price_version_id
 `
 
 const channelSelect = `
 SELECT c.id, c.merchant_profile_id, p.newapi_user_id, p.display_name, c.review_id, c.newapi_channel_id,
-	   c.channel_name, c.canonical_model_id, cm.public_name, cm.provider, cm.protocol,
+	   c.channel_name, c.canonical_model_id, cm.public_name, cm.provider,
 	   c.adapter_type, c.base_url,
 	   c.credential_fingerprint, c.status, c.created_at,
 	   COALESCE(h.state, 'healthy'), COALESCE(h.availability_ppm, 0),
@@ -1093,7 +1097,7 @@ func scanMerchantApplication(scanner rowScanner) (MerchantApplication, error) {
 		&application.ID, &application.UserID, &application.DisplayName, &application.WebsiteURL,
 		&application.BusinessDescription, &application.Status, &applicationReason, &applicationReviewedAt, &application.CreatedAt,
 		&review.ID, &review.UserID, &review.ApplicationID, &review.ReplacesChannelID,
-		&review.ChannelName, &review.CanonicalModelID, &review.Model, &review.Provider, &review.Protocol,
+		&review.ChannelName, &review.CanonicalModelID, &review.Model, &review.Provider, &review.PriceKind,
 		&review.ChannelTestID, &review.AdapterType, &review.BaseURL, &review.EncryptedCredential,
 		&review.CredentialFingerprint, &review.Status, &verificationError, &reviewReason,
 		&reviewVerifiedAt, &reviewReviewedAt, &review.CreatedAt,
@@ -1117,7 +1121,7 @@ func scanMerchantReview(scanner rowScanner) (MerchantChannelReview, error) {
 	var verifiedAt, reviewedAt sql.NullTime
 	err := scanner.Scan(
 		&review.ID, &review.UserID, &review.ApplicationID, &review.ReplacesChannelID,
-		&review.ChannelName, &review.CanonicalModelID, &review.Model, &review.Provider, &review.Protocol,
+		&review.ChannelName, &review.CanonicalModelID, &review.Model, &review.Provider, &review.PriceKind,
 		&review.ChannelTestID, &review.AdapterType, &review.BaseURL, &review.EncryptedCredential,
 		&review.CredentialFingerprint, &review.Status, &review.VerificationError,
 		&review.ReviewReason, &verifiedAt, &reviewedAt, &review.CreatedAt,
@@ -1153,7 +1157,7 @@ func scanMerchantChannel(scanner rowScanner) (MerchantChannel, error) {
 	var cooldownUntil sql.NullTime
 	err := scanner.Scan(&channel.ID, &channel.MerchantID, &channel.UserID, &channel.MerchantName, &channel.ReviewID, &channel.NewAPIChannelID,
 		&channel.ChannelName, &channel.CanonicalModelID, &channel.Model, &channel.Provider,
-		&channel.Protocol, &channel.AdapterType, &channel.BaseURL, &fingerprint,
+		&channel.AdapterType, &channel.BaseURL, &fingerprint,
 		&channel.Status, &channel.CreatedAt, &channel.HealthState, &channel.AvailabilityPPM,
 		&channel.TTFTP95MS, &channel.ConsecutiveFailures, &cooldownUntil)
 	if err != nil {

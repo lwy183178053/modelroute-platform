@@ -36,7 +36,6 @@ type OfficialPrice struct {
 type CreateCanonicalModelCommand struct {
 	PublicName string
 	Provider   string
-	Protocol   string
 	AdminID    int
 	Price      OfficialPrice
 }
@@ -45,11 +44,9 @@ type CanonicalModel struct {
 	ID          int64         `json:"id"`
 	PublicName  string        `json:"public_name"`
 	Provider    string        `json:"provider"`
-	Protocol    string        `json:"protocol"`
 	Status      string        `json:"status"`
 	Price       OfficialPrice `json:"price"`
 	CreatedAt   time.Time     `json:"created_at,omitempty"`
-	AdapterHint string        `json:"adapter_hint"`
 }
 
 type RoutingRepository interface {
@@ -95,7 +92,6 @@ type MarketOffer struct {
 	MerchantID             int64            `json:"merchant_id"`
 	MerchantName           string           `json:"merchant_name"`
 	Model                  string           `json:"model"`
-	Protocol               string           `json:"protocol"`
 	MultiplierBPS          int              `json:"multiplier_bps"`
 	PriceTiers             []OfferPriceTier `json:"price_tiers"`
 	ImagePrices            []ImagePriceItem `json:"image_prices,omitempty"`
@@ -117,7 +113,6 @@ type MarketOffer struct {
 type MerchantOfferView struct {
 	OfferID                int64              `json:"offer_id"`
 	Model                  string             `json:"model"`
-	Protocol               string             `json:"protocol"`
 	MultiplierBPS          int                `json:"multiplier_bps"`
 	ChannelCount           int                `json:"channel_count"`
 	CallCount              int64              `json:"call_count"`
@@ -157,7 +152,7 @@ type RouteSelection struct {
 	CanonicalModelID   int64
 	Priority           string
 	MinimumCacheHitPPM *int
-	Protocol           string
+	PriceKind          string
 	Candidates         []RouteCandidate
 }
 
@@ -229,7 +224,7 @@ type OfferVersion struct {
 	MultiplierBPS          int                 `json:"multiplier_bps"`
 	Status                 string              `json:"status"`
 	PublicModel            string              `json:"model"`
-	Protocol               string              `json:"protocol"`
+	PriceKind              string              `json:"-"`
 	CreatedAt              time.Time           `json:"created_at,omitempty"`
 	MerchantID             int64               `json:"merchant_id"`
 	Version                int                 `json:"version"`
@@ -502,16 +497,16 @@ func (s *SQLRoutingStore) CreateCanonicalModel(ctx context.Context, command Crea
 		return CanonicalModel{}, fmt.Errorf("开始标准模型事务：%w", err)
 	}
 	defer tx.Rollback()
-	model := CanonicalModel{PublicName: command.PublicName, Provider: command.Provider, Protocol: command.Protocol, AdapterHint: "auto", Status: "active", Price: command.Price}
+	model := CanonicalModel{PublicName: command.PublicName, Provider: command.Provider, Status: "active", Price: command.Price}
 	err = tx.QueryRowContext(ctx, `
-INSERT INTO canonical_models (public_name, provider, protocol, adapter_hint, status)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO canonical_models (public_name, provider, status)
+VALUES ($1, $2, $3)
 RETURNING id, status, created_at
-`, command.PublicName, command.Provider, command.Protocol, model.AdapterHint, model.Status).Scan(&model.ID, &model.Status, &model.CreatedAt)
+`, command.PublicName, command.Provider, model.Status).Scan(&model.ID, &model.Status, &model.CreatedAt)
 	if err != nil {
 		return CanonicalModel{}, fmt.Errorf("创建标准模型：%w", err)
 	}
-	model.Price, err = insertOfficialPriceVersion(ctx, tx, model.ID, 1, command.AdminID, command.Protocol, command.Price)
+	model.Price, err = insertOfficialPriceVersion(ctx, tx, model.ID, 1, command.AdminID, command.Price)
 	if err != nil {
 		return CanonicalModel{}, fmt.Errorf("创建官方价格版本：%w", err)
 	}
@@ -524,9 +519,9 @@ RETURNING id, status, created_at
 	return model, nil
 }
 
-func insertOfficialPriceVersion(ctx context.Context, tx *sql.Tx, modelID int64, version int, adminID int, protocol string, price OfficialPrice) (OfficialPrice, error) {
+func insertOfficialPriceVersion(ctx context.Context, tx *sql.Tx, modelID int64, version int, adminID int, price OfficialPrice) (OfficialPrice, error) {
 	price = normalizeOfficialPrice(price)
-	if err := validateOfficialPrice(price, protocol); err != nil {
+	if err := validateOfficialPrice(price); err != nil {
 		return OfficialPrice{}, err
 	}
 	err := tx.QueryRowContext(ctx, `
@@ -585,7 +580,7 @@ func (s *SQLRoutingStore) CreateOffer(ctx context.Context, command CreateOfferCo
 	offer.CanonicalModelID = command.CanonicalModelID
 	offer.MultiplierBPS = command.MultiplierBPS
 	err = tx.QueryRowContext(ctx, `
-SELECT mp.id, cm.current_official_price_version_id, cm.public_name, cm.protocol,
+SELECT mp.id, cm.current_official_price_version_id, cm.public_name, price.price_kind,
 	   COALESCE((SELECT id FROM offer_versions old
 	             WHERE old.merchant_profile_id = mp.id AND old.canonical_model_id = cm.id AND old.status = 'active'
 	             ORDER BY old.id DESC LIMIT 1), 0),
@@ -593,12 +588,13 @@ SELECT mp.id, cm.current_official_price_version_id, cm.public_name, cm.protocol,
 	             WHERE versions.merchant_profile_id = mp.id AND versions.canonical_model_id = cm.id), 1)
 FROM merchant_profiles mp
 JOIN canonical_models cm ON cm.id = $2
+JOIN official_price_versions price ON price.id = cm.current_official_price_version_id
 WHERE mp.newapi_user_id = $1 AND mp.status = 'active'
   AND cm.status = 'active' AND cm.current_official_price_version_id IS NOT NULL
 FOR UPDATE OF mp, cm
-`, command.UserID, command.CanonicalModelID).Scan(
+	`, command.UserID, command.CanonicalModelID).Scan(
 		&offer.MerchantID, &offer.OfficialPriceVersionID, &offer.PublicModel,
-		&offer.Protocol, &offer.PreviousOfferID, &offer.Version,
+		&offer.PriceKind, &offer.PreviousOfferID, &offer.Version,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return OfferVersion{}, ErrRoutingNotFound
@@ -804,10 +800,10 @@ WHERE id = $1 AND status = 'syncing'
 
 func (s *SQLRoutingStore) AliasPrices(ctx context.Context) ([]aliasPrice, error) {
 	rows, err := s.database.QueryContext(ctx, `
-SELECT aliases.internal_alias, cm.protocol, o.multiplier_bps, o.official_price_version_id
+SELECT aliases.internal_alias, price.price_kind, o.multiplier_bps, o.official_price_version_id
 FROM offer_channel_aliases aliases
 JOIN offer_versions o ON o.id = aliases.offer_version_id
-JOIN canonical_models cm ON cm.id = o.canonical_model_id
+JOIN official_price_versions price ON price.id = o.official_price_version_id
 WHERE o.status IN ('syncing', 'active', 'inactive')
 ORDER BY aliases.id
 `)
@@ -820,7 +816,7 @@ ORDER BY aliases.id
 	for rows.Next() {
 		var price aliasPrice
 		var priceID int64
-		if err := rows.Scan(&price.Alias, &price.Protocol, &price.MultiplierBPS, &priceID); err != nil {
+		if err := rows.Scan(&price.Alias, &price.PriceKind, &price.MultiplierBPS, &priceID); err != nil {
 			return nil, fmt.Errorf("解析别名价格：%w", err)
 		}
 		loaded, exists := priceCache[priceID]
@@ -971,12 +967,13 @@ func (s *SQLRoutingStore) ResolveRoute(ctx context.Context, fingerprint string, 
 	var selection RouteSelection
 	var cacheFloor sql.NullInt64
 	err := s.database.QueryRowContext(ctx, `
-SELECT b.id, p.id, cm.id, p.priority, cm.protocol, p.minimum_cache_hit_ppm
+SELECT b.id, p.id, cm.id, p.priority, price.price_kind, p.minimum_cache_hit_ppm
 FROM token_bindings b
 JOIN routing_policies p ON p.id = b.routing_policy_id
 JOIN canonical_models cm ON cm.public_name = $2 AND cm.status = 'active'
+JOIN official_price_versions price ON price.id = cm.current_official_price_version_id
 WHERE b.token_fingerprint = $1 AND b.status = 'active'
-`, fingerprint, publicModel).Scan(&selection.TokenBindingID, &selection.PolicyID, &selection.CanonicalModelID, &selection.Priority, &selection.Protocol, &cacheFloor)
+`, fingerprint, publicModel).Scan(&selection.TokenBindingID, &selection.PolicyID, &selection.CanonicalModelID, &selection.Priority, &selection.PriceKind, &cacheFloor)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RouteSelection{}, ErrRoutingNotFound
 	}
@@ -999,7 +996,7 @@ WITH merchant_metrics AS (
     GROUP BY channel.merchant_profile_id, snapshot.canonical_model_id
 )
 SELECT o.id, aliases.id, mp.id, mc.id, mc.newapi_channel_id, cm.id, aliases.internal_alias,
-       cm.public_name, cm.protocol, o.multiplier_bps, h.state,
+       cm.public_name, o.multiplier_bps, h.state,
        COALESCE(metric.availability_ppm, 0), COALESCE(metric.average_ttft_ms, 0),
        COALESCE(metric.request_count, 0), COALESCE(metric.cache_hit_ppm, 0),
        COALESCE(metric.prompt_tokens, 0), COALESCE(metric.cache_weight_ready, false),
@@ -1034,7 +1031,7 @@ WHERE p.id = $1
 		if err := rows.Scan(
 			&candidate.OfferID, &candidate.OfferChannelAliasID, &candidate.MerchantID, &candidate.MerchantChannelID,
 			&candidate.NewAPIChannelID, &candidate.CanonicalModelID, &candidate.InternalAlias,
-			&candidate.PublicModel, &candidate.Protocol, &candidate.MultiplierBPS,
+			&candidate.PublicModel, &candidate.MultiplierBPS,
 			&candidate.HealthState, &candidate.AvailabilityPPM, &candidate.TTFTP95MS,
 			&candidate.MetricRequestCount, &candidate.CacheHitPPM, &candidate.CacheSampleInputTokens,
 			&candidate.CacheWeightReady, &candidate.MerchantCacheHitPPM, &candidate.MerchantCacheWeightReady,
@@ -1252,14 +1249,16 @@ func (s *SQLRoutingStore) ClaimHealthProbes(ctx context.Context, now time.Time, 
 WITH due AS (
     SELECT h.merchant_channel_id, mc.canonical_model_id, route.offer_id,
            route.offer_channel_alias_id, mc.newapi_channel_id, route.internal_alias,
-           cm.protocol, h.state, h.consecutive_failures, h.cooldown_level
+           route.price_kind, h.state, h.consecutive_failures, h.cooldown_level
     FROM channel_health h
     JOIN merchant_channels mc ON mc.id = h.merchant_channel_id AND mc.status = 'active'
     JOIN canonical_models cm ON cm.id = mc.canonical_model_id AND cm.status = 'active'
     JOIN LATERAL (
-        SELECT o.id AS offer_id, aliases.id AS offer_channel_alias_id, aliases.internal_alias
+        SELECT o.id AS offer_id, aliases.id AS offer_channel_alias_id, aliases.internal_alias,
+               price.price_kind
         FROM offer_channel_aliases aliases
         JOIN offer_versions o ON o.id = aliases.offer_version_id
+        JOIN official_price_versions price ON price.id = o.official_price_version_id
         WHERE aliases.merchant_channel_id = h.merchant_channel_id AND o.status = 'active'
         ORDER BY o.id DESC LIMIT 1
     ) route ON true
@@ -1275,7 +1274,7 @@ WITH due AS (
     RETURNING h.merchant_channel_id
 )
 SELECT d.offer_channel_alias_id, d.offer_id, d.merchant_channel_id, d.canonical_model_id, d.newapi_channel_id,
-       d.internal_alias, d.protocol, d.state, d.consecutive_failures,
+       d.internal_alias, d.price_kind, d.state, d.consecutive_failures,
        d.cooldown_level
 FROM due d
 JOIN claimed c USING (merchant_channel_id)
@@ -1289,7 +1288,7 @@ JOIN claimed c USING (merchant_channel_id)
 		var probe HealthProbe
 		if err := rows.Scan(
 			&probe.OfferChannelAliasID, &probe.OfferID, &probe.MerchantChannelID, &probe.CanonicalModelID,
-			&probe.NewAPIChannelID, &probe.InternalAlias, &probe.Protocol, &probe.State,
+			&probe.NewAPIChannelID, &probe.InternalAlias, &probe.PriceKind, &probe.State,
 			&probe.ConsecutiveFailures, &probe.CooldownLevel,
 		); err != nil {
 			return nil, fmt.Errorf("解析探活任务：%w", err)
@@ -1405,7 +1404,7 @@ WITH usage_stats AS (
     WHERE channel.status = 'active'
     GROUP BY channel.merchant_profile_id, snapshot.canonical_model_id
 )
-SELECT o.id, mp.id, mp.display_name, cm.public_name, cm.protocol,
+SELECT o.id, mp.id, mp.display_name, cm.public_name,
        o.multiplier_bps, o.official_price_version_id,
        count(*) FILTER (WHERE h.state IN ('healthy', 'degraded')),
        CASE
@@ -1435,7 +1434,7 @@ JOIN channel_health h ON h.merchant_channel_id = mc.id
 WHERE o.status = 'active' AND mc.status = 'active' AND mp.status = 'active'
   AND cm.status = 'active'
   AND ($1 = '' OR cm.public_name = $1)
-	GROUP BY o.id, mp.id, mp.display_name, cm.public_name, cm.protocol,
+	GROUP BY o.id, mp.id, mp.display_name, cm.public_name,
 	         stats.call_count, stats.token_usage, stats.last_called_at,
 	         metric.prompt_tokens, metric.cache_tokens, metric.metrics_updated_at
 HAVING count(*) FILTER (WHERE h.state IN ('healthy', 'degraded')) > 0
@@ -1452,7 +1451,7 @@ ORDER BY cm.public_name, o.multiplier_bps, o.id
 		var metricsUpdatedAt sql.NullTime
 		if err := rows.Scan(
 			&offer.OfferID, &offer.MerchantID, &offer.MerchantName, &offer.Model,
-			&offer.Protocol, &offer.MultiplierBPS, &priceID, &offer.ChannelCount,
+			&offer.MultiplierBPS, &priceID, &offer.ChannelCount,
 			&offer.HealthState, &offer.AvailabilityPPM, &offer.TTFTP95MS,
 			&offer.CallCount, &offer.TokenUsage, &offer.LastCalledAt,
 			&offer.CacheHitPPM, &offer.CacheSampleInputTokens, &offer.CacheWeightReady, &metricsUpdatedAt,
@@ -1479,12 +1478,12 @@ ORDER BY cm.public_name, o.multiplier_bps, o.id
 }
 
 func applyMarketPrice(offer *MarketOffer) error {
-	if offer.Protocol == "image_generation" {
+	if offer.OfficialPrice.PriceKind == "image" {
 		_, prices, err := buildImageExpression(offer.OfficialPrice.ImagePrices, offer.MultiplierBPS)
 		offer.ImagePrices = prices
 		return err
 	}
-	_, tiers, err := buildTieredExpression(offer.OfficialPrice, offer.MultiplierBPS, offer.Protocol)
+	_, tiers, err := buildTieredExpression(offer.OfficialPrice, offer.MultiplierBPS)
 	offer.PriceTiers = tiers
 	return err
 }
@@ -1531,15 +1530,21 @@ func (s *SQLRoutingStore) PublishOfficialPrice(ctx context.Context, modelID int6
 		return OfficialPrice{}, fmt.Errorf("开始官方价格事务：%w", err)
 	}
 	defer tx.Rollback()
-	var protocol string
-	err = tx.QueryRowContext(ctx, `SELECT protocol FROM canonical_models WHERE id = $1 FOR UPDATE`, modelID).Scan(&protocol)
+	var currentPriceKind string
+	err = tx.QueryRowContext(ctx, `
+SELECT current.price_kind
+FROM canonical_models model
+JOIN official_price_versions current ON current.id = model.current_official_price_version_id
+WHERE model.id = $1
+FOR UPDATE OF model, current
+`, modelID).Scan(&currentPriceKind)
 	if errors.Is(err, sql.ErrNoRows) {
 		return OfficialPrice{}, ErrRoutingNotFound
 	}
 	if err != nil {
 		return OfficialPrice{}, fmt.Errorf("锁定标准模型：%w", err)
 	}
-	if err := validateAbsolutePrice(price, protocol); err != nil {
+	if price.PriceKind != currentPriceKind || validateAbsolutePrice(price) != nil {
 		return OfficialPrice{}, ErrRoutingInvalidState
 	}
 	if err := tx.QueryRowContext(ctx, `
@@ -1547,7 +1552,7 @@ SELECT COALESCE(max(version), 0) + 1 FROM official_price_versions WHERE canonica
 `, modelID).Scan(&price.Version); err != nil {
 		return OfficialPrice{}, fmt.Errorf("生成官方价格版本：%w", err)
 	}
-	price, err = insertOfficialPriceVersion(ctx, tx, modelID, price.Version, adminID, protocol, price)
+	price, err = insertOfficialPriceVersion(ctx, tx, modelID, price.Version, adminID, price)
 	if err != nil {
 		return OfficialPrice{}, fmt.Errorf("创建官方价格版本：%w", err)
 	}
@@ -1565,8 +1570,8 @@ SELECT COALESCE(max(version), 0) + 1 FROM official_price_versions WHERE canonica
 
 func (s *SQLRoutingStore) ListCanonicalModels(ctx context.Context) ([]CanonicalModel, error) {
 	rows, err := s.database.QueryContext(ctx, `
-SELECT cm.id, cm.public_name, cm.provider, cm.protocol, cm.status, cm.created_at,
-       cm.adapter_hint, cm.current_official_price_version_id
+SELECT cm.id, cm.public_name, cm.provider, cm.status, cm.created_at,
+       cm.current_official_price_version_id
 FROM canonical_models cm
 WHERE cm.current_official_price_version_id IS NOT NULL
 ORDER BY cm.public_name
@@ -1580,8 +1585,8 @@ ORDER BY cm.public_name
 		var model CanonicalModel
 		var priceID int64
 		if err := rows.Scan(
-			&model.ID, &model.PublicName, &model.Provider, &model.Protocol, &model.Status,
-			&model.CreatedAt, &model.AdapterHint, &priceID,
+			&model.ID, &model.PublicName, &model.Provider, &model.Status,
+			&model.CreatedAt, &priceID,
 		); err != nil {
 			return nil, fmt.Errorf("解析标准模型：%w", err)
 		}
@@ -1625,7 +1630,7 @@ WITH latest AS (
     FROM usage_rows
     GROUP BY merchant_profile_id, canonical_model_id
 )
-SELECT o.id, cm.public_name, cm.protocol, o.multiplier_bps, o.status,
+SELECT o.id, cm.public_name, o.multiplier_bps, o.status,
        COALESCE(o.sync_error, ''), o.official_price_version_id,
        COALESCE(stats.call_count, 0), COALESCE(stats.token_usage, 0), stats.last_called_at,
        count(*) FILTER (WHERE mc.status = 'active' AND h.state IN ('healthy', 'degraded'))
@@ -1661,7 +1666,7 @@ ORDER BY o.id DESC, mc.id
 		var metricsUpdatedAt sql.NullTime
 		var channel OfferChannelView
 		if err := rows.Scan(
-			&offer.OfferID, &offer.Model, &offer.Protocol, &offer.MultiplierBPS,
+			&offer.OfferID, &offer.Model, &offer.MultiplierBPS,
 			&offer.OfferStatus, &offer.SyncError, &priceID, &offer.CallCount, &offer.TokenUsage, &lastCalledAt, &offer.ChannelCount,
 			&channel.MerchantChannelID, &channel.ChannelName, &channel.HealthState,
 			&channel.AvailabilityPPM, &channel.TTFTP95MS,
@@ -1697,7 +1702,7 @@ ORDER BY o.id DESC, mc.id
 	}
 	for index := range offers {
 		applyMerchantOfferCacheMetrics(&offers[index])
-		if offers[index].Protocol == "image_generation" {
+		if offers[index].OfficialPrice.PriceKind == "image" {
 			_, prices, err := buildImageExpression(offers[index].OfficialPrice.ImagePrices, offers[index].MultiplierBPS)
 			if err != nil {
 				return nil, fmt.Errorf("换算商户图片报价：%w", err)
@@ -1705,7 +1710,7 @@ ORDER BY o.id DESC, mc.id
 			offers[index].ImagePrices = prices
 			continue
 		}
-		_, tiers, err := buildTieredExpression(offers[index].OfficialPrice, offers[index].MultiplierBPS, offers[index].Protocol)
+		_, tiers, err := buildTieredExpression(offers[index].OfficialPrice, offers[index].MultiplierBPS)
 		if err != nil {
 			return nil, fmt.Errorf("换算商户报价：%w", err)
 		}
@@ -1739,13 +1744,13 @@ func assignNullableTierPrices(tier *PriceTier, maximum, output, cacheRead, cache
 
 func (s *SQLRoutingStore) ImagePriceItems(ctx context.Context, modelID int64) ([]ImagePriceItem, error) {
 	var priceID int64
-	var protocol string
 	err := s.database.QueryRowContext(ctx, `
-SELECT protocol, current_official_price_version_id
-FROM canonical_models
-WHERE id = $1 AND status = 'active'
-`, modelID).Scan(&protocol, &priceID)
-	if errors.Is(err, sql.ErrNoRows) || protocol != "image_generation" {
+SELECT price.id
+FROM canonical_models model
+JOIN official_price_versions price ON price.id = model.current_official_price_version_id
+WHERE model.id = $1 AND model.status = 'active' AND price.price_kind = 'image'
+`, modelID).Scan(&priceID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrRoutingNotFound
 	}
 	if err != nil {

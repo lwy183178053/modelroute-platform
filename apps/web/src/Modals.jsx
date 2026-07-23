@@ -9,7 +9,7 @@ function Footer({ cancel, submit, submitText, icon = Check }) {
 }
 
 function StatusLine({ result }) {
-  return <InlineNotice>检测通过 · {result.adapter_type} · {result.latency_ms} ms</InlineNotice>;
+  return <InlineNotice>检测通过 · {result.latency_ms} ms</InlineNotice>;
 }
 
 function merchantNameUnits(value) {

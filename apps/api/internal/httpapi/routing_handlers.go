@@ -18,7 +18,6 @@ func (s *server) createCanonicalModel(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		PublicName string        `json:"public_name"`
 		Provider   string        `json:"provider"`
-		Protocol   string        `json:"protocol"`
 		Price      OfficialPrice `json:"price"`
 	}
 	if err := decodeJSON(r, &request); err != nil {
@@ -27,8 +26,7 @@ func (s *server) createCanonicalModel(w http.ResponseWriter, r *http.Request) {
 	}
 	command := CreateCanonicalModelCommand{
 		PublicName: strings.TrimSpace(request.PublicName), Provider: strings.TrimSpace(request.Provider),
-		Protocol: strings.TrimSpace(request.Protocol), AdminID: session.UserID,
-		Price: normalizeOfficialPrice(request.Price),
+		AdminID: session.UserID, Price: normalizeOfficialPrice(request.Price),
 	}
 	if err := validateCanonicalModel(command); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_model_price", err.Error())
@@ -54,7 +52,7 @@ func (s *server) detectCanonicalModel(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		PublicName string `json:"public_name"`
 		Provider   string `json:"provider"`
-		Protocol   string `json:"protocol"`
+		PriceKind  string `json:"price_kind"`
 		BaseURL    string `json:"base_url"`
 		APIKey     string `json:"api_key"`
 	}
@@ -64,11 +62,11 @@ func (s *server) detectCanonicalModel(w http.ResponseWriter, r *http.Request) {
 	}
 	model := CanonicalModel{
 		ID: 1, PublicName: strings.TrimSpace(request.PublicName), Provider: strings.TrimSpace(request.Provider),
-		Protocol: strings.TrimSpace(request.Protocol), Status: "active",
+		Status: "active", Price: OfficialPrice{PriceKind: strings.TrimSpace(request.PriceKind)},
 	}
 	baseURL, err := normalizePublicHTTPSURL(request.BaseURL, false)
 	credential := strings.TrimSpace(request.APIKey)
-	if err != nil || validateModelDescriptor(model.PublicName, model.Provider, model.Protocol) != nil || len(credential) < 8 || len(credential) > 65536 {
+	if err != nil || validateModelDescriptor(model.PublicName, model.Provider) != nil || (model.Price.PriceKind != "text" && model.Price.PriceKind != "image") || len(credential) < 8 || len(credential) > 65536 {
 		writeAPIError(w, http.StatusBadRequest, "invalid_model_detect", "模型、基础地址或 API 密钥无效")
 		return
 	}
@@ -487,23 +485,18 @@ func validateRoutingPolicy(input RoutingPolicyInput) error {
 }
 
 func validateCanonicalModel(command CreateCanonicalModelCommand) error {
-	if err := validateModelDescriptor(command.PublicName, command.Provider, command.Protocol); err != nil {
+	if err := validateModelDescriptor(command.PublicName, command.Provider); err != nil {
 		return err
 	}
-	return validateOfficialPrice(command.Price, command.Protocol)
+	return validateOfficialPrice(command.Price)
 }
 
-func validateModelDescriptor(publicName string, provider string, protocol string) error {
+func validateModelDescriptor(publicName string, provider string) error {
 	if publicName == "" || len(publicName) > 255 || strings.HasPrefix(publicName, "mkt-ov-") || provider == "" || len(provider) > 80 {
 		return errors.New("模型名称或厂商无效")
 	}
 	if _, supported := supportedModelProviders[provider]; !supported {
 		return errors.New("模型厂商不在平台支持范围")
-	}
-	switch protocol {
-	case "chat_completions", "responses", "image_generation":
-	default:
-		return errors.New("模型协议不在平台开放范围")
 	}
 	return nil
 }

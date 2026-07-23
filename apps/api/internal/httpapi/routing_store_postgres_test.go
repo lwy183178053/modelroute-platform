@@ -42,7 +42,7 @@ RESTART IDENTITY CASCADE
 	outputPrice := int64(4_800_000)
 	cacheReadPrice := int64(600_000)
 	model, err := store.CreateCanonicalModel(ctx, CreateCanonicalModelCommand{
-		PublicName: "gpt-4o-mini", Provider: "OpenAI", Protocol: "chat_completions", AdminID: 1,
+		PublicName: "gpt-4o-mini", Provider: "OpenAI", AdminID: 1,
 		Price: OfficialPrice{Tiers: []PriceTier{{
 			MinimumInputTokens: 0, InputPriceMicros: 1_200_000,
 			OutputPriceMicros: &outputPrice, CacheReadPriceMicros: &cacheReadPrice,
@@ -74,7 +74,7 @@ INSERT INTO merchant_channel_tests
     (newapi_user_id, canonical_model_id, base_url, credential_fingerprint,
      adapter_type, capabilities, latency_ms, receipt_token_hash, expires_at, consumed_at)
 VALUES (7, $1, 'https://upstream.test/v1', $2, 'openai_compatible',
-        '["chat_completions"]'::jsonb, 10, $3, now() + interval '15 minutes', now())
+        '["text"]'::jsonb, 10, $3, now() + interval '15 minutes', now())
 RETURNING id
 `, model.ID,
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

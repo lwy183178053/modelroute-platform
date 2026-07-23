@@ -48,8 +48,6 @@ CREATE TABLE canonical_models (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     public_name varchar(255) NOT NULL UNIQUE,
     provider varchar(80) NOT NULL,
-    protocol text NOT NULL CHECK (protocol IN ('chat_completions', 'responses', 'image_generation')),
-    adapter_hint text NOT NULL DEFAULT 'auto',
     status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'archived')),
     current_official_price_version_id bigint,
     created_at timestamptz NOT NULL DEFAULT now(),

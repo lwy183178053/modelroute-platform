@@ -97,7 +97,7 @@ func TestBuildAliasPriceOptionsPreservesExistingAndWritesTieredExpression(t *tes
 		"billing_setting.billing_expr": `{"existing":"v1:tier(\"tier_1\", p * 2)"}`,
 	}
 	offers := []aliasPrice{{
-		Alias: "mkt-ov-42", Protocol: "responses", MultiplierBPS: 9_000,
+		Alias: "mkt-ov-42", PriceKind: "text", MultiplierBPS: 9_000,
 		Price: OfficialPrice{Tiers: []PriceTier{{
 			MinimumInputTokens: 0, InputPriceMicros: 3_000_000, OutputPriceMicros: &output,
 			CacheReadPriceMicros: &cacheRead, CacheWritePriceMicros: &cacheWrite,
@@ -116,7 +116,7 @@ func TestBuildAliasPriceOptionsPreservesExistingAndWritesTieredExpression(t *tes
 
 func TestBuildAliasPriceOptionsUsesImageMatrix(t *testing.T) {
 	options, err := buildAliasPriceOptions(map[string]string{}, []aliasPrice{{
-		Alias: "mkt-ov-image", Protocol: "image_generation", MultiplierBPS: 10_000,
+		Alias: "mkt-ov-image", PriceKind: "image", MultiplierBPS: 10_000,
 		Price: OfficialPrice{ImagePrices: []ImagePriceItem{{Quality: "standard", Size: "1024x1024", PriceMicros: 40_000}}},
 	}})
 	if err != nil {
@@ -131,7 +131,7 @@ func TestBuildAliasPriceOptionsUsesImageMatrix(t *testing.T) {
 func TestPriceSynchronizerUpdatesAllOptionsAndChannelBeforeActivation(t *testing.T) {
 	repository := &priceSyncRepositoryStub{
 		prices: []aliasPrice{{
-			Alias: "mkt-ov-42", Protocol: "responses", MultiplierBPS: 10_000,
+			Alias: "mkt-ov-42", PriceKind: "text", MultiplierBPS: 10_000,
 			Price: OfficialPrice{Tiers: []PriceTier{{MinimumInputTokens: 0, InputPriceMicros: 1_000_000, OutputPriceMicros: int64Pointer(2_000_000)}}},
 		}},
 		channels: []ChannelPriceRoute{{MerchantChannelID: 51, NewAPIChannelID: 41, PublicModels: []string{"gpt-5.5"}, Aliases: map[string]string{"mkt-ov-42": "gpt-5.5"}}},
@@ -168,7 +168,7 @@ func TestPriceSynchronizerUpdatesAllOptionsAndChannelBeforeActivation(t *testing
 func TestPriceSynchronizerDoesNotActivateWhenExpressionUpdateFails(t *testing.T) {
 	repository := &priceSyncRepositoryStub{
 		prices: []aliasPrice{{
-			Alias: "mkt-ov-42", Protocol: "responses", MultiplierBPS: 10_000,
+			Alias: "mkt-ov-42", PriceKind: "text", MultiplierBPS: 10_000,
 			Price: OfficialPrice{Tiers: []PriceTier{{MinimumInputTokens: 0, InputPriceMicros: 1_000_000, OutputPriceMicros: int64Pointer(2_000_000)}}},
 		}},
 		channels: []ChannelPriceRoute{{MerchantChannelID: 51, NewAPIChannelID: 41}},
@@ -191,7 +191,7 @@ func TestPriceSynchronizerDoesNotActivateWhenExpressionUpdateFails(t *testing.T)
 func TestPriceSynchronizerRestoresOptionsAndChannelWhenChannelUpdateFails(t *testing.T) {
 	repository := &priceSyncRepositoryStub{
 		prices: []aliasPrice{{
-			Alias: "mkt-ov-42", Protocol: "responses", MultiplierBPS: 10_000,
+			Alias: "mkt-ov-42", PriceKind: "text", MultiplierBPS: 10_000,
 			Price: OfficialPrice{Tiers: []PriceTier{{MinimumInputTokens: 0, InputPriceMicros: 1_000_000, OutputPriceMicros: int64Pointer(2_000_000)}}},
 		}},
 		channels: []ChannelPriceRoute{{MerchantChannelID: 51, NewAPIChannelID: 41, PublicModels: []string{"gpt-5.5"}, Aliases: map[string]string{"mkt-ov-42": "gpt-5.5"}}},
@@ -212,7 +212,7 @@ func TestPriceSynchronizerRestoresOptionsAndChannelWhenChannelUpdateFails(t *tes
 func TestPriceSynchronizerCanFinalizeUpdatedOfferAsInactive(t *testing.T) {
 	repository := &priceSyncRepositoryStub{
 		prices: []aliasPrice{{
-			Alias: "mkt-ov-43", Protocol: "responses", MultiplierBPS: 9_000,
+			Alias: "mkt-ov-43", PriceKind: "text", MultiplierBPS: 9_000,
 			Price: OfficialPrice{Tiers: []PriceTier{{MinimumInputTokens: 0, InputPriceMicros: 1_000_000, OutputPriceMicros: int64Pointer(2_000_000)}}},
 		}},
 		channels: []ChannelPriceRoute{{MerchantChannelID: 51, NewAPIChannelID: 41, PublicModels: []string{"gpt-5.5"}, Aliases: map[string]string{"mkt-ov-43": "gpt-5.5"}}},

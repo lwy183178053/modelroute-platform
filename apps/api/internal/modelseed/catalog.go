@@ -44,7 +44,6 @@ type Catalog struct {
 type SeedModel struct {
 	PublicName  string                `json:"public_name"`
 	Provider    string                `json:"provider"`
-	Protocol    string                `json:"protocol"`
 	EvidenceURL string                `json:"evidence_url"`
 	Price       httpapi.OfficialPrice `json:"price"`
 }
@@ -105,7 +104,6 @@ func validateCatalog(catalog *Catalog) error {
 		model := &catalog.Models[index]
 		model.PublicName = strings.TrimSpace(model.PublicName)
 		model.Provider = strings.TrimSpace(model.Provider)
-		model.Protocol = strings.TrimSpace(model.Protocol)
 		model.EvidenceURL = strings.TrimSpace(model.EvidenceURL)
 		if _, exists := seen[model.PublicName]; exists {
 			return fmt.Errorf("模型种子存在重复 API 标识：%s", model.PublicName)
@@ -124,7 +122,6 @@ func validateCatalog(catalog *Catalog) error {
 		command := httpapi.CreateCanonicalModelCommand{
 			PublicName: model.PublicName,
 			Provider:   model.Provider,
-			Protocol:   model.Protocol,
 			AdminID:    1,
 			Price:      model.Price,
 		}

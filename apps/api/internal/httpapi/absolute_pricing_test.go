@@ -12,7 +12,7 @@ func TestValidateTextPriceRequiresContinuousTiers(t *testing.T) {
 		{MinimumInputTokens: 0, MaximumInputTokens: int64Pointer(200_000), InputPriceMicros: 3_000_000, OutputPriceMicros: int64Pointer(15_000_000)},
 		{MinimumInputTokens: 200_001, InputPriceMicros: 6_000_000, OutputPriceMicros: int64Pointer(22_500_000)},
 	}}
-	if err := validateOfficialPrice(valid, "responses"); err != nil {
+	if err := validateOfficialPrice(valid); err != nil {
 		t.Fatalf("连续价格阶梯被拒绝：%v", err)
 	}
 	for _, test := range []struct {
@@ -27,23 +27,23 @@ func TestValidateTextPriceRequiresContinuousTiers(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			price := valid
 			price.Tiers = test.tiers
-			if err := validateOfficialPrice(price, "responses"); err == nil {
+	if err := validateOfficialPrice(price); err == nil {
 				t.Fatal("无效阶梯未被拒绝")
 			}
 		})
 	}
 }
 
-func TestValidateCanonicalModelUsesProviderAndProtocolWhitelists(t *testing.T) {
+func TestValidateCanonicalModelInfersTextOrImageFromPrice(t *testing.T) {
 	price := OfficialPrice{Tiers: []PriceTier{{MinimumInputTokens: 0, InputPriceMicros: 100_000, OutputPriceMicros: int64Pointer(200_000)}}}
-	if err := validateCanonicalModel(CreateCanonicalModelCommand{PublicName: "model", Provider: "Unknown", Protocol: "responses", Price: price}); err == nil {
+	if err := validateCanonicalModel(CreateCanonicalModelCommand{PublicName: "model", Provider: "Unknown", Price: price}); err == nil {
 		t.Fatal("未知模型厂商未被拒绝")
 	}
-	if err := validateCanonicalModel(CreateCanonicalModelCommand{PublicName: "model", Provider: "OpenAI", Protocol: "embeddings", Price: price}); err == nil {
-		t.Fatal("Embeddings 协议未被拒绝")
+	if err := validateCanonicalModel(CreateCanonicalModelCommand{PublicName: "model", Provider: "OpenAI", Price: price}); err != nil {
+		t.Fatalf("无协议文本模型被拒绝：%v", err)
 	}
 	image := OfficialPrice{ImagePrices: []ImagePriceItem{{Quality: "standard", Size: "1024x1024", PriceMicros: 40_000}}}
-	if err := validateCanonicalModel(CreateCanonicalModelCommand{PublicName: "gpt-image-2", Provider: "OpenAI", Protocol: "image_generation", Price: image}); err != nil {
+	if err := validateCanonicalModel(CreateCanonicalModelCommand{PublicName: "gpt-image-2", Provider: "OpenAI", Price: image}); err != nil {
 		t.Fatalf("图片模型被拒绝：%v", err)
 	}
 }
@@ -57,7 +57,7 @@ func TestBuildTieredExpressionUsesNumericPricesAndCache(t *testing.T) {
 		},
 		{MinimumInputTokens: 200_001, InputPriceMicros: 6_000_000, OutputPriceMicros: int64Pointer(22_500_000)},
 	}}
-	expression, tiers, err := buildTieredExpression(price, 9_000, "responses")
+	expression, tiers, err := buildTieredExpression(price, 9_000)
 	if err != nil {
 		t.Fatalf("生成表达式失败：%v", err)
 	}
@@ -73,11 +73,11 @@ func TestBuildTieredExpressionUsesNumericPricesAndCache(t *testing.T) {
 func TestBuildTieredExpressionAcceptsZeroAndFiveTimesMultiplier(t *testing.T) {
 	output := int64(2_000_000)
 	price := OfficialPrice{Tiers: []PriceTier{{MinimumInputTokens: 0, InputPriceMicros: 1_000_000, OutputPriceMicros: &output}}}
-	zero, tiers, err := buildTieredExpression(price, 0, "responses")
+	zero, tiers, err := buildTieredExpression(price, 0)
 	if err != nil || zero != `v1:tier("tier_1", p * 0 + c * 0)` || tiers[0].InputPriceMicros != 0 {
 		t.Fatalf("零倍率表达式=%q，阶梯=%+v，错误=%v", zero, tiers, err)
 	}
-	five, _, err := buildTieredExpression(price, 50_000, "responses")
+	five, _, err := buildTieredExpression(price, 50_000)
 	if err != nil || five != `v1:tier("tier_1", p * 5 + c * 10)` {
 		t.Fatalf("五倍表达式=%q，错误=%v", five, err)
 	}

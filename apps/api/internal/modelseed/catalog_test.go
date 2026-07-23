@@ -33,7 +33,7 @@ func TestParseCatalogRejectsNonOfficialEvidenceURL(t *testing.T) {
 	}
 }
 
-func TestCurrentCatalogCoversPinnedProvidersAndProtocols(t *testing.T) {
+func TestCurrentCatalogCoversPinnedProvidersAndPriceKinds(t *testing.T) {
 	catalog, err := CurrentCatalog()
 	if err != nil {
 		t.Fatalf("读取当前种子：%v", err)
@@ -45,11 +45,11 @@ func TestCurrentCatalogCoversPinnedProvidersAndProtocols(t *testing.T) {
 		t.Fatalf("当前种子模型数=%d，期望 21", len(catalog.Models))
 	}
 	providers := map[string]bool{}
-	protocols := map[string]bool{}
+	priceKinds := map[string]bool{}
 	models := map[string]bool{}
 	for _, model := range catalog.Models {
 		providers[model.Provider] = true
-		protocols[model.Protocol] = true
+		priceKinds[comparablePrice(model.Price).PriceKind] = true
 		models[model.PublicName] = true
 	}
 	for _, provider := range []string{"OpenAI", "Anthropic", "Gemini", "DeepSeek", "Qwen", "Moonshot"} {
@@ -60,13 +60,10 @@ func TestCurrentCatalogCoversPinnedProvidersAndProtocols(t *testing.T) {
 	if providers["Minimax"] {
 		t.Fatal("当前种子不应包含 MiniMax")
 	}
-	for _, protocol := range []string{"chat_completions", "responses", "image_generation"} {
-		if !protocols[protocol] {
-			t.Fatalf("当前种子缺少协议 %s", protocol)
+	for _, priceKind := range []string{"text", "image"} {
+		if !priceKinds[priceKind] {
+			t.Fatalf("当前种子缺少价格类型 %s", priceKind)
 		}
-	}
-	if protocols["embeddings"] {
-		t.Fatal("V2 模型种子仍包含 Embeddings")
 	}
 	for _, name := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-image-1", "gpt-image-1.5", "gpt-image-2", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-5", "kimi-k3"} {
 		if !models[name] {
@@ -115,7 +112,6 @@ func validCatalogJSON(modelName string, provider string) string {
 		"models":[{
 			"public_name":"` + modelName + `",
 			"provider":"` + provider + `",
-			"protocol":"responses",
 			"evidence_url":"https://developers.openai.com/api/docs/models/gpt-5.4",
 			"price":{
 				"tiers":[{

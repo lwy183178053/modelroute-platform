@@ -8,7 +8,6 @@ type SyncedChannelModel struct {
 	CanonicalModelID  int64  `json:"canonical_model_id,omitempty"`
 	Model             string `json:"model,omitempty"`
 	Provider          string `json:"provider,omitempty"`
-	Protocol          string `json:"protocol,omitempty"`
 	MatchStatus       string `json:"match_status"`
 }
 
@@ -38,7 +37,6 @@ func matchUpstreamModels(upstream []string, canonical []CanonicalModel) []Synced
 			item.CanonicalModelID = model.ID
 			item.Model = model.PublicName
 			item.Provider = model.Provider
-			item.Protocol = model.Protocol
 			item.MatchStatus = "matched"
 		}
 		result = append(result, item)

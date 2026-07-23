@@ -212,7 +212,7 @@ func TestMerchantChannelTestReturnsBoundReceiptWithoutPersistingCredential(t *te
 		t.Fatal("渠道检测器已隔离，不应走用户 New API 会话")
 	}))
 	services.Routing = &routingRepositoryStub{listModels: func(context.Context) ([]CanonicalModel, error) {
-		return []CanonicalModel{{ID: 61, PublicName: "claude-fable-5", Provider: "Anthropic", Protocol: "responses", Status: "active"}}, nil
+		return []CanonicalModel{{ID: 61, PublicName: "claude-fable-5", Provider: "Anthropic", Status: "active", Price: OfficialPrice{PriceKind: "text"}}}, nil
 	}}
 	services.ChannelTests = channelTesterStub{test: func(_ context.Context, request ChannelTestRequest) (ChannelTestOutcome, error) {
 		if request.Model.ID != 61 || request.BaseURL != "https://api.merchant.example" || request.APIKey != "sk-upstream-secret" {
@@ -281,7 +281,7 @@ func TestAdminVerifiesMerchantCredentialThroughNewAPI(t *testing.T) {
 		if reviewID != 21 || status != "verifying" {
 			t.Fatalf("认领审核参数=%d %s", reviewID, status)
 		}
-		return MerchantChannelReview{ID: 21, UserID: 7, CanonicalModelID: 61, Model: "gpt-5.6", Provider: "OpenAI", Protocol: "responses", AdapterType: "openai_compatible", BaseURL: "https://api.merchant.example", EncryptedCredential: encrypted}, nil
+		return MerchantChannelReview{ID: 21, UserID: 7, CanonicalModelID: 61, Model: "gpt-5.6", Provider: "OpenAI", PriceKind: "text", AdapterType: "openai_compatible", BaseURL: "https://api.merchant.example", EncryptedCredential: encrypted}, nil
 	}
 	repository.finishVerify = func(_ context.Context, reviewID int64, adminID int, adapterType string, failure string) error {
 		if reviewID != 21 || adminID != 1 || failure != "" || adapterType != "openai_compatible" {
@@ -339,7 +339,7 @@ func TestAdminApprovalCreatesAndTestsNewAPIChannelBeforeFinalizing(t *testing.T)
 		if status != "approving" {
 			t.Fatalf("审批状态=%s", status)
 		}
-		return MerchantChannelReview{ID: 21, UserID: 7, ApplicationID: 11, CanonicalModelID: 61, Model: "gpt-5.6", Provider: "OpenAI", Protocol: "responses", ChannelName: "主线路", AdapterType: "openai_compatible", BaseURL: "https://api.merchant.example", EncryptedCredential: encrypted, Status: "approving"}, nil
+		return MerchantChannelReview{ID: 21, UserID: 7, ApplicationID: 11, CanonicalModelID: 61, Model: "gpt-5.6", Provider: "OpenAI", PriceKind: "text", ChannelName: "主线路", AdapterType: "openai_compatible", BaseURL: "https://api.merchant.example", EncryptedCredential: encrypted, Status: "approving"}, nil
 	}
 	repository.finishApproval = func(_ context.Context, reviewID int64, adminID int, channelID int) (MerchantApproval, error) {
 		if reviewID != 21 || adminID != 1 || channelID != 41 {
@@ -574,7 +574,7 @@ func TestApprovalFailureDeletesNewAPIChannelAndRestoresReview(t *testing.T) {
 	restored := false
 	repository := &merchantRepositoryStub{}
 	repository.claimReview = func(context.Context, int64, string) (MerchantChannelReview, error) {
-		return MerchantChannelReview{ID: 21, UserID: 7, CanonicalModelID: 61, Model: "gpt-5.6", Provider: "OpenAI", Protocol: "responses", ChannelName: "主线路", AdapterType: "openai_compatible", BaseURL: "https://api.merchant.example", EncryptedCredential: encrypted}, nil
+		return MerchantChannelReview{ID: 21, UserID: 7, CanonicalModelID: 61, Model: "gpt-5.6", Provider: "OpenAI", PriceKind: "text", ChannelName: "主线路", AdapterType: "openai_compatible", BaseURL: "https://api.merchant.example", EncryptedCredential: encrypted}, nil
 	}
 	repository.cancelApproval = func(_ context.Context, reviewID int64, _ string) error {
 		restored = reviewID == 21

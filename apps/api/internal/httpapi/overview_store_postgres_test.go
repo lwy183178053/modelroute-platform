@@ -45,8 +45,8 @@ VALUES (true, $1, $2)
 
 	var modelID, priceID int64
 	if err := database.QueryRowContext(ctx, `
-INSERT INTO canonical_models (public_name, provider, protocol)
-VALUES ('gpt-4o-mini', 'OpenAI', 'chat_completions') RETURNING id
+INSERT INTO canonical_models (public_name, provider)
+VALUES ('gpt-4o-mini', 'OpenAI') RETURNING id
 `).Scan(&modelID); err != nil {
 		t.Fatal(err)
 	}

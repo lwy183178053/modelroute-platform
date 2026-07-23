@@ -76,16 +76,14 @@ func roundMultiplyDivide(value int64, multiplier int64, divisor int64) (int64, e
 	return product.Int64(), nil
 }
 
-func validateOfficialPrice(price OfficialPrice, protocol string) error {
-	if protocol == "image_generation" {
+func validateOfficialPrice(price OfficialPrice) error {
+	price = normalizeOfficialPrice(price)
+	if price.PriceKind == "image" {
 		if len(price.Tiers) != 0 {
 			return errors.New("图片模型不得配置 Token 价格阶梯")
 		}
 		_, _, err := buildImageExpression(price.ImagePrices, 10_000)
 		return err
-	}
-	if protocol != "chat_completions" && protocol != "responses" {
-		return errors.New("模型协议不在平台开放范围")
 	}
 	if len(price.ImagePrices) != 0 {
 		return errors.New("文本模型不得配置图片价格矩阵")
@@ -126,19 +124,19 @@ func validateOfficialPrice(price OfficialPrice, protocol string) error {
 	return nil
 }
 
-func validateAbsolutePrice(price OfficialPrice, protocol string) error {
-	return validateOfficialPrice(price, protocol)
+func validateAbsolutePrice(price OfficialPrice) error {
+	return validateOfficialPrice(price)
 }
 
 func ValidateCanonicalModel(command CreateCanonicalModelCommand) error {
 	return validateCanonicalModel(command)
 }
 
-func buildTieredExpression(price OfficialPrice, discountBPS int, protocol string) (string, []OfferPriceTier, error) {
+func buildTieredExpression(price OfficialPrice, discountBPS int) (string, []OfferPriceTier, error) {
 	if discountBPS < 0 || discountBPS > 50_000 {
 		return "", nil, errors.New("商户倍率必须在 0 到 50000 基点之间")
 	}
-	if err := validateAbsolutePrice(price, protocol); err != nil {
+	if err := validateAbsolutePrice(price); err != nil {
 		return "", nil, err
 	}
 	discounted := make([]OfferPriceTier, 0, len(price.Tiers))

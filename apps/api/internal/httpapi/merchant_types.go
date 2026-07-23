@@ -38,7 +38,7 @@ type MerchantChannelReview struct {
 	CanonicalModelID      int64                `json:"canonical_model_id"`
 	Model                 string               `json:"model"`
 	Provider              string               `json:"provider"`
-	Protocol              string               `json:"protocol"`
+	PriceKind             string               `json:"-"`
 	AdapterType           string               `json:"adapter_type"`
 	ChannelTestID         int64                `json:"channel_test_id"`
 	BaseURL               string               `json:"base_url"`
@@ -115,7 +115,6 @@ type MerchantChannel struct {
 	CanonicalModelID      int64      `json:"canonical_model_id"`
 	Model                 string     `json:"model"`
 	Provider              string     `json:"provider"`
-	Protocol              string     `json:"protocol"`
 	AdapterType           string     `json:"adapter_type"`
 	BaseURL               string     `json:"base_url"`
 	Models                []string   `json:"matched_models,omitempty"`

@@ -52,7 +52,6 @@ func Apply(ctx context.Context, repository Repository, catalog Catalog, administ
 			created, err := repository.CreateCanonicalModel(ctx, httpapi.CreateCanonicalModelCommand{
 				PublicName: seed.PublicName,
 				Provider:   seed.Provider,
-				Protocol:   seed.Protocol,
 				AdminID:    administratorID,
 				Price:      seed.Price,
 			})
@@ -63,8 +62,8 @@ func Apply(ctx context.Context, repository Repository, catalog Catalog, administ
 			result.Created++
 			continue
 		}
-		if model.Provider != seed.Provider || model.Protocol != seed.Protocol {
-			return Result{}, fmt.Errorf("模型 %s 的厂商或协议与种子不一致", seed.PublicName)
+		if model.Provider != seed.Provider {
+			return Result{}, fmt.Errorf("模型 %s 的厂商与种子不一致", seed.PublicName)
 		}
 		if pricesEqual(model.Price, seed.Price) {
 			result.Unchanged++

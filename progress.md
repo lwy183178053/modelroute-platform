@@ -1450,3 +1450,44 @@
 - `apps/web/artifacts/withdrawal-modal-mobile.png`：更新人民币提现移动回归图。
 - `progress.md`：追加本阶段实现、验证、文件清单和回滚点。
 - 回滚点：前一提交为 `dbf128b`；执行 `git revert <本阶段提交>` 可回退 V2 前端与截图。该阶段不改生产数据。
+
+## 2026-07-23 - Task: 建立 V2 受控备份重置工具并同步中文运行文档
+
+### What was done
+
+- 扩展生产备份为平台库、New API 库、Redis RDB、New API 文件、SMTP 设置、共享环境和管理员受限文件的完整回滚包。
+- 新增 103 专用 V2 数据重置脚本，强制校验确认值、目标 IP、Git 哈希发布目录、共享数据真实路径和 `modelroute` Compose 项目。
+- 重置流程固定先做 SHA-256 校验与双数据库临时恢复演练，再清理 ModelRoute 四个数据子目录，原生初始化唯一管理员、恢复 SMTP、导入 V2 种子并执行基础验收。
+- 删除运营验收中的分组接口访问，更新全部现行中文文档为单模型、零至五倍、密钥路由、冷却探测、图片计费和人民币口径；旧计划与规范标记为历史文件。
+
+### Testing
+
+- 部署工具测试先稳定捕获旧种子路径、缺少 Redis/受限配置备份和缺少重置脚本；实现后执行 `python -m unittest discover -s deploy/tests -p 'test_*.py'`，22 个测试全部通过。
+- 执行 `bash -n deploy/scripts/backup.sh`、`bash -n deploy/scripts/reset-v2-data.sh` 和 `python -m py_compile deploy/scripts/bootstrap-newapi.py`，语法检查通过。
+- 执行 `docker compose --env-file .env.example --profile tools config --quiet`，Compose 配置校验通过。
+- 中文文档关键口径检查确认 `2026-07-23-v2`、`0.00x..5.00x`、人民币额度、图片入口、渠道检测和受控重置命令均已写入现行文档。
+- 只读检查 103 的真实发布结构，确认 ModelRoute 数据位于 `/opt/modelroute-platform/shared/data`、Compose 项目名为 `modelroute`，Sub2API 为独立项目。
+
+### Notes
+
+- `deploy/scripts/backup.sh`：增加 Redis、New API 文件、SMTP 与受限配置备份和完整性检查。
+- `deploy/scripts/bootstrap-newapi.py`：通过 New API 原生接口初始化唯一管理员并恢复 SMTP 白名单设置。
+- `deploy/scripts/reset-v2-data.sh`：实现 103 专用、显式确认、先备份演练后重置的 V2 发布流程。
+- `deploy/scripts/verify-operations.sh`：删除已退出的分组接口只读验收。
+- `deploy/tests/test_bootstrap_newapi.py`：覆盖 SMTP 设置备份白名单和未知字段拦截。
+- `deploy/tests/test_release_tools.py`：锁定 V2 种子、运营接口、完整备份和重置保护条件。
+- `docs/New API版本与许可.md`：说明 New API 原生契约与 ModelRoute 公网协议边界。
+- `docs/V2数据基线.md`：补充受控重置脚本、固定路径和回滚边界。
+- `docs/superpowers/plans/2026-07-22-ModelRoute完整实施计划.md`：标记旧实施计划已由 V2 取代。
+- `docs/superpowers/specs/2026-07-22-API聚合平台设计规范.md`：标记旧多模型和周期探活规范为历史口径。
+- `docs/商户与渠道审核接口.md`：重写自助检测、单模型提交、管理员复检和密钥生命周期。
+- `docs/官方模型种子.md`：记录 V2 的 23 个模型、价格数字一比一和证据约束。
+- `docs/易支付充值.md`：改为纯人民币订单和 `¥1 = 500000` 额度。
+- `docs/模型报价路由与健康.md`：记录密钥策略、唯一报价、图片入口和仅冷却探测。
+- `docs/绝对价格与分层计费.md`：记录无币种价格、零至五倍和文本/图片表达式。
+- `docs/账号与管理员接口.md`：将账号余额说明统一为人民币。
+- `docs/运营管理与升级验收.md`：删除分组功能并增加 V2 发布验收要求。
+- `docs/部署环境审计.md`：更新外围分组删除后的功能边界。
+- `docs/部署运行手册.md`：增加 V2 数据重置完整操作与验收顺序。
+- `progress.md`：追加本阶段实现、验证、文件清单和回滚点。
+- 回滚点：前一提交为 `ea0318a`；执行 `git revert <本阶段提交>` 可回退部署工具和中文文档。103 仍运行 V1 数据，当前阶段回退不涉及生产恢复；V2 重置后使用脚本输出的完整备份目录回滚。

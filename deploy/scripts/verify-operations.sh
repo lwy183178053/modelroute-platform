@@ -46,7 +46,6 @@ for entry in \
   "overview|/api/admin/overview" \
   "admin-usage|/api/admin/usage?p=1&page_size=5" \
   "settings|/api/admin/platform-settings" \
-  "groups|/api/admin/groups" \
   "redemptions|/api/admin/redemptions?p=1&page_size=5" \
   "tasks|/api/admin/system-tasks?p=1&page_size=5" \
   "channels|/api/admin/channels?p=1&page_size=5"
@@ -74,4 +73,4 @@ for forbidden in ("smtp_password", "smtp_token", "merchant_key", "encryption_key
     assert forbidden not in encoded, f"设置接口泄露敏感字段: {forbidden}"
 PY
 
-echo "运营管理只读验收通过：用量、总览、设置、分组、兑换码、任务和渠道列表正常。"
+echo "运营管理只读验收通过：用量、总览、设置、兑换码、任务和渠道列表正常。"

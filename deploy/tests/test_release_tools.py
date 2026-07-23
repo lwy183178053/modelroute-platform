@@ -38,7 +38,7 @@ class ReleaseToolContractTest(unittest.TestCase):
             self.assertIn(marker, verifier)
 
     def test_official_model_seed_catalog_is_included_in_release(self):
-        catalog = ROOT / "apps" / "api" / "internal" / "modelseed" / "data" / "2026-07-23-v1.json"
+        catalog = ROOT / "apps" / "api" / "internal" / "modelseed" / "data" / "2026-07-23-v2.json"
         self.assertTrue(catalog.is_file())
         result = subprocess.run(
             ["git", "check-ignore", "--quiet", str(catalog.relative_to(ROOT))],
@@ -53,12 +53,12 @@ class ReleaseToolContractTest(unittest.TestCase):
             "/api/admin/overview",
             "/api/admin/usage",
             "/api/admin/platform-settings",
-            "/api/admin/groups",
             "/api/admin/redemptions",
             "/api/admin/system-tasks",
             "/api/admin/channels",
         ):
             self.assertIn(path, verifier)
+        self.assertNotIn("/api/admin/groups", verifier)
         for write_path in (
             "/api/redemptions/redeem",
             "/api/admin/system-tasks/log-cleanup",
@@ -79,6 +79,38 @@ class ReleaseToolContractTest(unittest.TestCase):
         self.assertIn('test "$NEWAPI_TEST_DB" != "$NEWAPI_DB_NAME"', script)
         self.assertNotIn('-d "$PLATFORM_DB_NAME" <', script)
         self.assertNotIn('-d "$NEWAPI_DB_NAME" <', script)
+
+    def test_v2_backup_includes_redis_newapi_and_restricted_configuration(self):
+        script = read_script("backup.sh")
+        for marker in (
+            "umask 077",
+            "redis-cli SAVE",
+            "redis.rdb",
+            "newapi-data.tar.gz",
+            "newapi-smtp-options.json",
+            "env.backup",
+            "bootstrap-admin.txt",
+            "sha256sum",
+        ):
+            self.assertIn(marker, script)
+
+    def test_v2_reset_is_confirmed_scoped_backed_up_and_bootstrapped(self):
+        script = read_script("reset-v2-data.sh")
+        for marker in (
+            "CONFIRM_V2_RESET=MODELROUTE_V2_RESET_103",
+            "38.34.191.103",
+            "/opt/modelroute-platform/shared/data",
+            'test "$COMPOSE_PROJECT_NAME" = "modelroute"',
+            "backup.sh",
+            "verify-backup-restore.sh",
+            "sha256sum -c",
+            "docker compose --env-file .env down",
+            "bootstrap-newapi.py",
+            "model-seed",
+        ):
+            self.assertIn(marker, script)
+        for forbidden in ("/opt/sub2api", "docker system prune", "docker volume prune"):
+            self.assertNotIn(forbidden, script)
 
     def test_rollback_requires_confirmation_and_rejects_traversal(self):
         script = ROOT / "deploy" / "scripts" / "rollback-release.sh"

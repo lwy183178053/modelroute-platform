@@ -1647,3 +1647,33 @@
 - `deploy/scripts/reset-v2-data.sh`：开发库重置验收纳入多模型渠道迁移。
 - `docs/多模型渠道运营升级.md`：记录业务流程、接口和数据边界。
 - 回滚点：本阶段提交前的基线为 `918d1bb`；执行 `git revert <本阶段提交>` 可回退本轮代码、前端和迁移改动。开发库回滚需同时恢复本阶段迁移前的平台库与 New API 备份。
+
+## 2026-07-23 - Task: 将 103 开发重置改为直接覆盖
+
+### What was done
+
+- 按最新部署决定删除 V2 重置流程中的新备份、校验和恢复演练，保留 103 地址、Git 发布目录、共享数据路径和 `modelroute` Compose 项目边界校验。
+- 重置脚本改为先完成配置检查和镜像构建，再直接清空四个 ModelRoute 数据目录；重建后校验两份迁移、20 个有效模型和 MiniMax 为零。
+- 多模型渠道、官方模型数量、厂商数量和部署验收文档统一到当前实现，界面冒烟输出不再使用“单模型渠道”旧文案。
+
+### Testing
+
+- 新增直接覆盖契约后先运行定向测试，确认旧脚本因仍调用备份流程而失败；修改后定向测试通过。
+- 执行 `go test -count=1 ./...`、`go vet ./...` 和 `go build ./...`，全部通过。
+- 执行 `npm.cmd run build` 和 `npm.cmd run test:ui`，前端构建及三套工作区桌面/移动端烟熏通过。
+- 执行 `python -m unittest discover -s deploy/tests -p 'test_*.py' -v`，27 个部署测试全部通过；Compose 配置校验、Shell 语法检查和 `git diff --check` 通过。
+
+### Notes
+
+- `deploy/scripts/reset-v2-data.sh`：改为 103 定向直接覆盖并增加迁移、模型数和 MiniMax 清理验收。
+- `deploy/tests/test_release_tools.py`：锁定重置流程不得调用备份或恢复脚本。
+- `apps/web/scripts/ui-smoke.mjs`：将渠道冒烟结果文案更新为多模型渠道。
+- `apps/web/src/views/admin/AdminMerchants.jsx`：移除商户审核页的单模型旧描述。
+- `docs/V2数据基线.md`：记录多模型关系和直接重置边界。
+- `docs/商户与渠道审核接口.md`：更新多模型同步、逐模型检查和渠道管理接口。
+- `docs/官方模型种子.md`：更新为 20 个模型、6 家厂商并移除 MiniMax。
+- `docs/模型报价路由与健康.md`：更新多模型渠道报价和路由关系。
+- `docs/运营管理与升级验收.md`：更新模型目录验收数量。
+- `docs/部署运行手册.md`：更新直接覆盖命令、两份迁移和 20 个模型验收步骤。
+- `progress.md`：追加本轮直接覆盖策略、验证证据和文件清单。
+- 回滚点：本阶段前的代码基线为 `382c3ad`；执行 `git revert <本阶段提交>` 可回退本轮脚本、文档和文案。103 尚未执行本轮直接重置。

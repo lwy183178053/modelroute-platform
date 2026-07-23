@@ -143,22 +143,29 @@ class ReleaseToolContractTest(unittest.TestCase):
         ):
             self.assertIn(marker, script)
 
-    def test_v2_reset_is_confirmed_scoped_backed_up_and_bootstrapped(self):
+    def test_v2_reset_is_confirmed_scoped_direct_and_bootstrapped(self):
         script = read_script("reset-v2-data.sh")
         for marker in (
             "CONFIRM_V2_RESET=MODELROUTE_V2_RESET_103",
             "38.34.191.103",
             "/opt/modelroute-platform/shared/data",
             'test "$COMPOSE_PROJECT_NAME" = "modelroute"',
-            "backup.sh",
-            "verify-backup-restore.sh",
-            "sha256sum -c",
+            "SMTP_OPTIONS_FILE",
             "docker compose --env-file .env down",
             "bootstrap-newapi.py",
             "model-seed",
+            'test "$MODEL_COUNT" = "20"',
+            'test "$MINIMAX_COUNT" = "0"',
         ):
             self.assertIn(marker, script)
-        for forbidden in ("/opt/sub2api", "docker system prune", "docker volume prune"):
+        for forbidden in (
+            "/opt/sub2api",
+            "docker system prune",
+            "docker volume prune",
+            "backup.sh",
+            "verify-backup-restore.sh",
+            "sha256sum -c",
+        ):
             self.assertNotIn(forbidden, script)
 
     def test_rollback_requires_confirmation_and_rejects_traversal(self):

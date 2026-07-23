@@ -28,7 +28,6 @@ cd "$ROOT_DIR"
 test -f .env
 test "$(readlink -f .env)" = "/opt/modelroute-platform/shared/.env"
 test "$(readlink -f data)" = "/opt/modelroute-platform/shared/data"
-test "$(readlink -f backups)" = "/opt/modelroute-platform/shared/backups"
 
 set -a
 . ./.env
@@ -37,14 +36,19 @@ test "$COMPOSE_PROJECT_NAME" = "modelroute"
 APP_VERSION="$RELEASE_NAME"
 export APP_VERSION
 
-BACKUP_DIR=$(BACKUP_ROOT=/opt/modelroute-platform/shared/backups deploy/scripts/backup.sh)
-BACKUP_DIR=$(readlink -f "$BACKUP_DIR")
-case "$BACKUP_DIR" in
-  /opt/modelroute-platform/shared/backups/*) ;;
-  *) echo "备份目录超出 ModelRoute shared/backups" >&2; exit 1 ;;
+if [ -z "${SMTP_OPTIONS_FILE:-}" ]; then
+  echo "必须设置 SMTP_OPTIONS_FILE 指向现有受限 SMTP 配置" >&2
+  exit 1
+fi
+SMTP_OPTIONS_FILE=$(readlink -f "$SMTP_OPTIONS_FILE")
+case "$SMTP_OPTIONS_FILE" in
+  /opt/modelroute-platform/shared/*) ;;
+  *) echo "SMTP 配置不在 ModelRoute shared 范围内" >&2; exit 1 ;;
 esac
-(cd "$BACKUP_DIR" && sha256sum -c SHA256SUMS)
-CONFIRM_RESTORE_DRILL=MODELROUTE_RESTORE_DRILL deploy/scripts/verify-backup-restore.sh "$BACKUP_DIR"
+test -f "$SMTP_OPTIONS_FILE"
+
+docker compose --env-file .env --profile tools config --quiet
+docker compose --env-file .env --profile tools build
 
 docker compose --env-file .env down --remove-orphans
 
@@ -55,14 +59,12 @@ for name in postgres redis new-api new-api-logs; do
   find "$target" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 done
 
-docker compose --env-file .env --profile tools config --quiet
-docker compose --env-file .env --profile tools build
 docker compose --env-file .env up -d --wait postgres redis new-api
 
 NEW_API_CONTAINER=$(docker compose --env-file .env ps -q new-api)
 NEW_API_IP=$(docker inspect -f '{{with index .NetworkSettings.Networks "modelroute_backend"}}{{.IPAddress}}{{end}}' "$NEW_API_CONTAINER")
 test -n "$NEW_API_IP"
-python3 deploy/scripts/bootstrap-newapi.py "http://$NEW_API_IP:3000" "$BACKUP_DIR/newapi-smtp-options.json"
+python3 deploy/scripts/bootstrap-newapi.py "http://$NEW_API_IP:3000" "$SMTP_OPTIONS_FILE"
 
 docker compose --env-file .env --profile tools run --rm model-seed
 docker compose --env-file .env up -d --wait --remove-orphans
@@ -73,5 +75,9 @@ test "$MIGRATIONS" = "000001_v2_baseline.sql
 000002_multimodel_channels.sql"
 SEED_VERSION=$(docker compose --env-file .env exec -T postgres psql -At -U "$POSTGRES_SUPERUSER" -d "$PLATFORM_DB_NAME" -c "SELECT value FROM platform_runtime_metadata WHERE key='official_model_seed_version'")
 test "$SEED_VERSION" = "2026-07-23-v2"
+MODEL_COUNT=$(docker compose --env-file .env exec -T postgres psql -At -U "$POSTGRES_SUPERUSER" -d "$PLATFORM_DB_NAME" -c "SELECT count(*) FROM canonical_models WHERE status <> 'archived'")
+test "$MODEL_COUNT" = "20"
+MINIMAX_COUNT=$(docker compose --env-file .env exec -T postgres psql -At -U "$POSTGRES_SUPERUSER" -d "$PLATFORM_DB_NAME" -c "SELECT count(*) FROM canonical_models WHERE lower(provider) = 'minimax'")
+test "$MINIMAX_COUNT" = "0"
 
-printf 'V2 数据重置与基础验收完成，回滚备份：%s\n' "$BACKUP_DIR"
+printf 'V2 数据直接重置与基础验收完成。\n'

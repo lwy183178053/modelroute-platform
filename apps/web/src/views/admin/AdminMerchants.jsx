@@ -72,7 +72,7 @@ export default function AdminMerchants({ notify }) {
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}
       <Section
         title="商户申请审核"
-        description="核对网站、单模型渠道和自动检测结果"
+        description="核对网站、渠道资料和审核结果"
         actions={<Button icon={RefreshCw} onClick={load}>刷新</Button>}
       >
         <div className="filter-toolbar slim-toolbar"><label className="search-box"><Search size={16} /><TextInput onChange={(event) => setKeyword(event.target.value)} placeholder="搜索申请人、网址或 UID" value={keyword} /></label><Button onClick={load} variant="primary">筛选</Button></div>

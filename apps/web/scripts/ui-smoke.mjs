@@ -714,7 +714,7 @@ try {
   await resetDialog.getByText('TempPass1234').waitFor();
   await resetPage.close();
 
-  console.log('UI 冒烟测试通过：三套侧栏、单模型渠道、零至五倍报价、密钥路由、人民币支付、结算和人工提现交互正常。');
+console.log('UI 冒烟测试通过：三套侧栏、多模型渠道、零至五倍报价、密钥路由、人民币支付、结算和人工提现交互正常。');
 } finally {
   await browser.close();
   await stopLocalPreview(previewServer);

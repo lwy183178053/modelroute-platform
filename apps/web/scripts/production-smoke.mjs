@@ -95,10 +95,10 @@ async function verifyViewport(browser, viewport, suffix) {
   await page.getByRole('heading', { name: '运营管理' }).waitFor();
   const adminSidebar = page.getByRole('complementary', { name: '管理员功能' });
   await adminSidebar.getByRole('button', { name: '模型与定价', exact: true }).click();
-  await page.getByRole('heading', { name: '标准模型与官方价格' }).waitFor();
+  await page.getByRole('heading', { name: '标准模型与基础价格' }).waitFor();
   await page.getByText(/^价格版本 v\d+$/).first().waitFor();
   await page.getByRole('button', { name: '发布价格', exact: true }).first().click();
-  const dialog = page.getByRole('dialog', { name: '发布官方价格' });
+  const dialog = page.getByRole('dialog', { name: '发布模型价格' });
   await dialog.waitFor();
   await dialog.getByText('每百万 Token 价格', { exact: true }).waitFor();
   await dialog.getByLabel('第 1 档输入价格').waitFor();

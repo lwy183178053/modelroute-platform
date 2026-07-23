@@ -1563,3 +1563,30 @@
 - `docs/部署运行手册.md`：说明 V2 生产验收的临时凭证、清理边界和凭据来源。
 - `progress.md`：追加本轮实现、测试证据、文件清单和回滚点。
 - 回滚点：前一提交为 `5468bc9`；执行 `git revert <本阶段提交>` 可回退生产验收工具。本阶段不改平台业务结构，生产验证产生的临时记录由脚本按用户编号清理。
+
+## 2026-07-23 - Task: 完成 V2 生产重置验收并校正生产界面检查
+
+### What was done
+
+- 在 103 完成 ModelRoute V2 开发数据全量重置，只重建平台库、New API 库和 Redis，并重新初始化唯一管理员、SMTP 设置和 23 个模型的 V2 种子。
+- 完成账号、商户、路由、支付、结算和运营生产契约，清理全部验收临时用户、申请、检测凭证和 New API 临时渠道。
+- 校正真实生产 Playwright 对模型管理页面的旧文案断言，使验收脚本匹配“标准模型与基础价格”和“发布模型价格”的现行界面。
+- 更新部署审计为 V2 当前结构、备份、支付空配置与 SMTP 实发缺口，不再把 V1 的迁移和发布哈希描述为当前状态。
+
+### Testing
+
+- 重置前完整备份 `/opt/modelroute-platform/shared/backups/20260723T025901Z` 和重置后 V2 完整备份 `/opt/modelroute-platform/shared/backups/20260723T032444Z` 均通过 SHA-256；恢复演练确认平台库 `34` 张表、New API 库 `31` 张表，未覆盖生产库。
+- 生产基础、账号、商户、路由、支付、结算和运营契约全部通过；测试申请、检测凭证、临时用户和 New API 临时渠道均为 `0`。
+- 执行只读压力测试 `200` 个请求、并发 `10`，成功 `200`，平均耗时 `0.0017s`、P95 `0.004087s`；验收窗口内网关 `5xx`、New API `429`、API 与 Worker fatal 均为 `0`。
+- `/v1/chat/completions`、`/v1/responses` 和 `/v1/images/generations` 无密钥返回 `401`，`/v1/embeddings` 返回 `404`；三个现有 HTTPS 域名均返回 `200`。
+- 修复前真实生产 Playwright 在等待旧文案时稳定失败；修复后桌面 `1440x1000` 和移动 `390x844` 两个视口均通过，截图人工检查非空且无文字重叠。
+- 执行 `python -m unittest discover -s deploy/tests -p 'test_*.py' -v`，27 个部署测试全部通过；执行 `git diff --check` 通过。
+- 只读复核生产 `current`、`/api/version`、容器状态和备份目录，确认 V2 首次验收版本为 `8257e228f367`，六个服务运行且五项健康检查正常。
+
+### Notes
+
+- `apps/web/scripts/production-smoke.mjs`：将模型管理生产验收断言更新为 V2 当前页面文案。
+- `deploy/tests/test_release_tools.py`：增加生产 UI 验收脚本不得回退到旧模型价格文案的回归测试。
+- `docs/部署环境审计.md`：以 V2 生产数据库、种子、协议、备份和配置现状替换旧 V1 当前状态。
+- `progress.md`：追加本轮 V2 生产重置、完整验收、文件清单和回滚点。
+- 回滚点：代码前一提交为 `8257e228f367`；执行 `git revert <本阶段提交>` 可回退生产界面验收脚本和文档。数据级回滚使用重置前完整备份 `/opt/modelroute-platform/shared/backups/20260723T025901Z`，V2 当前数据恢复使用 `/opt/modelroute-platform/shared/backups/20260723T032444Z`。

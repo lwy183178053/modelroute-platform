@@ -77,6 +77,15 @@ class ReleaseToolContractTest(unittest.TestCase):
         ):
             self.assertNotIn(old_marker, verifier)
 
+    def test_production_ui_smoke_uses_current_v2_model_labels(self):
+        smoke = (ROOT / "apps" / "web" / "scripts" / "production-smoke.mjs").read_text(
+            encoding="utf-8"
+        )
+        for marker in ("标准模型与基础价格", "发布模型价格"):
+            self.assertIn(marker, smoke)
+        for old_label in ("标准模型与官方价格", "发布官方价格"):
+            self.assertNotIn(old_label, smoke)
+
     def test_official_model_seed_catalog_is_included_in_release(self):
         catalog = ROOT / "apps" / "api" / "internal" / "modelseed" / "data" / "2026-07-23-v2.json"
         self.assertTrue(catalog.is_file())

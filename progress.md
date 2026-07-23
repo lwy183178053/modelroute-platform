@@ -1969,3 +1969,24 @@
 - `docs/官方模型种子.md`、`docs/运营管理与升级验收.md`、`docs/部署环境审计.md`、`docs/部署运行手册.md`：同步模型目录和验收数量。
 - `data/ui-preview/vite.config.mjs`：Git 忽略的本地预览模型目录已同步更新，不进入正式提交。
 - 回滚点：本轮提交前的 `e893b6a`；执行 `git revert <本轮提交哈希>` 可回退跟踪文件和截图，模型种子回退后需重新执行种子导入。
+
+## 2026-07-23 - Task: 本地预览展示完整模型种子
+
+### What was done
+
+- 修复本地预览只显示 9 个演示模型的问题，改为启动时读取完整 `2026-07-23-v2` 模型种子。
+- 管理后台“模型与定价”页面现在展示完整 21 个模型，包含所有 OpenAI、Anthropic、Gemini、DeepSeek、Qwen 和 Moonshot 条目；渠道同步仍使用相同目录匹配。
+
+### Testing
+
+- 本地 `GET /api/models` 返回 21 个模型，厂商和型号清单与种子一致。
+- `node data/ui-preview/verify.mjs` 通过，真实浏览器确认模型定价页显示 21 行、关键 OpenAI 5.6 和 Claude 型号均可见；渠道弹窗、默认上游和一键获取模型回归仍通过。
+- `node --check data/ui-preview/vite.config.mjs` 通过，页面运行时错误为 0，根页面无横向溢出。
+
+### Notes
+
+- `data/ui-preview/vite.config.mjs`：从版本化模型种子动态生成完整本地预览模型列表，文件位于 Git 忽略目录。
+- `data/ui-preview/verify.mjs`：增加模型定价页 21 行和关键型号的真实浏览器断言，文件位于 Git 忽略目录。
+- `docs/部署运行手册.md`：说明本地模型页面读取完整种子而非精简演示数据。
+- 凭据仍只存在当前本地预览进程环境，未写入 Git、文档、进度日志或接口响应；本轮未上传服务器。
+- 回滚点：停止监听 `57723` 的 Node 进程可关闭预览；恢复 `data/ui-preview` 到本轮前本地状态即可撤销本地预览变更。

@@ -434,7 +434,7 @@ func truncateSettlementTables(t *testing.T, database *sql.DB) {
 TRUNCATE merchant_ledger_entries, settlement_refund_allocations,
          settlement_reconciliation_items, settlement_sources, merchant_withdrawals,
          merchant_balances, channel_health_events, performance_rollups, routing_decisions,
-         routing_policy_merchants, routing_policies, token_bindings, channel_health,
+         routing_policies, token_bindings, channel_health,
          offer_channel_aliases, offer_versions, text_price_tiers, image_price_items,
          official_price_versions, merchant_channels, merchant_channel_reviews,
          merchant_channel_tests, merchant_profiles, merchant_applications, canonical_models

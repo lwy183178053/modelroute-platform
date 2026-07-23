@@ -2653,3 +2653,49 @@
 - `docs/账号与管理员接口.md`：同步用户余额和管理员额度调整口径。
 - `progress.md`：追加本轮实现、验证、文件清单和回滚点。
 - 回滚点：执行 `git revert <本轮提交哈希>` 可整体回退动态额度单位改造；本轮未发布服务器。
+
+## 2026-07-24 - Task: 删除固定路由并改为单一智能路由
+
+### What was done
+
+- 删除固定路由模式、固定商户名单、商户选择接口和相关前端交互，路由只保留名称、优先方式、倍率区间、最低缓存阈值及密钥绑定。
+- 将失败切换改为按商户分轮排列候选，每轮每个商户最多尝试一条渠道；文本请求在首字节前遍历合格渠道，图片请求仅在明确可重试响应时切换。
+- 缓存样本不足的新商户按中性分参与智能路由；只有样本充足且低于用户阈值时才退出候选。
+- V2 最终路由迁移不再创建模式字段、固定商户关联表和路由决策模式字段，旧字段及旧接口由回归测试确认不再接受。
+
+### Testing
+
+- `go test ./... -count=1`：通过，全部 Go 包测试无失败。
+- `go vet ./...`：通过，无静态检查问题。
+- `go build ./cmd/api ./cmd/worker`：通过，API 与 Worker 可构建。
+- 临时 PostgreSQL 17 执行 `go test ./internal/httpapi -run TestSQLRoutingStoreAgainstPostgres -count=1 -v`：通过，最终迁移、路由创建、候选解析和决策写入均完成真实数据库验证；临时容器已停止。
+- `npm.cmd run test:ui`：通过，前端生产构建和单一智能路由交互冒烟测试通过。
+- `npm.cmd run build`：通过，生产前端构建成功。
+- `docker compose --env-file .env.example config --quiet`：通过，Compose 配置有效。
+- `git diff --check`：通过，无空白错误。
+
+### Notes
+
+- `apps/api/internal/httpapi/routing_domain.go`：调整缓存阈值口径并按商户分轮生成候选顺序。
+- `apps/api/internal/httpapi/routing_domain_test.go`：覆盖商户分轮和缓存低样本中性参与。
+- `apps/api/internal/httpapi/routing_handlers.go`：删除固定路由字段校验和商户选择接口。
+- `apps/api/internal/httpapi/routing_handlers_test.go`：覆盖单一路由请求及旧字段、旧接口拒绝行为。
+- `apps/api/internal/httpapi/routing_proxy.go`：升级算法版本并限制图片连接结果不明时的重试。
+- `apps/api/internal/httpapi/routing_proxy_test.go`：覆盖文本遍历和图片重试边界。
+- `apps/api/internal/httpapi/routing_store.go`：移除固定商户查询、写入和过滤逻辑。
+- `apps/api/internal/httpapi/routing_store_postgres_test.go`：使用单一路由结构验证 PostgreSQL 查询与决策写入。
+- `apps/api/internal/httpapi/routing_store_test.go`：更新路由存储夹具和断言。
+- `apps/api/internal/httpapi/server.go`：取消注册路由商户选择接口。
+- `apps/api/internal/httpapi/settlement_store_postgres_test.go`：同步最终路由表清理清单。
+- `apps/api/internal/migrations/migrate_test.go`：锁定最终迁移不含固定路由字段和关联表。
+- `apps/api/internal/migrations/sql/000005_independent_routes.sql`：移除模式、固定商户表和决策模式字段。
+- `apps/web/scripts/capture.mjs`：更新单一路由截图场景。
+- `apps/web/scripts/ui-smoke.mjs`：覆盖旧字段不再提交和固定路由界面已删除。
+- `apps/web/src/Modals.jsx`：删除路由模式与固定商户选择器。
+- `apps/web/src/styles.css`：清理固定商户选择器遗留样式。
+- `apps/web/src/views/ConsoleView.jsx`：移除路由商户列表加载逻辑。
+- `docs/V2数据基线.md`：记录不含固定路由字段和关联表的最终基线。
+- `docs/模型报价路由与健康.md`：同步单一智能路由、缓存低样本和分轮重试规则。
+- `docs/账号与管理员接口.md`：删除旧路由商户接口说明。
+- `progress.md`：追加本轮实现、验证、文件清单和回滚点。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可整体恢复固定路由实现；本轮未发布服务器。

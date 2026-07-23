@@ -100,6 +100,15 @@ func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
 			t.Fatalf("独立路由迁移缺少 %q", fragment)
 		}
 	}
+	for _, removed := range []string{
+		"mode text NOT NULL CHECK (mode IN ('smart', 'fixed'))",
+		"CREATE TABLE routing_policy_merchants",
+		"merchant_profile_id bigint NOT NULL REFERENCES merchant_profiles(id)",
+	} {
+		if strings.Contains(files[4].SQL, removed) {
+			t.Fatalf("独立路由迁移仍包含已删除的固定路由结构 %q", removed)
+		}
+	}
 	for _, fragment := range []string{
 		"CREATE TABLE route_metric_buckets",
 		"CREATE TABLE route_metric_snapshots",

@@ -372,20 +372,6 @@ func (s *server) deleteRoutingPolicy(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": nil})
 }
 
-func (s *server) routingMerchants(w http.ResponseWriter, r *http.Request) {
-	_, _, ok := s.requireSession(w, r, roleCommon)
-	if !ok || !s.routingReady(w, false) {
-		return
-	}
-	page, pageSize := pagination(r)
-	result, err := s.services.Routing.ListRoutingMerchants(r.Context(), strings.TrimSpace(r.URL.Query().Get("keyword")), page, pageSize)
-	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "routing_merchants_query_failed", "读取可选商户失败")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": result})
-}
-
 func decodeRoutingPolicyInput(w http.ResponseWriter, r *http.Request) (RoutingPolicyInput, bool) {
 	var input RoutingPolicyInput
 	if err := decodeJSON(r, &input); err != nil {
@@ -405,7 +391,7 @@ func writeRoutingPolicyError(w http.ResponseWriter, err error, fallback string) 
 	case errors.Is(err, ErrRoutingNotFound):
 		writeAPIError(w, http.StatusNotFound, "routing_policy_not_found", "路由不存在")
 	case errors.Is(err, ErrRoutingInvalidState):
-		writeAPIError(w, http.StatusConflict, "routing_policy_conflict", "路由已绑定密钥或固定商户状态已变化")
+		writeAPIError(w, http.StatusConflict, "routing_policy_conflict", "路由已绑定密钥或当前状态不允许操作")
 	default:
 		writeAPIError(w, http.StatusInternalServerError, "routing_policy_store_error", fallback)
 	}
@@ -486,22 +472,13 @@ func validateRoutingPolicy(input RoutingPolicyInput) error {
 	if name := strings.TrimSpace(input.Name); name == "" || len([]rune(name)) > 50 {
 		return errors.New("路由名称需为 1 至 50 个字符")
 	}
-	if input.Mode != "smart" && input.Mode != "fixed" {
-		return errors.New("路由模式必须是智能路由或固定路由")
-	}
 	if input.Priority != "balanced" && input.Priority != "price" && input.Priority != "success" && input.Priority != "latency" && input.Priority != "cache" {
 		return errors.New("优先方式必须是均衡、价格、成功率、响应速度或缓存命中率优先")
 	}
 	if input.MinimumMultiplierBPS < 0 || input.MaximumMultiplierBPS > 50_000 || input.MinimumMultiplierBPS > input.MaximumMultiplierBPS {
 		return errors.New("倍率区间必须在 0 到 50000 基点之间")
 	}
-	if input.Mode == "fixed" && len(uniqueInt64(input.MerchantIDs)) == 0 {
-		return errors.New("固定路由至少选择一个商户")
-	}
 	if input.MinimumCacheHitPPM != nil {
-		if input.Mode != "smart" {
-			return errors.New("最低缓存命中率只适用于智能路由")
-		}
 		if *input.MinimumCacheHitPPM < 0 || *input.MinimumCacheHitPPM > 1_000_000 {
 			return errors.New("最低缓存命中率必须在 0% 到 100% 之间")
 		}

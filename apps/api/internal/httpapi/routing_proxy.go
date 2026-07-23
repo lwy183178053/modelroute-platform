@@ -12,7 +12,7 @@ import (
 
 const maxModelRequestBytes = 64 << 20
 const maxModelListBytes = 4 << 20
-const routeAlgorithmVersion = "weighted-v1"
+const routeAlgorithmVersion = "weighted-v2-merchant-rounds"
 
 func (s *server) modelListProxy(w http.ResponseWriter, r *http.Request) {
 	if s.services.NewAPI == nil {
@@ -152,7 +152,7 @@ func (s *server) modelProxy(w http.ResponseWriter, r *http.Request) {
 		RequestID: requestID, TokenBindingID: selection.TokenBindingID,
 		PolicyID:         selection.PolicyID,
 		CanonicalModelID: selection.CanonicalModelID, OfferChannelAliasID: selection.Candidates[0].OfferChannelAliasID,
-		Mode: selection.Mode, Priority: selection.Priority, AlgorithmVersion: routeAlgorithmVersion,
+		Priority: selection.Priority, AlgorithmVersion: routeAlgorithmVersion,
 		CandidateCount: len(selection.Candidates), SelectedMetrics: routeDecisionMetrics(selection.Candidates[0]),
 	}); err != nil {
 		writeOpenAIError(w, http.StatusServiceUnavailable, "routing_store_error", "记录路由决策失败")
@@ -170,7 +170,7 @@ func (s *server) modelProxy(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			observation := RouteObservation{Candidate: candidate, Outcome: "temporary_failure", RequestID: requestID, Summary: "核心服务连接失败"}
 			_ = s.services.Routing.RecordRouteObservation(r.Context(), observation)
-			if index+1 < len(selection.Candidates) {
+			if selection.Protocol != "image_generation" && index+1 < len(selection.Candidates) {
 				continue
 			}
 			_ = s.services.Routing.CompleteRouteDecision(r.Context(), RouteDecisionResult{RequestID: requestID, OfferChannelAliasID: candidate.OfferChannelAliasID, Attempts: index + 1, Result: "transport_error"})

@@ -25,7 +25,6 @@ type routingRepositoryStub struct {
 	rebindToken          func(context.Context, int, int, int64) (TokenRoutingBinding, error)
 	listBindings         func(context.Context, int) ([]TokenRoutingBinding, error)
 	revokeToken          func(context.Context, int, int) error
-	listRoutingMerchants func(context.Context, string, int, int) (RoutingMerchantPage, error)
 	listOffers           func(context.Context, int, string) ([]MarketOffer, error)
 	listMerchantOffers   func(context.Context, int) ([]MerchantOfferView, error)
 	prepareHealth        func(context.Context, int64) (int, error)
@@ -64,10 +63,6 @@ func (s *routingRepositoryStub) RebindTokenPolicy(ctx context.Context, userID in
 
 func (s *routingRepositoryStub) ListTokenRoutingBindings(ctx context.Context, userID int) ([]TokenRoutingBinding, error) {
 	return s.listBindings(ctx, userID)
-}
-
-func (s *routingRepositoryStub) ListRoutingMerchants(ctx context.Context, keyword string, page int, pageSize int) (RoutingMerchantPage, error) {
-	return s.listRoutingMerchants(ctx, keyword, page, pageSize)
 }
 
 func (s *routingRepositoryStub) ListCanonicalModels(ctx context.Context) ([]CanonicalModel, error) {
@@ -362,12 +357,12 @@ func TestCreateIndependentRoutingPolicyWithCacheFloor(t *testing.T) {
 		if userID != 7 || input.Name != "缓存主路由" || input.MinimumCacheHitPPM == nil || *input.MinimumCacheHitPPM != 650_000 {
 			t.Fatalf("创建路由参数 user=%d input=%+v", userID, input)
 		}
-		return RoutingPolicy{ID: 91, UserID: userID, Name: input.Name, Mode: input.Mode, Priority: input.Priority, MinimumCacheHitPPM: input.MinimumCacheHitPPM}, nil
+		return RoutingPolicy{ID: 91, UserID: userID, Name: input.Name, Priority: input.Priority, MinimumCacheHitPPM: input.MinimumCacheHitPPM}, nil
 	}
 	services.Routing = repository
 	token := createPlatformSession(t, services, 7, 1)
 	handler := NewServerWithServices("test", Dependencies{}, services)
-	request := httptest.NewRequest(http.MethodPost, "/api/routing-policies", strings.NewReader(`{"name":"缓存主路由","mode":"smart","priority":"cache","minimum_multiplier_bps":0,"maximum_multiplier_bps":50000,"minimum_cache_hit_ppm":650000,"merchant_ids":[]}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/routing-policies", strings.NewReader(`{"name":"缓存主路由","priority":"cache","minimum_multiplier_bps":0,"maximum_multiplier_bps":50000,"minimum_cache_hit_ppm":650000}`))
 	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()
@@ -377,47 +372,37 @@ func TestCreateIndependentRoutingPolicyWithCacheFloor(t *testing.T) {
 	}
 }
 
-func TestRoutingMerchantSearchReturnsPagedCacheMetrics(t *testing.T) {
+func TestRoutingMerchantSelectionEndpointIsRemoved(t *testing.T) {
 	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	repository := &routingRepositoryStub{}
-	repository.listRoutingMerchants = func(_ context.Context, keyword string, page int, pageSize int) (RoutingMerchantPage, error) {
-		if keyword != "官方" || page != 2 || pageSize != 50 {
-			t.Fatalf("商户搜索参数 keyword=%q page=%d size=%d", keyword, page, pageSize)
-		}
-		return RoutingMerchantPage{
-			Items: []RoutingMerchant{{ID: 31, UserID: 7, Name: "ModelRoute 官方", ModelCount: 8, MinimumMultiplierBPS: 6000, MaximumMultiplierBPS: 9000, AvailabilityPPM: 990000, TTFTP95MS: 420, CacheHitPPM: 720000, CacheSampleInputTokens: 2000000, CacheWeightReady: true}},
-			Page:  2, PageSize: 50, Total: 51,
-		}, nil
-	}
-	services.Routing = repository
+	services.Routing = &routingRepositoryStub{}
 	token := createPlatformSession(t, services, 7, 1)
 	handler := NewServerWithServices("test", Dependencies{}, services)
-	request := httptest.NewRequest(http.MethodGet, "/api/routing-merchants?keyword=%E5%AE%98%E6%96%B9&p=2&page_size=50", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/routing-merchants", nil)
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"cache_hit_ppm":720000`) || !strings.Contains(response.Body.String(), `"total":51`) {
-		t.Fatalf("路由商户搜索响应=%d %s", response.Code, response.Body.String())
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("已删除的路由商户接口响应=%d %s", response.Code, response.Body.String())
 	}
 }
 
-func TestFixedRoutingPolicyRequiresAtLeastOneMerchant(t *testing.T) {
+func TestRoutingPolicyRejectsRemovedFixedRouteFields(t *testing.T) {
 	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	repository := &routingRepositoryStub{}
 	repository.createRoute = func(context.Context, int, RoutingPolicyInput) (RoutingPolicy, error) {
-		t.Fatal("固定商户为空时不应写仓储")
+		t.Fatal("已删除字段不应进入仓储")
 		return RoutingPolicy{}, nil
 	}
 	services.Routing = repository
 	token := createPlatformSession(t, services, 7, 1)
 	handler := NewServerWithServices("test", Dependencies{}, services)
-	request := httptest.NewRequest(http.MethodPost, "/api/routing-policies", strings.NewReader(`{"name":"固定路由","mode":"fixed","priority":"price","minimum_multiplier_bps":2000,"maximum_multiplier_bps":6000,"merchant_ids":[]}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/routing-policies", strings.NewReader(`{"name":"旧固定路由","mode":"fixed","priority":"price","minimum_multiplier_bps":2000,"maximum_multiplier_bps":6000,"merchant_ids":[31]}`))
 	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
-		t.Fatalf("固定路由空名单响应=%d %s", response.Code, response.Body.String())
+		t.Fatalf("旧固定路由字段响应=%d %s", response.Code, response.Body.String())
 	}
 }
 
@@ -425,7 +410,7 @@ func TestRoutingPolicyValidationSupportsWeightedPrioritiesAndSmartCacheFloor(t *
 	cacheFloor := 750_000
 	for _, priority := range []string{"balanced", "price", "success", "latency", "cache"} {
 		input := RoutingPolicyInput{
-			Name: "主路由", Mode: "smart", Priority: priority,
+			Name: "主路由", Priority: priority,
 			MinimumMultiplierBPS: 0, MaximumMultiplierBPS: 50_000,
 			MinimumCacheHitPPM: &cacheFloor,
 		}
@@ -438,19 +423,11 @@ func TestRoutingPolicyValidationSupportsWeightedPrioritiesAndSmartCacheFloor(t *
 func TestRoutingPolicyValidationRejectsInvalidCacheFloor(t *testing.T) {
 	tooHigh := 1_000_001
 	if err := validateRoutingPolicy(RoutingPolicyInput{
-		Name: "智能路由", Mode: "smart", Priority: "cache",
+		Name: "智能路由", Priority: "cache",
 		MinimumMultiplierBPS: 0, MaximumMultiplierBPS: 50_000,
 		MinimumCacheHitPPM: &tooHigh,
 	}); err == nil {
 		t.Fatal("超过 100% 的缓存命中率阈值应被拒绝")
-	}
-	zero := 0
-	if err := validateRoutingPolicy(RoutingPolicyInput{
-		Name: "固定路由", Mode: "fixed", Priority: "balanced",
-		MinimumMultiplierBPS: 0, MaximumMultiplierBPS: 50_000,
-		MinimumCacheHitPPM: &zero, MerchantIDs: []int64{31},
-	}); err == nil {
-		t.Fatal("固定路由不应接受缓存命中率阈值")
 	}
 }
 
@@ -501,13 +478,13 @@ func TestListAndUpdateRoutingPoliciesByPolicyID(t *testing.T) {
 	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	repository := &routingRepositoryStub{}
 	repository.listRoutes = func(_ context.Context, userID int) ([]RoutingPolicy, error) {
-		return []RoutingPolicy{{ID: 91, UserID: userID, Name: "主路由", Mode: "smart", Priority: "balanced", BoundKeyCount: 2}}, nil
+		return []RoutingPolicy{{ID: 91, UserID: userID, Name: "主路由", Priority: "balanced", BoundKeyCount: 2}}, nil
 	}
 	repository.updateRoute = func(_ context.Context, userID int, policyID int64, input RoutingPolicyInput) (RoutingPolicy, error) {
 		if userID != 7 || policyID != 91 || input.Name != "低价路由" || input.Priority != "price" {
 			t.Fatalf("修改路由参数 user=%d policy=%d input=%+v", userID, policyID, input)
 		}
-		return RoutingPolicy{ID: policyID, UserID: userID, Name: input.Name, Mode: input.Mode, Priority: input.Priority, BoundKeyCount: 2}, nil
+		return RoutingPolicy{ID: policyID, UserID: userID, Name: input.Name, Priority: input.Priority, BoundKeyCount: 2}, nil
 	}
 	services.Routing = repository
 	token := createPlatformSession(t, services, 7, 1)
@@ -521,7 +498,7 @@ func TestListAndUpdateRoutingPoliciesByPolicyID(t *testing.T) {
 		t.Fatalf("路由列表响应=%d %s", response.Code, response.Body.String())
 	}
 
-	request = httptest.NewRequest(http.MethodPut, "/api/routing-policies/91", strings.NewReader(`{"name":"低价路由","mode":"smart","priority":"price","minimum_multiplier_bps":0,"maximum_multiplier_bps":50000,"merchant_ids":[]}`))
+	request = httptest.NewRequest(http.MethodPut, "/api/routing-policies/91", strings.NewReader(`{"name":"低价路由","priority":"price","minimum_multiplier_bps":0,"maximum_multiplier_bps":50000,"minimum_cache_hit_ppm":null}`))
 	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response = httptest.NewRecorder()

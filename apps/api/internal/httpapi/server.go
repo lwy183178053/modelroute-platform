@@ -129,7 +129,6 @@ func NewServerWithServices(version string, dependencies Dependencies, services S
 	mux.HandleFunc("GET /api/routing-policies/{id}", s.routingPolicy)
 	mux.HandleFunc("PUT /api/routing-policies/{id}", s.updateRoutingPolicy)
 	mux.HandleFunc("DELETE /api/routing-policies/{id}", s.deleteRoutingPolicy)
-	mux.HandleFunc("GET /api/routing-merchants", s.routingMerchants)
 	mux.HandleFunc("GET /api/offers", s.marketOffers)
 	mux.HandleFunc("POST /api/admin/channels/{id}/health/reset", s.adminResetChannelHealth)
 	mux.HandleFunc("GET /api/payment-settings", s.paymentSettings)

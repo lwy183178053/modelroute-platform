@@ -65,7 +65,6 @@ type RoutingRepository interface {
 	BindTokenToPolicy(context.Context, int, int, string, int64) (TokenRoutingBinding, error)
 	RebindTokenPolicy(context.Context, int, int, int64) (TokenRoutingBinding, error)
 	ListTokenRoutingBindings(context.Context, int) ([]TokenRoutingBinding, error)
-	ListRoutingMerchants(context.Context, string, int, int) (RoutingMerchantPage, error)
 	RevokeTokenBinding(context.Context, int, int) error
 	ResolveRoute(context.Context, string, string) (RouteSelection, error)
 	StartRouteDecision(context.Context, RouteDecision) error
@@ -156,7 +155,6 @@ type RouteSelection struct {
 	TokenBindingID     int64
 	PolicyID           int64
 	CanonicalModelID   int64
-	Mode               string
 	Priority           string
 	MinimumCacheHitPPM *int
 	Protocol           string
@@ -169,7 +167,6 @@ type RouteDecision struct {
 	PolicyID            int64
 	CanonicalModelID    int64
 	OfferChannelAliasID int64
-	Mode                string
 	Priority            string
 	AlgorithmVersion    string
 	CandidateCount      int
@@ -196,24 +193,20 @@ type RouteObservation struct {
 
 type RoutingPolicyInput struct {
 	Name                 string  `json:"name"`
-	Mode                 string  `json:"mode"`
 	Priority             string  `json:"priority"`
 	MinimumMultiplierBPS int     `json:"minimum_multiplier_bps"`
 	MaximumMultiplierBPS int     `json:"maximum_multiplier_bps"`
 	MinimumCacheHitPPM   *int    `json:"minimum_cache_hit_ppm"`
-	MerchantIDs          []int64 `json:"merchant_ids"`
 }
 
 type RoutingPolicy struct {
 	ID                   int64     `json:"id"`
 	Name                 string    `json:"name"`
 	UserID               int       `json:"user_id,omitempty"`
-	Mode                 string    `json:"mode"`
 	Priority             string    `json:"priority"`
 	MinimumMultiplierBPS int       `json:"minimum_multiplier_bps"`
 	MaximumMultiplierBPS int       `json:"maximum_multiplier_bps"`
 	MinimumCacheHitPPM   *int      `json:"minimum_cache_hit_ppm"`
-	MerchantIDs          []int64   `json:"merchant_ids"`
 	BoundKeyCount        int       `json:"bound_key_count"`
 	UpdatedAt            time.Time `json:"updated_at,omitempty"`
 }
@@ -222,28 +215,6 @@ type TokenRoutingBinding struct {
 	TokenID    int    `json:"token_id"`
 	PolicyID   int64  `json:"routing_policy_id"`
 	PolicyName string `json:"routing_policy_name"`
-}
-
-type RoutingMerchant struct {
-	ID                     int64      `json:"id"`
-	UserID                 int        `json:"user_id"`
-	Name                   string     `json:"name"`
-	ModelCount             int        `json:"model_count"`
-	MinimumMultiplierBPS   int        `json:"minimum_multiplier_bps"`
-	MaximumMultiplierBPS   int        `json:"maximum_multiplier_bps"`
-	AvailabilityPPM        int        `json:"availability_ppm"`
-	TTFTP95MS              int        `json:"ttft_p95_ms"`
-	CacheHitPPM            int        `json:"cache_hit_ppm"`
-	CacheSampleInputTokens int64      `json:"cache_sample_input_tokens"`
-	CacheWeightReady       bool       `json:"cache_weight_ready"`
-	MetricsUpdatedAt       *time.Time `json:"metrics_updated_at,omitempty"`
-}
-
-type RoutingMerchantPage struct {
-	Items    []RoutingMerchant `json:"items"`
-	Page     int               `json:"page"`
-	PageSize int               `json:"page_size"`
-	Total    int               `json:"total"`
 }
 
 type OfferSynchronizer interface {
@@ -290,54 +261,23 @@ func (s *SQLRoutingStore) CreateRoutingPolicy(ctx context.Context, userID int, i
 	if userID <= 0 || validateRoutingPolicy(input) != nil {
 		return RoutingPolicy{}, ErrRoutingInvalidState
 	}
-	if input.Mode == "smart" {
-		input.MerchantIDs = nil
-	}
-	input.MerchantIDs = uniqueInt64(input.MerchantIDs)
-	tx, err := s.database.BeginTx(ctx, nil)
-	if err != nil {
-		return RoutingPolicy{}, fmt.Errorf("开始创建路由事务：%w", err)
-	}
-	defer tx.Rollback()
 	policy := RoutingPolicy{
-		Name: input.Name, UserID: userID, Mode: input.Mode, Priority: input.Priority,
+		Name: input.Name, UserID: userID, Priority: input.Priority,
 		MinimumMultiplierBPS: input.MinimumMultiplierBPS, MaximumMultiplierBPS: input.MaximumMultiplierBPS,
-		MinimumCacheHitPPM: input.MinimumCacheHitPPM, MerchantIDs: input.MerchantIDs,
+		MinimumCacheHitPPM: input.MinimumCacheHitPPM,
 	}
-	err = tx.QueryRowContext(ctx, `
+	err := s.database.QueryRowContext(ctx, `
 INSERT INTO routing_policies
-    (newapi_user_id, name, mode, priority, minimum_multiplier_bps,
+    (newapi_user_id, name, priority, minimum_multiplier_bps,
      maximum_multiplier_bps, minimum_cache_hit_ppm)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, created_at, updated_at
-`, userID, input.Name, input.Mode, input.Priority, input.MinimumMultiplierBPS,
-		input.MaximumMultiplierBPS, input.MinimumCacheHitPPM).Scan(&policy.ID, new(time.Time), &policy.UpdatedAt)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, updated_at
+`, userID, input.Name, input.Priority, input.MinimumMultiplierBPS,
+		input.MaximumMultiplierBPS, input.MinimumCacheHitPPM).Scan(&policy.ID, &policy.UpdatedAt)
 	if err != nil {
 		return RoutingPolicy{}, routingStoreError(err)
 	}
-	if err := insertRoutingPolicyMerchants(ctx, tx, policy.ID, input.MerchantIDs); err != nil {
-		return RoutingPolicy{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return RoutingPolicy{}, fmt.Errorf("提交创建路由事务：%w", err)
-	}
 	return policy, nil
-}
-
-func insertRoutingPolicyMerchants(ctx context.Context, tx *sql.Tx, policyID int64, merchantIDs []int64) error {
-	for _, merchantID := range merchantIDs {
-		result, err := tx.ExecContext(ctx, `
-INSERT INTO routing_policy_merchants (routing_policy_id, merchant_profile_id)
-SELECT $1, id FROM merchant_profiles WHERE id = $2 AND status = 'active'
-`, policyID, merchantID)
-		if err != nil {
-			return fmt.Errorf("保存固定商户：%w", err)
-		}
-		if affected, _ := result.RowsAffected(); affected != 1 {
-			return ErrRoutingNotFound
-		}
-	}
-	return nil
 }
 
 func (s *SQLRoutingStore) RoutingPolicy(ctx context.Context, userID int, policyID int64) (RoutingPolicy, error) {
@@ -346,7 +286,6 @@ func (s *SQLRoutingStore) RoutingPolicy(ctx context.Context, userID int, policyI
 	}
 	return scanRoutingPolicy(s.database.QueryRowContext(ctx, routingPolicySelect+`
 WHERE policy.newapi_user_id = $1 AND policy.id = $2
-GROUP BY policy.id
 `, userID, policyID))
 }
 
@@ -356,7 +295,6 @@ func (s *SQLRoutingStore) ListRoutingPolicies(ctx context.Context, userID int) (
 	}
 	rows, err := s.database.QueryContext(ctx, routingPolicySelect+`
 WHERE policy.newapi_user_id = $1
-GROUP BY policy.id
 ORDER BY policy.updated_at DESC, policy.id DESC
 `, userID)
 	if err != nil {
@@ -382,31 +320,22 @@ func (s *SQLRoutingStore) UpdateRoutingPolicy(ctx context.Context, userID int, p
 	if userID <= 0 || policyID <= 0 || validateRoutingPolicy(input) != nil {
 		return RoutingPolicy{}, ErrRoutingInvalidState
 	}
-	if input.Mode == "smart" {
-		input.MerchantIDs = nil
-	}
-	input.MerchantIDs = uniqueInt64(input.MerchantIDs)
-	tx, err := s.database.BeginTx(ctx, nil)
-	if err != nil {
-		return RoutingPolicy{}, fmt.Errorf("开始修改路由事务：%w", err)
-	}
-	defer tx.Rollback()
 	policy := RoutingPolicy{
-		ID: policyID, UserID: userID, Name: input.Name, Mode: input.Mode, Priority: input.Priority,
+		ID: policyID, UserID: userID, Name: input.Name, Priority: input.Priority,
 		MinimumMultiplierBPS: input.MinimumMultiplierBPS, MaximumMultiplierBPS: input.MaximumMultiplierBPS,
-		MinimumCacheHitPPM: input.MinimumCacheHitPPM, MerchantIDs: input.MerchantIDs,
+		MinimumCacheHitPPM: input.MinimumCacheHitPPM,
 	}
-	err = tx.QueryRowContext(ctx, `
+	err := s.database.QueryRowContext(ctx, `
 UPDATE routing_policies
-SET name = $1, mode = $2, priority = $3,
-    minimum_multiplier_bps = $4, maximum_multiplier_bps = $5,
-    minimum_cache_hit_ppm = $6, updated_at = now()
-WHERE newapi_user_id = $7 AND id = $8
+SET name = $1, priority = $2,
+	minimum_multiplier_bps = $3, maximum_multiplier_bps = $4,
+	minimum_cache_hit_ppm = $5, updated_at = now()
+WHERE newapi_user_id = $6 AND id = $7
 RETURNING id,
     (SELECT count(*) FROM token_bindings binding
      WHERE binding.routing_policy_id = routing_policies.id AND binding.status = 'active'),
     updated_at
-`, input.Name, input.Mode, input.Priority, input.MinimumMultiplierBPS,
+`, input.Name, input.Priority, input.MinimumMultiplierBPS,
 		input.MaximumMultiplierBPS, input.MinimumCacheHitPPM, userID, policyID).
 		Scan(&policy.ID, &policy.BoundKeyCount, &policy.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -415,39 +344,26 @@ RETURNING id,
 	if err != nil {
 		return RoutingPolicy{}, routingStoreError(err)
 	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM routing_policy_merchants WHERE routing_policy_id = $1", policyID); err != nil {
-		return RoutingPolicy{}, fmt.Errorf("清理固定商户：%w", err)
-	}
-	if err := insertRoutingPolicyMerchants(ctx, tx, policyID, input.MerchantIDs); err != nil {
-		return RoutingPolicy{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return RoutingPolicy{}, fmt.Errorf("提交修改路由事务：%w", err)
-	}
 	return policy, nil
 }
 
 const routingPolicySelect = `
-SELECT policy.id, policy.newapi_user_id, policy.name, policy.mode, policy.priority,
+SELECT policy.id, policy.newapi_user_id, policy.name, policy.priority,
        policy.minimum_multiplier_bps, policy.maximum_multiplier_bps,
        policy.minimum_cache_hit_ppm,
-       COALESCE(json_agg(DISTINCT allowed.merchant_profile_id ORDER BY allowed.merchant_profile_id)
-           FILTER (WHERE allowed.merchant_profile_id IS NOT NULL), '[]'::json),
-       count(DISTINCT binding.id) FILTER (WHERE binding.status = 'active'),
+       (SELECT count(*) FROM token_bindings binding
+        WHERE binding.routing_policy_id = policy.id AND binding.status = 'active'),
        policy.updated_at
 FROM routing_policies policy
-LEFT JOIN routing_policy_merchants allowed ON allowed.routing_policy_id = policy.id
-LEFT JOIN token_bindings binding ON binding.routing_policy_id = policy.id
 `
 
 func scanRoutingPolicy(scanner rowScanner) (RoutingPolicy, error) {
 	var policy RoutingPolicy
 	var cacheFloor sql.NullInt64
-	var merchantIDsJSON []byte
 	err := scanner.Scan(
-		&policy.ID, &policy.UserID, &policy.Name, &policy.Mode, &policy.Priority,
+		&policy.ID, &policy.UserID, &policy.Name, &policy.Priority,
 		&policy.MinimumMultiplierBPS, &policy.MaximumMultiplierBPS, &cacheFloor,
-		&merchantIDsJSON, &policy.BoundKeyCount, &policy.UpdatedAt,
+		&policy.BoundKeyCount, &policy.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RoutingPolicy{}, ErrRoutingNotFound
@@ -458,9 +374,6 @@ func scanRoutingPolicy(scanner rowScanner) (RoutingPolicy, error) {
 	if cacheFloor.Valid {
 		value := int(cacheFloor.Int64)
 		policy.MinimumCacheHitPPM = &value
-	}
-	if err := json.Unmarshal(merchantIDsJSON, &policy.MerchantIDs); err != nil {
-		return RoutingPolicy{}, fmt.Errorf("解析固定商户：%w", err)
 	}
 	return policy, nil
 }
@@ -534,89 +447,6 @@ ORDER BY binding.newapi_token_id DESC
 		return nil, fmt.Errorf("遍历密钥路由绑定：%w", err)
 	}
 	return items, nil
-}
-
-func (s *SQLRoutingStore) ListRoutingMerchants(ctx context.Context, keyword string, page int, pageSize int) (RoutingMerchantPage, error) {
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 || pageSize > 200 {
-		pageSize = 20
-	}
-	keyword = strings.TrimSpace(keyword)
-	rows, err := s.database.QueryContext(ctx, `
-WITH merchant_metrics AS (
-    SELECT channel.merchant_profile_id,
-           sum(snapshot.request_count) AS request_count,
-           sum(snapshot.success_count) AS success_count,
-           sum(snapshot.average_ttft_ms::bigint * snapshot.request_count) AS ttft_total_ms,
-           sum(snapshot.prompt_tokens) AS prompt_tokens,
-           sum(snapshot.cache_tokens) AS cache_tokens,
-           max(snapshot.metrics_updated_at) AS metrics_updated_at
-    FROM route_metric_snapshots snapshot
-    JOIN merchant_channels channel ON channel.id = snapshot.merchant_channel_id
-    WHERE channel.status = 'active'
-    GROUP BY channel.merchant_profile_id
-), merchant_rows AS (
-    SELECT profile.id, profile.newapi_user_id, profile.display_name,
-           count(DISTINCT offer.canonical_model_id) AS model_count,
-           min(offer.multiplier_bps) AS minimum_multiplier_bps,
-           max(offer.multiplier_bps) AS maximum_multiplier_bps,
-           CASE WHEN COALESCE(metric.request_count, 0) = 0
-                THEN COALESCE(max(health.availability_ppm), 0)
-                ELSE LEAST(1000000, (metric.success_count * 1000000 / metric.request_count)::integer) END AS availability_ppm,
-           CASE WHEN COALESCE(metric.request_count, 0) = 0 THEN COALESCE(max(health.ttft_p95_ms), 0)
-                ELSE (metric.ttft_total_ms / metric.request_count)::integer END AS ttft_p95_ms,
-           CASE WHEN COALESCE(metric.prompt_tokens, 0) = 0 THEN 0
-                ELSE LEAST(1000000, (metric.cache_tokens * 1000000 / metric.prompt_tokens)::integer) END AS cache_hit_ppm,
-           COALESCE(metric.prompt_tokens, 0) AS cache_sample_input_tokens,
-           COALESCE(metric.prompt_tokens, 0) >= 1000000 AS cache_weight_ready,
-           metric.metrics_updated_at
-    FROM merchant_profiles profile
-    JOIN offer_versions offer ON offer.merchant_profile_id = profile.id AND offer.status = 'active'
-    JOIN offer_channel_aliases alias ON alias.offer_version_id = offer.id
-    JOIN merchant_channels channel ON channel.id = alias.merchant_channel_id AND channel.status = 'active'
-    JOIN channel_health health ON health.merchant_channel_id = channel.id AND health.state IN ('healthy', 'degraded')
-    LEFT JOIN merchant_metrics metric ON metric.merchant_profile_id = profile.id
-    WHERE profile.status = 'active'
-      AND ($1 = '' OR profile.display_name ILIKE '%' || $1 || '%'
-           OR profile.newapi_user_id::text ILIKE '%' || $1 || '%')
-    GROUP BY profile.id, metric.request_count, metric.success_count, metric.ttft_total_ms,
-             metric.prompt_tokens, metric.cache_tokens, metric.metrics_updated_at
-)
-SELECT id, newapi_user_id, display_name, model_count,
-       minimum_multiplier_bps, maximum_multiplier_bps, availability_ppm, ttft_p95_ms,
-       cache_hit_ppm, cache_sample_input_tokens, cache_weight_ready, metrics_updated_at,
-       count(*) OVER ()
-FROM merchant_rows
-ORDER BY display_name, id
-LIMIT $2 OFFSET $3
-`, keyword, pageSize, (page-1)*pageSize)
-	if err != nil {
-		return RoutingMerchantPage{}, fmt.Errorf("查询路由商户：%w", err)
-	}
-	defer rows.Close()
-	result := RoutingMerchantPage{Items: make([]RoutingMerchant, 0), Page: page, PageSize: pageSize}
-	for rows.Next() {
-		var item RoutingMerchant
-		var updatedAt sql.NullTime
-		if err := rows.Scan(
-			&item.ID, &item.UserID, &item.Name, &item.ModelCount,
-			&item.MinimumMultiplierBPS, &item.MaximumMultiplierBPS, &item.AvailabilityPPM, &item.TTFTP95MS,
-			&item.CacheHitPPM, &item.CacheSampleInputTokens, &item.CacheWeightReady, &updatedAt, &result.Total,
-		); err != nil {
-			return RoutingMerchantPage{}, fmt.Errorf("解析路由商户：%w", err)
-		}
-		if updatedAt.Valid {
-			value := updatedAt.Time.UTC()
-			item.MetricsUpdatedAt = &value
-		}
-		result.Items = append(result.Items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return RoutingMerchantPage{}, fmt.Errorf("遍历路由商户：%w", err)
-	}
-	return result, nil
 }
 
 func (s *SQLRoutingStore) DeleteRoutingPolicy(ctx context.Context, userID int, policyID int64) error {
@@ -1137,32 +967,16 @@ WHERE newapi_user_id = $1 AND newapi_token_id = $2
 	return nil
 }
 
-func uniqueInt64(values []int64) []int64 {
-	seen := make(map[int64]struct{}, len(values))
-	result := make([]int64, 0, len(values))
-	for _, value := range values {
-		if value <= 0 {
-			continue
-		}
-		if _, exists := seen[value]; exists {
-			continue
-		}
-		seen[value] = struct{}{}
-		result = append(result, value)
-	}
-	return result
-}
-
 func (s *SQLRoutingStore) ResolveRoute(ctx context.Context, fingerprint string, publicModel string) (RouteSelection, error) {
 	var selection RouteSelection
 	var cacheFloor sql.NullInt64
 	err := s.database.QueryRowContext(ctx, `
-SELECT b.id, p.id, cm.id, p.mode, p.priority, cm.protocol, p.minimum_cache_hit_ppm
+SELECT b.id, p.id, cm.id, p.priority, cm.protocol, p.minimum_cache_hit_ppm
 FROM token_bindings b
 JOIN routing_policies p ON p.id = b.routing_policy_id
 JOIN canonical_models cm ON cm.public_name = $2 AND cm.status = 'active'
 WHERE b.token_fingerprint = $1 AND b.status = 'active'
-`, fingerprint, publicModel).Scan(&selection.TokenBindingID, &selection.PolicyID, &selection.CanonicalModelID, &selection.Mode, &selection.Priority, &selection.Protocol, &cacheFloor)
+`, fingerprint, publicModel).Scan(&selection.TokenBindingID, &selection.PolicyID, &selection.CanonicalModelID, &selection.Priority, &selection.Protocol, &cacheFloor)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RouteSelection{}, ErrRoutingNotFound
 	}
@@ -1209,10 +1023,6 @@ WHERE p.id = $1
   ))
   AND o.multiplier_bps BETWEEN p.minimum_multiplier_bps AND p.maximum_multiplier_bps
   AND h.state IN ('healthy', 'degraded')
-  AND (p.mode = 'smart' OR EXISTS (
-      SELECT 1 FROM routing_policy_merchants allowed
-      WHERE allowed.routing_policy_id = p.id AND allowed.merchant_profile_id = mp.id
-  ))
 `, selection.PolicyID, selection.CanonicalModelID)
 	if err != nil {
 		return RouteSelection{}, fmt.Errorf("查询路由候选：%w", err)
@@ -1250,10 +1060,10 @@ func (s *SQLRoutingStore) StartRouteDecision(ctx context.Context, decision Route
 	_, err = s.database.ExecContext(ctx, `
 INSERT INTO routing_decisions
     (request_id, token_binding_id, routing_policy_id, canonical_model_id,
-     offer_channel_alias_id, mode, priority, algorithm_version, candidate_count, selected_metrics)
-VALUES ($1, $2, $3, $4, NULLIF($5, 0), $6, $7, $8, $9, $10)
+     offer_channel_alias_id, priority, algorithm_version, candidate_count, selected_metrics)
+VALUES ($1, $2, $3, $4, NULLIF($5, 0), $6, $7, $8, $9)
 `, decision.RequestID, decision.TokenBindingID, decision.PolicyID, decision.CanonicalModelID,
-		decision.OfferChannelAliasID, decision.Mode, decision.Priority,
+		decision.OfferChannelAliasID, decision.Priority,
 		decision.AlgorithmVersion, decision.CandidateCount, selectedMetrics)
 	if err != nil {
 		return fmt.Errorf("创建路由决策：%w", err)

@@ -12,29 +12,22 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-func TestCreateRoutingPolicyStoresIndependentResourceAndFixedMerchants(t *testing.T) {
+func TestCreateRoutingPolicyStoresIndependentSmartRoute(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer database.Close()
 	createdAt := time.Date(2026, 7, 23, 9, 0, 0, 0, time.UTC)
-	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO routing_policies")).
-		WithArgs(7, "固定主路由", "fixed", "balanced", 2_000, 15_000, nil).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at"}).AddRow(91, createdAt, createdAt))
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO routing_policy_merchants")).
-		WithArgs(int64(91), int64(31)).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO routing_policy_merchants")).
-		WithArgs(int64(91), int64(32)).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
+		WithArgs(7, "智能主路由", "balanced", 2_000, 15_000, nil).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "updated_at"}).AddRow(91, createdAt))
 
 	policy, err := NewSQLRoutingStore(database).CreateRoutingPolicy(context.Background(), 7, RoutingPolicyInput{
-		Name: " 固定主路由 ", Mode: "fixed", Priority: "balanced",
+		Name: " 智能主路由 ", Priority: "balanced",
 		MinimumMultiplierBPS: 2_000, MaximumMultiplierBPS: 15_000,
-		MerchantIDs: []int64{31, 32, 31},
 	})
-	if err != nil || policy.ID != 91 || policy.Name != "固定主路由" || policy.UserID != 7 || len(policy.MerchantIDs) != 2 {
+	if err != nil || policy.ID != 91 || policy.Name != "智能主路由" || policy.UserID != 7 {
 		t.Fatalf("创建路由=%+v err=%v", policy, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -104,8 +97,8 @@ func TestRoutingPolicyCacheFloorScansNullableValue(t *testing.T) {
 	defer database.Close()
 	mock.ExpectQuery(regexp.QuoteMeta("FROM routing_policies policy")).
 		WithArgs(7, int64(91)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "name", "mode", "priority", "minimum_multiplier_bps", "maximum_multiplier_bps", "minimum_cache_hit_ppm", "merchant_ids", "bound_key_count", "updated_at"}).
-			AddRow(91, 7, "缓存路由", "smart", "cache", 0, 50_000, sql.NullInt64{Int64: 650_000, Valid: true}, []byte(`[]`), 1, time.Now()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "name", "priority", "minimum_multiplier_bps", "maximum_multiplier_bps", "minimum_cache_hit_ppm", "bound_key_count", "updated_at"}).
+			AddRow(91, 7, "缓存路由", "cache", 0, 50_000, sql.NullInt64{Int64: 650_000, Valid: true}, 1, time.Now()))
 	policy, err := NewSQLRoutingStore(database).RoutingPolicy(context.Background(), 7, 91)
 	if err != nil || policy.MinimumCacheHitPPM == nil || *policy.MinimumCacheHitPPM != 650_000 {
 		t.Fatalf("缓存阈值路由=%+v err=%v", policy, err)
@@ -122,24 +115,20 @@ func TestListAndUpdateIndependentRoutingPolicies(t *testing.T) {
 	now := time.Now()
 	mock.ExpectQuery(regexp.QuoteMeta("FROM routing_policies policy")).
 		WithArgs(7).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "name", "mode", "priority", "minimum_multiplier_bps", "maximum_multiplier_bps", "minimum_cache_hit_ppm", "merchant_ids", "bound_key_count", "updated_at"}).
-			AddRow(91, 7, "主路由", "smart", "price", 0, 50_000, nil, []byte(`[]`), 2, now).
-			AddRow(92, 7, "备用路由", "fixed", "success", 5_000, 10_000, nil, []byte(`[31]`), 0, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "name", "priority", "minimum_multiplier_bps", "maximum_multiplier_bps", "minimum_cache_hit_ppm", "bound_key_count", "updated_at"}).
+			AddRow(91, 7, "主路由", "price", 0, 50_000, nil, 2, now).
+			AddRow(92, 7, "备用路由", "success", 5_000, 10_000, nil, 0, now))
 	items, err := store.ListRoutingPolicies(context.Background(), 7)
-	if err != nil || len(items) != 2 || items[0].BoundKeyCount != 2 || items[1].MerchantIDs[0] != 31 {
+	if err != nil || len(items) != 2 || items[0].BoundKeyCount != 2 || items[1].Priority != "success" {
 		t.Fatalf("路由列表=%+v err=%v", items, err)
 	}
 
 	cacheFloor := 600_000
-	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("UPDATE routing_policies")).
-		WithArgs("缓存优先", "smart", "cache", 0, 50_000, &cacheFloor, 7, int64(91)).
+		WithArgs("缓存优先", "cache", 0, 50_000, &cacheFloor, 7, int64(91)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "bound_key_count", "updated_at"}).AddRow(91, 2, now))
-	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM routing_policy_merchants")).
-		WithArgs(int64(91)).WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectCommit()
 	updated, err := store.UpdateRoutingPolicy(context.Background(), 7, 91, RoutingPolicyInput{
-		Name: "缓存优先", Mode: "smart", Priority: "cache",
+		Name: "缓存优先", Priority: "cache",
 		MinimumMultiplierBPS: 0, MaximumMultiplierBPS: 50_000,
 		MinimumCacheHitPPM: &cacheFloor,
 	})
@@ -166,7 +155,7 @@ func TestListTokenRoutingBindingsReturnsPlatformRouteIdentity(t *testing.T) {
 	}
 }
 
-func TestResolveRouteFiltersSmartMerchantsBelowCacheFloor(t *testing.T) {
+func TestResolveRouteKeepsInsufficientCacheSampleAndFiltersKnownLowValue(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -175,8 +164,8 @@ func TestResolveRouteFiltersSmartMerchantsBelowCacheFloor(t *testing.T) {
 	fingerprint := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 	mock.ExpectQuery(regexp.QuoteMeta("JOIN routing_policies p ON p.id = b.routing_policy_id")).
 		WithArgs(fingerprint, "gpt-5.6").
-		WillReturnRows(sqlmock.NewRows([]string{"binding_id", "policy_id", "model_id", "mode", "priority", "protocol", "minimum_cache_hit_ppm"}).
-			AddRow(81, 91, 61, "smart", "cache", "responses", 600_000))
+		WillReturnRows(sqlmock.NewRows([]string{"binding_id", "policy_id", "model_id", "priority", "protocol", "minimum_cache_hit_ppm"}).
+			AddRow(81, 91, 61, "cache", "responses", 600_000))
 	mock.ExpectQuery(regexp.QuoteMeta("WITH merchant_metrics AS")).
 		WithArgs(int64(91), int64(61)).
 		WillReturnRows(sqlmock.NewRows([]string{
@@ -185,10 +174,10 @@ func TestResolveRouteFiltersSmartMerchantsBelowCacheFloor(t *testing.T) {
 			"request_count", "cache_hit_ppm", "prompt_tokens", "cache_weight_ready", "merchant_cache_hit_ppm", "merchant_cache_weight_ready",
 		}).
 			AddRow(41, 81, 31, 51, 71, 61, "mkt-o41-c51", "gpt-5.6", "responses", 8000, "healthy", 990000, 800, 100, 900000, 999999, false, 900000, false).
-			AddRow(42, 82, 32, 52, 72, 61, "mkt-o42-c52", "gpt-5.6", "responses", 8500, "healthy", 980000, 900, 100, 700000, 2000000, true, 700000, true))
+			AddRow(42, 82, 32, 52, 72, 61, "mkt-o42-c52", "gpt-5.6", "responses", 8500, "healthy", 980000, 900, 100, 500000, 2000000, true, 500000, true))
 
 	selection, err := NewSQLRoutingStore(database).ResolveRoute(context.Background(), fingerprint, "gpt-5.6")
-	if err != nil || len(selection.Candidates) != 1 || selection.Candidates[0].MerchantID != 32 {
+	if err != nil || len(selection.Candidates) != 1 || selection.Candidates[0].MerchantID != 31 {
 		t.Fatalf("缓存阈值候选=%+v err=%v", selection.Candidates, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -205,7 +194,7 @@ func TestStartRouteDecisionPersistsWeightedRoutingContext(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO routing_decisions")).
 		WithArgs(
 			"request-1", int64(81), int64(91), int64(61), int64(101),
-			"smart", "cache", "weighted-v1", 2,
+			"cache", routeAlgorithmVersion, 2,
 			sqlmock.AnyArg(),
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -213,7 +202,7 @@ func TestStartRouteDecisionPersistsWeightedRoutingContext(t *testing.T) {
 	err = NewSQLRoutingStore(database).StartRouteDecision(context.Background(), RouteDecision{
 		RequestID: "request-1", TokenBindingID: 81, PolicyID: 91,
 		CanonicalModelID: 61, OfferChannelAliasID: 101,
-		Mode: "smart", Priority: "cache", AlgorithmVersion: "weighted-v1", CandidateCount: 2,
+		Priority: "cache", AlgorithmVersion: routeAlgorithmVersion, CandidateCount: 2,
 		SelectedMetrics: map[string]any{
 			"merchant_id": 31, "multiplier_bps": 8000, "availability_ppm": 990000,
 			"ttft_p95_ms": 420, "cache_hit_ppm": 720000, "cache_weight_ready": true,

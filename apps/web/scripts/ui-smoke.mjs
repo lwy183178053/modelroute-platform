@@ -93,18 +93,12 @@ async function mockAdminAPI(targetPage, state, account = null) {
       return json({ success: true, data: { page: 1, page_size: 20, total: 1, items: [{ id: 9, name: '真实主密钥', key: 'full-secret-key', status: 1, created_time: 1784690000, accessed_time: 1784692000, expired_time: -1, unlimited_quota: true, routing_policy_id: 71, routing_policy_name: '主路由' }] } });
     }
     if (url.pathname === '/api/routing-policies' && request.method() === 'GET') {
-      return json({ success: true, data: [{ id: 71, name: '主路由', mode: 'smart', priority: 'cache', minimum_multiplier_bps: 4000, maximum_multiplier_bps: 8000, minimum_cache_hit_ppm: null, merchant_ids: [], bound_key_count: 1, updated_at: '2026-07-23T12:00:00Z' }] });
+      return json({ success: true, data: [{ id: 71, name: '主路由', priority: 'cache', minimum_multiplier_bps: 4000, maximum_multiplier_bps: 8000, minimum_cache_hit_ppm: null, bound_key_count: 1, updated_at: '2026-07-23T12:00:00Z' }] });
     }
     if (url.pathname === '/api/routing-policies/71' && request.method() === 'PUT') {
       state.routeSaveCalls += 1;
       state.routeSaveBody = request.postDataJSON();
       return json({ success: true, data: { id: 71, bound_key_count: 1, ...state.routeSaveBody } });
-    }
-    if (url.pathname === '/api/routing-merchants' && request.method() === 'GET') {
-      return json({ success: true, data: { page: Number(url.searchParams.get('p') || 1), page_size: Number(url.searchParams.get('page_size') || 20), total: 2, items: [
-        { id: 31, user_id: 8, name: '北辰云智', model_count: 8, minimum_multiplier_bps: 5800, maximum_multiplier_bps: 7200, availability_ppm: 999800, ttft_p95_ms: 1200, cache_hit_ppm: 720000, cache_sample_input_tokens: 2000000, cache_weight_ready: true },
-        { id: 32, user_id: 9, name: '矩阵算力', model_count: 4, minimum_multiplier_bps: 5000, maximum_multiplier_bps: 8500, availability_ppm: 987500, ttft_p95_ms: 1650, cache_hit_ppm: 0, cache_sample_input_tokens: 320000, cache_weight_ready: false },
-      ] } });
     }
     if (url.pathname === '/api/usage' && request.method() === 'GET') {
       state.userUsageQuery = Object.fromEntries(url.searchParams);
@@ -463,6 +457,7 @@ try {
   await page.getByRole('button', { name: '保存策略' }).click();
   assert(adminMockState.routeSaveCalls === 1, '保存路由策略没有调用真实接口');
   assert(adminMockState.routeSaveBody.minimum_cache_hit_ppm === 600000, '最低缓存命中率没有转换为整数 PPM');
+  assert(!('mode' in adminMockState.routeSaveBody) && !('merchant_ids' in adminMockState.routeSaveBody), '路由仍提交已删除的固定路由字段');
   await consoleSidebar.getByRole('button', { name: 'API 密钥', exact: true }).click();
   await page.getByText('真实主密钥').first().waitFor();
   await page.getByText('主路由').waitFor();

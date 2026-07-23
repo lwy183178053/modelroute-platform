@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Check, CreditCard, KeyRound, Landmark, LockKeyhole, Plus, RotateCcw, Send, ShieldCheck, Store } from 'lucide-react';
+import { Check, CreditCard, KeyRound, Landmark, LockKeyhole, Plus, RotateCcw, Send, ShieldCheck } from 'lucide-react';
 import AuthModal from './AuthModal';
 import { apiRequest, formatPriceMicros, formatQuota, getQuotaPerUnit } from './api';
-import { Button, Field, InlineNotice, Modal, Pagination, Select, Status, TextInput } from './ui';
+import { Button, Field, InlineNotice, Modal, Select, Status, TextInput } from './ui';
 
 function Footer({ cancel, submit, submitText, icon = Check }) {
   return <><Button onClick={cancel}>取消</Button><Button icon={icon} variant="primary" onClick={submit}>{submitText}</Button></>;
@@ -26,42 +26,13 @@ function RouteModal({ close, config, notify }) {
   const policy = config.policy || {};
   const editing = Boolean(policy.id);
   const [name, setName] = useState(policy.name || '');
-  const [mode, setMode] = useState(policy.mode || 'smart');
   const [priority, setPriority] = useState(policy.priority || 'balanced');
   const [minimum, setMinimum] = useState(String(Number(policy.minimum_multiplier_bps ?? 0) / 10_000));
   const [maximum, setMaximum] = useState(String(Number(policy.maximum_multiplier_bps ?? 50_000) / 10_000));
-  const [merchantIDs, setMerchantIDs] = useState(policy.merchant_ids || []);
   const [cacheFloorEnabled, setCacheFloorEnabled] = useState(policy.minimum_cache_hit_ppm != null);
   const [cacheFloor, setCacheFloor] = useState(String(Number(policy.minimum_cache_hit_ppm ?? 0) / 10_000));
-  const [merchantQuery, setMerchantQuery] = useState('');
-  const [merchantPage, setMerchantPage] = useState(1);
-  const [merchantPageSize, setMerchantPageSize] = useState(20);
-  const [merchantResult, setMerchantResult] = useState({ items: [], total: 0 });
-  const [merchantLoading, setMerchantLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (mode !== 'fixed') return undefined;
-    let active = true;
-    const timer = window.setTimeout(async () => {
-      setMerchantLoading(true);
-      try {
-        const query = new URLSearchParams({ keyword: merchantQuery.trim(), p: String(merchantPage), page_size: String(merchantPageSize) });
-        const result = await apiRequest(`/api/routing-merchants?${query}`);
-        if (active) setMerchantResult(result || { items: [], total: 0 });
-      } catch (requestError) {
-        if (active) setError(requestError.message || '读取可选商户失败');
-      } finally {
-        if (active) setMerchantLoading(false);
-      }
-    }, 150);
-    return () => { active = false; window.clearTimeout(timer); };
-  }, [merchantPage, merchantPageSize, merchantQuery, mode]);
-
-  const toggleMerchant = (merchantID) => {
-    setMerchantIDs((current) => current.includes(merchantID) ? current.filter((id) => id !== merchantID) : [...current, merchantID]);
-  };
 
   const submit = async () => {
     if (!name.trim()) {
@@ -74,11 +45,7 @@ function RouteModal({ close, config, notify }) {
       setError('倍率区间必须在 0.00x 到 5.00x 之间');
       return;
     }
-    if (mode === 'fixed' && merchantIDs.length === 0) {
-      setError('固定路由至少选择一个商户');
-      return;
-    }
-    const minimumCacheHitPPM = mode === 'smart' && cacheFloorEnabled ? Math.round(Number(cacheFloor) * 10_000) : null;
+    const minimumCacheHitPPM = cacheFloorEnabled ? Math.round(Number(cacheFloor) * 10_000) : null;
     if (minimumCacheHitPPM != null && (!Number.isInteger(minimumCacheHitPPM) || minimumCacheHitPPM < 0 || minimumCacheHitPPM > 1_000_000)) {
       setError('最低缓存命中率必须在 0.00% 到 100.00% 之间');
       return;
@@ -89,11 +56,10 @@ function RouteModal({ close, config, notify }) {
       await apiRequest(editing ? `/api/routing-policies/${policy.id}` : '/api/routing-policies', {
         method: editing ? 'PUT' : 'POST',
         body: {
-          name: name.trim(), mode, priority,
+          name: name.trim(), priority,
           minimum_multiplier_bps: minimumBPS,
           maximum_multiplier_bps: maximumBPS,
           minimum_cache_hit_ppm: minimumCacheHitPPM,
-          merchant_ids: mode === 'fixed' ? merchantIDs : [],
         },
       });
       await config.onSaved?.();
@@ -115,11 +81,6 @@ function RouteModal({ close, config, notify }) {
     >
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
       <Field label="路由名称"><TextInput maxLength="50" onChange={(event) => setName(event.target.value)} placeholder="例如：稳定主路由" value={name} /></Field>
-      <div className="form-section"><h3>路由方式</h3><div className="choice-grid">
-        <label className={`choice-card ${mode === 'smart' ? 'selected' : ''}`}><input aria-label="智能路由" checked={mode === 'smart'} name="route-mode" onChange={() => setMode('smart')} type="radio" /><span className="choice-icon"><ShieldCheck size={20} /></span><strong>智能路由</strong><small>从所有符合倍率和健康条件的商户中选择</small></label>
-        <label className={`choice-card ${mode === 'fixed' ? 'selected' : ''}`}><input aria-label="固定商户" checked={mode === 'fixed'} name="route-mode" onChange={() => setMode('fixed')} type="radio" /><span className="choice-icon"><Store size={20} /></span><strong>固定商户</strong><small>只从指定商户中加权选择</small></label>
-      </div></div>
-
       <div className="form-grid two-column">
         <Field label="最低成交倍率" hint="低于此倍率的报价不参与路由"><TextInput value={minimum} onChange={(event) => setMinimum(event.target.value)} min="0" max="5" step="0.01" type="number" /></Field>
         <Field label="最高成交倍率" hint="高于此倍率的报价不参与路由"><TextInput value={maximum} onChange={(event) => setMaximum(event.target.value)} min="0" max="5" step="0.01" type="number" /></Field>
@@ -133,20 +94,10 @@ function RouteModal({ close, config, notify }) {
         <label><input checked={priority === 'cache'} name="priority" onChange={() => setPriority('cache')} type="radio" />缓存命中率优先<span>缓存指标权重 70%</span></label>
       </div></div>
 
-      {mode === 'smart' && <div className="form-section cache-floor-setting"><h3>缓存筛选</h3>
-        <label className="toggle-line"><input aria-label="启用最低缓存命中率" checked={cacheFloorEnabled} onChange={(event) => setCacheFloorEnabled(event.target.checked)} type="checkbox" /><span><strong>启用最低缓存命中率</strong><small>开启后过滤样本不足或低于阈值的商户模型</small></span></label>
+      <div className="form-section cache-floor-setting"><h3>缓存筛选</h3>
+        <label className="toggle-line"><input aria-label="启用最低缓存命中率" checked={cacheFloorEnabled} onChange={(event) => setCacheFloorEnabled(event.target.checked)} type="checkbox" /><span><strong>启用最低缓存命中率</strong><small>仅过滤样本充足且低于阈值的商户，新商户按中性分参与</small></span></label>
         {cacheFloorEnabled && <Field label="最低缓存命中率" hint="按最近 7 天商户与模型汇总数据判断"><div className="suffix-input"><TextInput max="100" min="0" onChange={(event) => setCacheFloor(event.target.value)} step="0.01" type="number" value={cacheFloor} /><span>%</span></div></Field>}
-      </div>}
-
-      {mode === 'fixed' && <div className="form-section"><h3>固定商户范围</h3>
-        <div className="filter-toolbar"><TextInput aria-label="搜索固定商户" onChange={(event) => { setMerchantQuery(event.target.value); setMerchantPage(1); }} placeholder="搜索商户名称或用户 ID" value={merchantQuery} /><span className="selection-count">已选择 {merchantIDs.length} 家</span></div>
-        <div className="table-wrap route-merchant-table"><table className="data-table"><thead><tr><th>选择</th><th>ID</th><th>商户</th><th>模型</th><th>倍率范围</th><th>成功率</th><th>缓存命中率</th></tr></thead><tbody>
-          {(merchantResult.items || []).map((merchant) => <tr key={merchant.id}><td><input aria-label={`选择商户 ${merchant.name}`} checked={merchantIDs.includes(merchant.id)} onChange={() => toggleMerchant(merchant.id)} type="checkbox" /></td><td><code>{merchant.id}</code></td><td><strong>{merchant.name}</strong><small>用户 ID {merchant.user_id}</small></td><td>{merchant.model_count}</td><td>{(Number(merchant.minimum_multiplier_bps || 0) / 10_000).toFixed(2)}x - {(Number(merchant.maximum_multiplier_bps || 0) / 10_000).toFixed(2)}x</td><td>{(Number(merchant.availability_ppm || 0) / 10_000).toFixed(2)}%</td><td>{merchant.cache_weight_ready ? `${(Number(merchant.cache_hit_ppm || 0) / 10_000).toFixed(2)}%` : '样本不足'}</td></tr>)}
-          {!merchantLoading && !(merchantResult.items || []).length && <tr><td className="table-message" colSpan="7">没有符合条件的商户</td></tr>}
-          {merchantLoading && <tr><td className="table-message" colSpan="7">正在读取商户</td></tr>}
-        </tbody></table></div>
-        <Pagination disabled={merchantLoading} page={merchantPage} pageSize={merchantPageSize} total={merchantResult.total || 0} onPageChange={setMerchantPage} onPageSizeChange={(value) => { setMerchantPageSize(value); setMerchantPage(1); }} />
-      </div>}
+      </div>
       <InlineNotice tone="warning">没有符合策略条件的候选时返回无可用渠道错误，本次请求不扣费。</InlineNotice>
     </Modal>
   );

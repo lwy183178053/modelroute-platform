@@ -3,11 +3,22 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+type proxyClientStub struct {
+	NewAPIClient
+	calls int
+}
+
+func (s *proxyClientStub) Proxy(context.Context, string, string, http.Header, []byte) (*http.Response, error) {
+	s.calls++
+	return nil, errors.New("连接结果未知")
+}
 
 type routeRepositoryStub struct {
 	RoutingRepository
@@ -64,7 +75,7 @@ func TestModelProxyRetriesBeforeFirstByteAndPreservesStream(t *testing.T) {
 	}))
 	box := testCredentialBox(t)
 	repository := &routeRepositoryStub{selection: RouteSelection{
-		TokenBindingID: 81, PolicyID: 91, Mode: "smart", Priority: "price", Protocol: "responses",
+		TokenBindingID: 81, PolicyID: 91, Priority: "price", Protocol: "responses",
 		Candidates: []RouteCandidate{
 			{OfferID: 1, OfferChannelAliasID: 101, MerchantChannelID: 51, CanonicalModelID: 61, InternalAlias: "mkt-ov-1", MultiplierBPS: 3000, HealthState: "healthy"},
 			{OfferID: 2, OfferChannelAliasID: 102, MerchantChannelID: 52, CanonicalModelID: 61, InternalAlias: "mkt-ov-2", MultiplierBPS: 4000, HealthState: "healthy"},
@@ -89,7 +100,7 @@ func TestModelProxyRetriesBeforeFirstByteAndPreservesStream(t *testing.T) {
 		t.Fatalf("路由决策记录不完整：started=%+v completed=%+v", repository.started, repository.completed)
 	}
 	decision := repository.started[0]
-	if decision.PolicyID != 91 || decision.AlgorithmVersion != "weighted-v1" || decision.CandidateCount != 2 || decision.SelectedMetrics["merchant_channel_id"] != int64(51) {
+	if decision.PolicyID != 91 || decision.AlgorithmVersion != routeAlgorithmVersion || decision.CandidateCount != 2 || decision.SelectedMetrics["merchant_channel_id"] != int64(51) {
 		t.Fatalf("路由决策上下文不完整：%+v", decision)
 	}
 	if len(repository.observations) != 2 || repository.observations[0].Outcome != "temporary_failure" || repository.observations[1].Outcome != "success" {
@@ -101,7 +112,7 @@ func TestModelProxyReturnsOpenAI503WithoutUpstreamWhenNoCandidate(t *testing.T) 
 	upstreamCalls := 0
 	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { upstreamCalls++ }))
 	services.Credentials = testCredentialBox(t)
-	services.Routing = &routeRepositoryStub{selection: RouteSelection{TokenBindingID: 81, PolicyID: 91, Mode: "fixed", Priority: "price", Protocol: "chat_completions"}}
+	services.Routing = &routeRepositoryStub{selection: RouteSelection{TokenBindingID: 81, PolicyID: 91, Priority: "price", Protocol: "chat_completions"}}
 	handler := NewServerWithServices("test", Dependencies{}, services)
 	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5.5","messages":[]}`))
 	request.Header.Set("Authorization", "Bearer sk-user-route")
@@ -126,7 +137,7 @@ func TestImageProxyRejectsUnpricedCombinationAndInvalidCountBeforeUpstream(t *te
 			services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { upstreamCalls++ }))
 			services.Credentials = testCredentialBox(t)
 			repository := &routeRepositoryStub{
-				selection:   RouteSelection{TokenBindingID: 81, PolicyID: 91, CanonicalModelID: 61, Mode: "smart", Priority: "price", Protocol: "image_generation", Candidates: []RouteCandidate{{OfferID: 1, OfferChannelAliasID: 101, MerchantChannelID: 51, CanonicalModelID: 61, InternalAlias: "mkt-ov-image"}}},
+				selection:   RouteSelection{TokenBindingID: 81, PolicyID: 91, CanonicalModelID: 61, Priority: "price", Protocol: "image_generation", Candidates: []RouteCandidate{{OfferID: 1, OfferChannelAliasID: 101, MerchantChannelID: 51, CanonicalModelID: 61, InternalAlias: "mkt-ov-image"}}},
 				imagePrices: []ImagePriceItem{{Quality: "standard", Size: "1024x1024", PriceMicros: 40_000}},
 			}
 			services.Routing = repository
@@ -151,7 +162,7 @@ func TestImageProxyAcceptsPricedCombinationAndPositiveCount(t *testing.T) {
 	}))
 	services.Credentials = testCredentialBox(t)
 	repository := &routeRepositoryStub{
-		selection:   RouteSelection{TokenBindingID: 81, PolicyID: 91, CanonicalModelID: 61, Mode: "smart", Priority: "price", Protocol: "image_generation", Candidates: []RouteCandidate{{OfferID: 1, OfferChannelAliasID: 101, MerchantChannelID: 51, CanonicalModelID: 61, InternalAlias: "mkt-ov-image"}}},
+		selection:   RouteSelection{TokenBindingID: 81, PolicyID: 91, CanonicalModelID: 61, Priority: "price", Protocol: "image_generation", Candidates: []RouteCandidate{{OfferID: 1, OfferChannelAliasID: 101, MerchantChannelID: 51, CanonicalModelID: 61, InternalAlias: "mkt-ov-image"}}},
 		imagePrices: []ImagePriceItem{{Quality: "standard", Size: "1024x1024", PriceMicros: 40_000}},
 	}
 	services.Routing = repository
@@ -162,5 +173,31 @@ func TestImageProxyAcceptsPricedCombinationAndPositiveCount(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || upstreamCalls != 1 || len(repository.started) != 1 {
 		t.Fatalf("响应=%d %s，上游调用=%d，路由记录=%+v", response.Code, response.Body.String(), upstreamCalls, repository.started)
+	}
+}
+
+func TestImageProxyDoesNotRetryWhenTransportResultIsUnknown(t *testing.T) {
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	services.Credentials = testCredentialBox(t)
+	proxy := &proxyClientStub{NewAPIClient: services.NewAPI}
+	services.NewAPI = proxy
+	repository := &routeRepositoryStub{
+		selection: RouteSelection{TokenBindingID: 81, PolicyID: 91, CanonicalModelID: 61, Priority: "price", Protocol: "image_generation", Candidates: []RouteCandidate{
+			{OfferID: 1, OfferChannelAliasID: 101, MerchantChannelID: 51, CanonicalModelID: 61, InternalAlias: "mkt-ov-image-a"},
+			{OfferID: 2, OfferChannelAliasID: 102, MerchantChannelID: 52, CanonicalModelID: 61, InternalAlias: "mkt-ov-image-b"},
+		}},
+		imagePrices: []ImagePriceItem{{Quality: "standard", Size: "1024x1024", PriceMicros: 40_000}},
+	}
+	services.Routing = repository
+	handler := NewServerWithServices("test", Dependencies{}, services)
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"gpt-image-2","prompt":"hi","quality":"standard","size":"1024x1024","n":1}`))
+	request.Header.Set("Authorization", "Bearer sk-user-route")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadGateway || proxy.calls != 1 {
+		t.Fatalf("图片连接结果未知时响应=%d，上游尝试=%d，响应体=%s", response.Code, proxy.calls, response.Body.String())
+	}
+	if len(repository.completed) != 1 || repository.completed[0].Attempts != 1 || repository.completed[0].Result != "transport_error" {
+		t.Fatalf("图片路由完成记录=%+v", repository.completed)
 	}
 }

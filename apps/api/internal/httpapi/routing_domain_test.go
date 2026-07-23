@@ -94,6 +94,27 @@ func TestWeightedCandidateOrderStartsFromMerchantNotChannelCount(t *testing.T) {
 	}
 }
 
+func TestWeightedCandidateOrderUsesOneChannelPerMerchantInEachRound(t *testing.T) {
+	candidates := []RouteCandidate{
+		{MerchantID: 1, MerchantChannelID: 11, OfferChannelAliasID: 11, MultiplierBPS: 1_000},
+		{MerchantID: 1, MerchantChannelID: 12, OfferChannelAliasID: 12, MultiplierBPS: 1_000},
+		{MerchantID: 1, MerchantChannelID: 13, OfferChannelAliasID: 13, MultiplierBPS: 1_000},
+		{MerchantID: 2, MerchantChannelID: 21, OfferChannelAliasID: 21, MultiplierBPS: 1_000},
+		{MerchantID: 2, MerchantChannelID: 22, OfferChannelAliasID: 22, MultiplierBPS: 1_000},
+		{MerchantID: 3, MerchantChannelID: 31, OfferChannelAliasID: 31, MultiplierBPS: 1_000},
+	}
+	ordered := weightedCandidateOrder(candidates, "balanced", &fixedRouteRandom{values: []float64{0}})
+	wantMerchants := []int64{1, 2, 3, 1, 2, 1}
+	if len(ordered) != len(wantMerchants) {
+		t.Fatalf("候选数量=%d，期望=%d", len(ordered), len(wantMerchants))
+	}
+	for index, wantMerchant := range wantMerchants {
+		if ordered[index].MerchantID != wantMerchant {
+			t.Fatalf("第 %d 个候选商户=%d，期望=%d；完整顺序=%+v", index, ordered[index].MerchantID, wantMerchant, ordered)
+		}
+	}
+}
+
 func TestCachePriorityTreatsLowSampleAsNeutral(t *testing.T) {
 	candidates := []RouteCandidate{
 		{MerchantID: 1, MerchantChannelID: 11, MultiplierBPS: 1_000, CacheHitPPM: 1_000_000, CacheSampleInputTokens: 999_999},
@@ -105,15 +126,15 @@ func TestCachePriorityTreatsLowSampleAsNeutral(t *testing.T) {
 	}
 }
 
-func TestSmartCacheFloorRequiresReadyMerchantMetric(t *testing.T) {
+func TestSmartCacheFloorTreatsInsufficientSampleAsNeutral(t *testing.T) {
 	floor := 600_000
-	selection := RouteSelection{Mode: "smart", MinimumCacheHitPPM: &floor}
+	selection := RouteSelection{MinimumCacheHitPPM: &floor}
 	for _, test := range []struct {
 		name      string
 		candidate RouteCandidate
 		want      bool
 	}{
-		{name: "样本不足", candidate: RouteCandidate{MerchantCacheHitPPM: 900_000, MerchantCacheWeightReady: false}, want: false},
+		{name: "样本不足", candidate: RouteCandidate{MerchantCacheHitPPM: 0, MerchantCacheWeightReady: false}, want: true},
 		{name: "低于阈值", candidate: RouteCandidate{MerchantCacheHitPPM: 599_999, MerchantCacheWeightReady: true}, want: false},
 		{name: "达到阈值", candidate: RouteCandidate{MerchantCacheHitPPM: 600_000, MerchantCacheWeightReady: true}, want: true},
 	} {
@@ -123,11 +144,6 @@ func TestSmartCacheFloorRequiresReadyMerchantMetric(t *testing.T) {
 			}
 		})
 	}
-	selection.Mode = "fixed"
-	if !routeCandidateMeetsCacheFloor(selection, RouteCandidate{}) {
-		t.Fatal("固定路由不应应用缓存命中率阈值")
-	}
-	selection.Mode = "smart"
 	if !routeCandidateMeetsCacheFloor(selection, RouteCandidate{Protocol: "image_generation"}) {
 		t.Fatal("图片模型不应应用缓存命中率阈值")
 	}

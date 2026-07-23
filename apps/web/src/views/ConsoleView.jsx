@@ -209,15 +209,15 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
             <UsageTrend data={usage.data} error={usage.error} loading={usage.loading} />
           </>}
 
-          {section === 'routes' && <Section title="路由管理" description="路由可复用，并根据价格、成功率、速度或缓存指标加权选择商户" actions={<Button icon={Plus} variant="primary" onClick={() => openModal({ type: 'route', onSaved: loadKeys })}>创建路由</Button>}>
+          {section === 'routes' && <Section title="路由管理" description="路由可复用，并从全部合格商户中按价格、成功率、速度或缓存指标加权选择" actions={<Button icon={Plus} variant="primary" onClick={() => openModal({ type: 'route', onSaved: loadKeys })}>创建路由</Button>}>
             <div className="table-wrap">
               <table className="data-table">
-                <thead><tr><th>ID</th><th>名称</th><th>模式</th><th>优先方式</th><th>倍率区间</th><th>最低缓存</th><th>固定商户</th><th>绑定密钥</th><th>操作</th></tr></thead>
+                <thead><tr><th>ID</th><th>名称</th><th>优先方式</th><th>倍率区间</th><th>最低缓存</th><th>绑定密钥</th><th>操作</th></tr></thead>
                 <tbody>{routingPolicies.map((policy) => <tr key={policy.id}>
-                  <td><code>{policy.id}</code></td><td><strong>{policy.name}</strong></td><td>{policy.mode === 'fixed' ? '固定路由' : '智能路由'}</td><td>{priorityName(policy.priority)}</td><td>{formatMultiplier(policy.minimum_multiplier_bps)} - {formatMultiplier(policy.maximum_multiplier_bps)}</td><td>{policy.mode === 'smart' ? cacheFloorName(policy.minimum_cache_hit_ppm) : '-'}</td><td>{policy.mode === 'fixed' ? `${policy.merchant_ids?.length || 0} 家` : '全部合格商户'}</td><td>{policy.bound_key_count || 0} 把</td><td><ActionMenu items={[{ label: '编辑', onClick: () => openModal({ type: 'route', policy, onSaved: loadKeys }) }, { label: '删除', danger: true, disabled: Number(policy.bound_key_count || 0) > 0, onClick: () => deleteRoute(policy) }]} /></td>
+                  <td><code>{policy.id}</code></td><td><strong>{policy.name}</strong></td><td>{priorityName(policy.priority)}</td><td>{formatMultiplier(policy.minimum_multiplier_bps)} - {formatMultiplier(policy.maximum_multiplier_bps)}</td><td>{cacheFloorName(policy.minimum_cache_hit_ppm)}</td><td>{policy.bound_key_count || 0} 把</td><td><ActionMenu items={[{ label: '编辑', onClick: () => openModal({ type: 'route', policy, onSaved: loadKeys }) }, { label: '删除', danger: true, disabled: Number(policy.bound_key_count || 0) > 0, onClick: () => deleteRoute(policy) }]} /></td>
                 </tr>)}
-                {!keyLoading && routingPolicies.length === 0 && <tr><td className="table-message" colSpan="9">{keyError || '尚未创建路由'}</td></tr>}
-                {keyLoading && <tr><td className="table-message" colSpan="9">正在读取路由</td></tr>}</tbody>
+                {!keyLoading && routingPolicies.length === 0 && <tr><td className="table-message" colSpan="7">{keyError || '尚未创建路由'}</td></tr>}
+                {keyLoading && <tr><td className="table-message" colSpan="7">正在读取路由</td></tr>}</tbody>
               </table>
             </div>
           </Section>}

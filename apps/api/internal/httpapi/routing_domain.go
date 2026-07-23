@@ -49,10 +49,10 @@ type RouteCandidate struct {
 }
 
 func routeCandidateMeetsCacheFloor(selection RouteSelection, candidate RouteCandidate) bool {
-	if selection.Mode != "smart" || selection.MinimumCacheHitPPM == nil || candidate.Protocol == "image_generation" {
+	if selection.MinimumCacheHitPPM == nil || candidate.Protocol == "image_generation" || !candidate.MerchantCacheWeightReady {
 		return true
 	}
-	return candidate.MerchantCacheWeightReady && candidate.MerchantCacheHitPPM >= *selection.MinimumCacheHitPPM
+	return candidate.MerchantCacheHitPPM >= *selection.MinimumCacheHitPPM
 }
 
 type healthFailureClass string
@@ -283,18 +283,22 @@ func weightedCandidateOrder(candidates []RouteCandidate, priority string, random
 			merchantIDs = append(merchantIDs, merchantID)
 		}
 		sort.Slice(merchantIDs, func(i, j int) bool { return merchantIDs[i] < merchantIDs[j] })
-		merchantID := merchantIDs[weightedIDIndex(merchantIDs, merchantWeights, random.Float64())]
-		channelIndexes := make([]int, 0)
-		for index := range remaining {
-			if remaining[index].MerchantID == merchantID {
-				channelIndexes = append(channelIndexes, index)
+		for len(merchantIDs) > 0 {
+			merchantOffset := weightedIDIndex(merchantIDs, merchantWeights, random.Float64())
+			merchantID := merchantIDs[merchantOffset]
+			merchantIDs = append(merchantIDs[:merchantOffset], merchantIDs[merchantOffset+1:]...)
+			channelIndexes := make([]int, 0)
+			for index := range remaining {
+				if remaining[index].MerchantID == merchantID {
+					channelIndexes = append(channelIndexes, index)
+				}
 			}
+			channelWeights := channelCandidateWeights(remaining, channelIndexes, priority)
+			selectedOffset := weightedFloatIndex(channelWeights, random.Float64())
+			selectedIndex := channelIndexes[selectedOffset]
+			ordered = append(ordered, remaining[selectedIndex])
+			remaining = append(remaining[:selectedIndex], remaining[selectedIndex+1:]...)
 		}
-		channelWeights := channelCandidateWeights(remaining, channelIndexes, priority)
-		selectedOffset := weightedFloatIndex(channelWeights, random.Float64())
-		selectedIndex := channelIndexes[selectedOffset]
-		ordered = append(ordered, remaining[selectedIndex])
-		remaining = append(remaining[:selectedIndex], remaining[selectedIndex+1:]...)
 	}
 	return ordered
 }

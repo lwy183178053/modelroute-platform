@@ -3447,6 +3447,26 @@
 - `docs/统一调用记录.md`：记录余额展示精度口径。
 - 本轮无数据库、核心服务或部署配置变更；回滚方式为 `git revert <本轮提交哈希>`。
 
+## 2026-07-24 - Task: 发布余额展示精度修复到 103
+
+### What was done
+
+- 将提交 `0ade8e13e5b4` 发布到 `/opt/modelroute-platform/releases/0ade8e13e5b4`，沿用共享环境、数据和备份目录，没有执行数据库迁移或数据重置。
+- 新目录构建和基础验收通过后，原子切换 `current`；公网前端已加载包含整数分截断的新资源。
+
+### Testing
+
+- 内网与公网 `deploy/scripts/verify.sh`：通过，`/api/version` 返回 `0ade8e13e5b4`，运行时额度单位为 `500000`。
+- `aggregate.lwylink.xyz`、`api.lwylink.xyz`、`sdk.lwylink.xyz`：均返回 `200`。
+- 公网资源 `/assets/index-9f5vP_2l.js`：包含 BigInt 余额换算和六位调用金额格式器。
+- 网关、核心服务、平台 API、Worker、PostgreSQL 和 Redis 均运行；带健康检查的服务为 healthy，最近 10 分钟服务日志无 `panic/fatal`。
+
+### Notes
+
+- `progress.md`：追加本次生产发布、版本、静态资源和服务状态证据。
+- 生产发布目录：`/opt/modelroute-platform/releases/0ade8e13e5b4`。
+- 回滚点：`/opt/modelroute-platform/releases/7767f69f428a`；可原子切回该目录并执行其基础验收。本轮无数据库迁移，代码回滚不改变余额或调用记录。
+
 ## 2026-07-24 - Task: 发布项目检查修复到 103
 
 ### What was done

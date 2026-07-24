@@ -113,13 +113,12 @@ func TestAdminOverviewUsesRepositorySnapshotAndRoleChecks(t *testing.T) {
 		TodayRequestCount:           42,
 		TodaySuccessfulRequests:     41,
 		PendingMerchantApplications: 3,
-		PendingChannelReviews:       2,
 		PendingWithdrawals:          1,
 		OpenReconciliation:          1,
 		TotalChannels:               8,
 		ActiveChannels:              6,
-		CoolingChannels:             1,
-		DisabledChannels:            1,
+		CoolingModels:               1,
+		ErrorModels:                 1,
 		PaymentEnabled:              true,
 		LastSyncedThrough:           lastSuccess.Unix() - 5,
 		LastSyncSuccessAt:           &lastSuccess,
@@ -147,7 +146,7 @@ func TestAdminOverviewUsesRepositorySnapshotAndRoleChecks(t *testing.T) {
 	}
 	for _, expected := range []string{
 		`"today_platform_quota":450000`, `"today_merchant_quota":4050000`, `"today_request_count":42`,
-		`"pending_merchant_applications":3`, `"cooling_channels":1`, `"payment_enabled":true`,
+		`"pending_merchant_applications":3`, `"cooling_models":1`, `"error_models":1`, `"payment_enabled":true`,
 		`"database":{"status":"healthy"`, `"new_api":{"status":"healthy"`,
 	} {
 		if !strings.Contains(response.Body.String(), expected) {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -71,8 +72,6 @@ type RoutingRepository interface {
 	CompleteRouteDecision(context.Context, RouteDecisionResult) error
 	RecordRouteObservation(context.Context, RouteObservation) error
 	ListMarketOffers(context.Context, int, string) ([]MarketOffer, error)
-	ChannelForHealthReset(context.Context, int64) (int, error)
-	ResetChannelHealth(context.Context, int64) error
 	PublishOfficialPrice(context.Context, int64, int, OfficialPrice) (OfficialPrice, error)
 	ListCanonicalModels(context.Context) ([]CanonicalModel, error)
 	ListMerchantOffers(context.Context, int) ([]MerchantOfferView, error)
@@ -770,14 +769,15 @@ FOR UPDATE OF mp, cm
 		return OfferVersion{}, fmt.Errorf("锁定报价商户与模型：%w", err)
 	}
 	rows, err := tx.QueryContext(ctx, `
-SELECT id, newapi_channel_id, channel_name FROM merchant_channels
-WHERE merchant_profile_id = $1 AND status = 'active'
-  AND (canonical_model_id = $2 OR EXISTS (
-      SELECT 1 FROM merchant_channel_model_bindings binding
-      WHERE binding.merchant_channel_id = merchant_channels.id
-        AND binding.canonical_model_id = $2 AND binding.match_status = 'matched'
-  ))
-ORDER BY id
+SELECT channel.id, channel.newapi_channel_id, channel.channel_name
+FROM merchant_channels channel
+JOIN merchant_channel_model_bindings binding
+  ON binding.merchant_channel_id = channel.id
+ AND binding.canonical_model_id = $2
+ AND binding.match_status = 'matched'
+ AND binding.health_state = 'healthy'
+WHERE channel.merchant_profile_id = $1 AND channel.deleted_at IS NULL
+ORDER BY channel.id
 `, offer.MerchantID, command.CanonicalModelID)
 	if err != nil {
 		return OfferVersion{}, fmt.Errorf("查询报价渠道：%w", err)
@@ -1178,7 +1178,7 @@ WITH merchant_metrics AS (
                 ELSE LEAST(1000000, (sum(snapshot.cache_tokens) * 1000000 / sum(snapshot.prompt_tokens))::integer) END AS cache_hit_ppm,
            sum(snapshot.prompt_tokens) >= 1000000 AS cache_weight_ready
     FROM route_metric_snapshots snapshot
-    JOIN merchant_channels channel ON channel.id = snapshot.merchant_channel_id AND channel.status = 'active'
+    JOIN merchant_channels channel ON channel.id = snapshot.merchant_channel_id AND channel.deleted_at IS NULL
     GROUP BY channel.merchant_profile_id, snapshot.canonical_model_id
 )
 SELECT merchant.id, channel.id,
@@ -1186,19 +1186,15 @@ SELECT merchant.id, channel.id,
 FROM canonical_models model
 JOIN offer_versions offer ON offer.canonical_model_id = model.id AND offer.status = 'active'
 JOIN offer_channel_aliases alias ON alias.offer_version_id = offer.id
-JOIN merchant_channels channel ON channel.id = alias.merchant_channel_id AND channel.status = 'active'
+JOIN merchant_channels channel ON channel.id = alias.merchant_channel_id AND channel.deleted_at IS NULL
+JOIN merchant_channel_model_bindings binding ON binding.merchant_channel_id = channel.id
+    AND binding.canonical_model_id = model.id
+    AND binding.match_status = 'matched' AND binding.health_state = 'healthy'
 JOIN merchant_profiles merchant ON merchant.id = channel.merchant_profile_id AND merchant.status = 'active'
-JOIN channel_health health ON health.merchant_channel_id = channel.id
 LEFT JOIN merchant_metrics metric
     ON metric.merchant_profile_id = merchant.id AND metric.canonical_model_id = model.id
 WHERE model.id = $1 AND model.status = 'active'
-  AND (channel.canonical_model_id = $1 OR EXISTS (
-      SELECT 1 FROM merchant_channel_model_bindings binding
-      WHERE binding.merchant_channel_id = channel.id
-        AND binding.canonical_model_id = $1 AND binding.match_status = 'matched'
-  ))
   AND offer.multiplier_bps BETWEEN $2 AND $3
-  AND health.state IN ('healthy', 'degraded')
 `, input.CanonicalModelID, input.MinimumMultiplierBPS, input.MaximumMultiplierBPS)
 	if err != nil {
 		return RoutingPreview{}, fmt.Errorf("查询路由预览候选：%w", err)
@@ -1270,11 +1266,11 @@ WITH merchant_metrics AS (
                 ELSE LEAST(1000000, (sum(snapshot.cache_tokens) * 1000000 / sum(snapshot.prompt_tokens))::integer) END AS cache_hit_ppm,
            sum(snapshot.prompt_tokens) >= 1000000 AS cache_weight_ready
     FROM route_metric_snapshots snapshot
-    JOIN merchant_channels channel ON channel.id = snapshot.merchant_channel_id AND channel.status = 'active'
+    JOIN merchant_channels channel ON channel.id = snapshot.merchant_channel_id AND channel.deleted_at IS NULL
     GROUP BY channel.merchant_profile_id, snapshot.canonical_model_id
 )
 SELECT o.id, aliases.id, mp.id, mc.id, mc.newapi_channel_id, cm.id, aliases.internal_alias,
-       cm.public_name, o.multiplier_bps, h.state,
+       cm.public_name, o.multiplier_bps, binding.health_state,
        COALESCE(metric.availability_ppm, 0), COALESCE(metric.average_ttft_ms, 0),
        COALESCE(metric.request_count, 0), COALESCE(metric.cache_hit_ppm, 0),
        COALESCE(metric.prompt_tokens, 0), COALESCE(metric.cache_weight_ready, false),
@@ -1283,21 +1279,17 @@ FROM routing_policies p
 JOIN canonical_models cm ON cm.id = $2
 JOIN offer_versions o ON o.canonical_model_id = cm.id AND o.status = 'active'
 JOIN offer_channel_aliases aliases ON aliases.offer_version_id = o.id
-JOIN merchant_channels mc ON mc.id = aliases.merchant_channel_id AND mc.status = 'active'
+JOIN merchant_channels mc ON mc.id = aliases.merchant_channel_id AND mc.deleted_at IS NULL
+JOIN merchant_channel_model_bindings binding ON binding.merchant_channel_id = mc.id
+    AND binding.canonical_model_id = cm.id
+    AND binding.match_status = 'matched' AND binding.health_state = 'healthy'
 JOIN merchant_profiles mp ON mp.id = mc.merchant_profile_id AND mp.status = 'active'
-JOIN channel_health h ON h.merchant_channel_id = mc.id
 LEFT JOIN route_metric_snapshots metric
     ON metric.merchant_channel_id = mc.id AND metric.canonical_model_id = cm.id
 LEFT JOIN merchant_metrics merchant_metric
     ON merchant_metric.merchant_profile_id = mp.id AND merchant_metric.canonical_model_id = cm.id
 WHERE p.id = $1
-  AND (mc.canonical_model_id = $2 OR EXISTS (
-      SELECT 1 FROM merchant_channel_model_bindings binding
-      WHERE binding.merchant_channel_id = mc.id
-        AND binding.canonical_model_id = $2 AND binding.match_status = 'matched'
-  ))
   AND o.multiplier_bps BETWEEN p.minimum_multiplier_bps AND p.maximum_multiplier_bps
-  AND h.state IN ('healthy', 'degraded')
 `, selection.PolicyID, selection.CanonicalModelID)
 	if err != nil {
 		return RouteSelection{}, fmt.Errorf("查询路由候选：%w", err)
@@ -1375,50 +1367,52 @@ func (s *SQLRoutingStore) RecordRouteObservation(ctx context.Context, observatio
 	case "hard_failure":
 		class = healthFailureHard
 	}
-	var probe HealthProbe
-	probe.MerchantChannelID = observation.Candidate.MerchantChannelID
+	var bindingID int64
+	var state ModelHealthState
+	var nextCheckAt sql.NullTime
+	var priceKind string
 	if err := tx.QueryRowContext(ctx, `
-SELECT state, consecutive_failures, cooldown_level
-FROM channel_health
-WHERE merchant_channel_id = $1
-FOR UPDATE
-`, probe.MerchantChannelID).Scan(&probe.State, &probe.ConsecutiveFailures, &probe.CooldownLevel); err != nil {
-		return fmt.Errorf("锁定渠道健康状态：%w", err)
+SELECT binding.id, binding.health_state, binding.consecutive_request_failures,
+       binding.automatic_check_failures, binding.next_check_at, price.price_kind
+FROM merchant_channel_model_bindings binding
+JOIN canonical_models model ON model.id = binding.canonical_model_id
+JOIN official_price_versions price ON price.id = model.current_official_price_version_id
+WHERE binding.merchant_channel_id = $1 AND binding.canonical_model_id = $2
+FOR UPDATE OF binding
+`, observation.Candidate.MerchantChannelID, observation.Candidate.CanonicalModelID).Scan(
+		&bindingID, &state.State, &state.ConsecutiveRequestFailures,
+		&state.AutomaticCheckFailures, &nextCheckAt, &priceKind,
+	); err != nil {
+		return fmt.Errorf("锁定渠道模型健康状态：%w", err)
 	}
-	next := nextProbeState(probe, class, time.Now().UTC(), 0)
+	if nextCheckAt.Valid {
+		state.NextCheckAt = nextCheckAt.Time.UTC()
+	}
+	now := time.Now().UTC()
+	next := nextModelHealthAfterRequest(state, class, priceKind, observation.StatusCode, now)
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO channel_health_events
-    (merchant_channel_id, offer_channel_alias_id, source, outcome,
+INSERT INTO channel_model_health_events
+    (channel_model_binding_id, offer_channel_alias_id, source, outcome,
      status_code, first_byte_ms, request_id, failure_summary)
 VALUES ($1, $2, 'request', $3, NULLIF($4, 0), $5, $6, NULLIF($7, ''))
-`, observation.Candidate.MerchantChannelID, observation.Candidate.OfferChannelAliasID,
+`, bindingID, observation.Candidate.OfferChannelAliasID,
 		observation.Outcome, observation.StatusCode, observation.FirstByteMS,
 		observation.RequestID, observation.Summary); err != nil {
-		return fmt.Errorf("记录健康事件：%w", err)
+		return fmt.Errorf("记录模型健康事件：%w", err)
 	}
 	validObservation := class != healthFailureIgnored
 	success := class == healthFailureNone
 	if _, err := tx.ExecContext(ctx, `
-UPDATE channel_health
-SET state = $2, consecutive_failures = $3, cooldown_level = $4,
-	    next_probe_at = $5::timestamptz,
-	    cooldown_until = CASE WHEN $2 = 'cooling' THEN $5::timestamptz ELSE NULL END,
-	    observations = observations + CASE WHEN $6 THEN 1 ELSE 0 END,
-	    successes = successes + CASE WHEN $7 THEN 1 ELSE 0 END,
-	    availability_ppm = CASE
-	        WHEN observations + CASE WHEN $6 THEN 1 ELSE 0 END = 0 THEN availability_ppm
-	        ELSE ((successes + CASE WHEN $7 THEN 1 ELSE 0 END) * 1000000 /
-	             (observations + CASE WHEN $6 THEN 1 ELSE 0 END))::integer END,
-	    ttft_p95_ms = CASE WHEN $6 AND $8 > 0 THEN $8 ELSE ttft_p95_ms END,
-	    last_success_at = CASE WHEN $7 THEN now() ELSE last_success_at END,
-	    last_failure_at = CASE WHEN $9 IN ('temporary', 'hard') THEN now() ELSE last_failure_at END,
-	    last_failure_class = CASE WHEN $9 IN ('temporary', 'hard') THEN $9 ELSE last_failure_class END,
-	    last_status_code = NULLIF($10, 0), updated_at = now()
-WHERE merchant_channel_id = $1
-`, observation.Candidate.MerchantChannelID, next.State, next.ConsecutiveFailures,
-		next.CooldownLevel, timeOrNil(next.NextProbeAt), validObservation, success,
-		observation.FirstByteMS, string(class), observation.StatusCode); err != nil {
-		return fmt.Errorf("更新渠道健康状态：%w", err)
+UPDATE merchant_channel_model_bindings
+SET health_state = $2, consecutive_request_failures = $3,
+    automatic_check_failures = $4, next_check_at = $5::timestamptz,
+    last_status_code = NULLIF($6, 0),
+    last_check_error = CASE WHEN $2 = 'healthy' THEN NULL ELSE NULLIF($7, '') END,
+    updated_at = now()
+WHERE id = $1
+`, bindingID, next.State, next.ConsecutiveRequestFailures,
+		next.AutomaticCheckFailures, timeOrNil(next.NextCheckAt), observation.StatusCode, observation.Summary); err != nil {
+		return fmt.Errorf("更新渠道模型健康状态：%w", err)
 	}
 	if validObservation {
 		requestCount, successCount, ttftTotal, ttftCount := int64(1), int64(0), int64(0), int64(0)
@@ -1446,9 +1440,14 @@ SET request_count = route_metric_buckets.request_count + EXCLUDED.request_count,
 			return fmt.Errorf("记录路由小时指标：%w", err)
 		}
 	}
-	if class == healthFailureHard {
-		if _, err := tx.ExecContext(ctx, `UPDATE merchant_channels SET status = 'disabled', updated_at = now() WHERE id = $1`, observation.Candidate.MerchantChannelID); err != nil {
-			return fmt.Errorf("停用硬故障渠道：%w", err)
+	if observation.StatusCode == http.StatusUnauthorized || observation.StatusCode == http.StatusPaymentRequired {
+		if _, err := tx.ExecContext(ctx, `
+UPDATE merchant_channel_model_bindings
+SET health_state = 'error', next_check_at = NULL, check_lease_until = NULL,
+    last_status_code = $2, last_check_error = '渠道密钥或余额故障', updated_at = now()
+WHERE merchant_channel_id = $1
+`, observation.Candidate.MerchantChannelID, observation.StatusCode); err != nil {
+			return fmt.Errorf("联动停用渠道全部模型：%w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -1525,37 +1524,36 @@ func (s *SQLRoutingStore) ClaimHealthProbes(ctx context.Context, now time.Time, 
 	}
 	rows, err := s.database.QueryContext(ctx, `
 WITH due AS (
-    SELECT h.merchant_channel_id, mc.canonical_model_id, route.offer_id,
-           route.offer_channel_alias_id, mc.newapi_channel_id, route.internal_alias,
-           route.price_kind, h.state, h.consecutive_failures, h.cooldown_level
-    FROM channel_health h
-    JOIN merchant_channels mc ON mc.id = h.merchant_channel_id AND mc.status = 'active'
-    JOIN canonical_models cm ON cm.id = mc.canonical_model_id AND cm.status = 'active'
-    JOIN LATERAL (
-        SELECT o.id AS offer_id, aliases.id AS offer_channel_alias_id, aliases.internal_alias,
-               price.price_kind
-        FROM offer_channel_aliases aliases
-        JOIN offer_versions o ON o.id = aliases.offer_version_id
-        JOIN official_price_versions price ON price.id = o.official_price_version_id
-        WHERE aliases.merchant_channel_id = h.merchant_channel_id AND o.status = 'active'
-        ORDER BY o.id DESC LIMIT 1
-    ) route ON true
-    WHERE h.state IN ('cooling', 'recovering') AND h.next_probe_at <= $1
-    ORDER BY h.next_probe_at, h.merchant_channel_id
+    SELECT binding.id, binding.merchant_channel_id, binding.canonical_model_id,
+           channel.newapi_channel_id, model.public_name, model.provider, model.status,
+           price.price_kind, binding.health_state,
+           binding.consecutive_request_failures, binding.automatic_check_failures,
+           binding.next_check_at
+    FROM merchant_channel_model_bindings binding
+    JOIN merchant_channels channel ON channel.id = binding.merchant_channel_id
+        AND channel.deleted_at IS NULL
+    JOIN canonical_models model ON model.id = binding.canonical_model_id
+        AND model.status = 'active'
+    JOIN official_price_versions price ON price.id = model.current_official_price_version_id
+        AND price.price_kind = 'text'
+    WHERE binding.match_status = 'matched' AND binding.health_state = 'cooling'
+      AND binding.next_check_at <= $1
+      AND (binding.check_lease_until IS NULL OR binding.check_lease_until <= $1)
+    ORDER BY binding.next_check_at, binding.id
     LIMIT $2
-    FOR UPDATE OF h SKIP LOCKED
+    FOR UPDATE OF binding SKIP LOCKED
 ), claimed AS (
-    UPDATE channel_health h
-    SET state = 'recovering', next_probe_at = $1 + interval '30 seconds', updated_at = now()
+    UPDATE merchant_channel_model_bindings binding
+    SET check_lease_until = $1 + interval '2 minutes', updated_at = now()
     FROM due
-    WHERE h.merchant_channel_id = due.merchant_channel_id
-    RETURNING h.merchant_channel_id
+    WHERE binding.id = due.id
+    RETURNING binding.id
 )
-SELECT d.offer_channel_alias_id, d.offer_id, d.merchant_channel_id, d.canonical_model_id, d.newapi_channel_id,
-       d.internal_alias, d.price_kind, d.state, d.consecutive_failures,
-       d.cooldown_level
+SELECT d.id, d.merchant_channel_id, d.canonical_model_id, d.newapi_channel_id,
+       d.public_name, d.provider, d.status, d.price_kind, d.health_state,
+       d.consecutive_request_failures, d.automatic_check_failures, d.next_check_at
 FROM due d
-JOIN claimed c USING (merchant_channel_id)
+JOIN claimed c ON c.id = d.id
 `, now, limit)
 	if err != nil {
 		return nil, fmt.Errorf("领取探活任务：%w", err)
@@ -1564,31 +1562,23 @@ JOIN claimed c USING (merchant_channel_id)
 	probes := make([]HealthProbe, 0)
 	for rows.Next() {
 		var probe HealthProbe
+		var nextCheckAt time.Time
 		if err := rows.Scan(
-			&probe.OfferChannelAliasID, &probe.OfferID, &probe.MerchantChannelID, &probe.CanonicalModelID,
-			&probe.NewAPIChannelID, &probe.InternalAlias, &probe.PriceKind, &probe.State,
-			&probe.ConsecutiveFailures, &probe.CooldownLevel,
+			&probe.BindingID, &probe.MerchantChannelID, &probe.CanonicalModelID, &probe.NewAPIChannelID,
+			&probe.Model.PublicName, &probe.Model.Provider, &probe.Model.Status,
+			&probe.Model.Price.PriceKind, &probe.State, &probe.ConsecutiveFailures,
+			&probe.AutomaticCheckFailures, &nextCheckAt,
 		); err != nil {
 			return nil, fmt.Errorf("解析探活任务：%w", err)
 		}
+		probe.Model.ID = probe.CanonicalModelID
+		probe.NextProbeAt = nextCheckAt.UTC()
 		probes = append(probes, probe)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("遍历探活任务：%w", err)
 	}
 	return probes, nil
-}
-
-func (s *SQLRoutingStore) RegisterProbeToken(ctx context.Context, tokenID int) error {
-	_, err := s.database.ExecContext(ctx, `
-INSERT INTO platform_runtime_metadata (key, value, updated_at)
-VALUES ('newapi_probe_token_id', $1, now())
-ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
-`, fmt.Sprintf("%d", tokenID))
-	if err != nil {
-		return fmt.Errorf("登记 New API 探活令牌：%w", err)
-	}
-	return nil
 }
 
 func (s *SQLRoutingStore) SaveProbeResult(ctx context.Context, result HealthProbeResult) error {
@@ -1606,44 +1596,33 @@ func (s *SQLRoutingStore) SaveProbeResult(ctx context.Context, result HealthProb
 	case healthFailureHard:
 		outcome = "hard_failure"
 	}
-	if _, err := tx.ExecContext(ctx, `
-INSERT INTO channel_health_events
-    (merchant_channel_id, offer_channel_alias_id, source, outcome,
-     status_code, first_byte_ms, failure_summary)
-VALUES ($1, $2, 'probe', $3, NULLIF($4, 0), $5, NULLIF($6, ''))
-`, result.Probe.MerchantChannelID, result.Probe.OfferChannelAliasID,
-		outcome, result.StatusCode, result.FirstByteMS, result.Summary); err != nil {
-		return fmt.Errorf("记录探活事件：%w", err)
+	updated, err := tx.ExecContext(ctx, `
+UPDATE merchant_channel_model_bindings
+SET health_state = $2, consecutive_request_failures = $3,
+    automatic_check_failures = $4, next_check_at = $5::timestamptz,
+    check_lease_until = NULL, last_checked_at = now(),
+    last_check_latency_ms = NULLIF($6, 0), last_check_error = NULLIF($7, ''),
+    last_status_code = NULLIF($8, 0), updated_at = now()
+WHERE id = $1 AND health_state = 'cooling' AND check_lease_until IS NOT NULL
+`, result.Probe.BindingID, result.State.State, result.State.ConsecutiveRequestFailures,
+		result.State.AutomaticCheckFailures, timeOrNil(result.State.NextCheckAt),
+		result.FirstByteMS, result.Summary, result.StatusCode)
+	if err != nil {
+		return fmt.Errorf("更新自动模型检查结果：%w", err)
 	}
-	validObservation := result.Class != healthFailureIgnored
-	success := result.Class == healthFailureNone
-	if _, err := tx.ExecContext(ctx, `
-UPDATE channel_health
-SET state = $2, consecutive_failures = $3, cooldown_level = $4,
-	    next_probe_at = $5::timestamptz,
-	    cooldown_until = CASE WHEN $2 = 'cooling' THEN $5::timestamptz ELSE NULL END,
-	    observations = observations + CASE WHEN $6 THEN 1 ELSE 0 END,
-	    successes = successes + CASE WHEN $7 THEN 1 ELSE 0 END,
-	    availability_ppm = CASE
-	        WHEN observations + CASE WHEN $6 THEN 1 ELSE 0 END = 0 THEN availability_ppm
-	        ELSE ((successes + CASE WHEN $7 THEN 1 ELSE 0 END) * 1000000 /
-	             (observations + CASE WHEN $6 THEN 1 ELSE 0 END))::integer END,
-	    ttft_p95_ms = CASE WHEN $6 AND $8 > 0 THEN $8 ELSE ttft_p95_ms END,
-	    last_success_at = CASE WHEN $7 THEN now() ELSE last_success_at END,
-	    last_failure_at = CASE WHEN $9 IN ('temporary', 'hard') THEN now() ELSE last_failure_at END,
-	    last_failure_class = CASE WHEN $9 IN ('temporary', 'hard') THEN $9 ELSE last_failure_class END,
-	    last_status_code = NULLIF($10, 0),
-	    updated_at = now()
-WHERE merchant_channel_id = $1
-`, result.Probe.MerchantChannelID, result.State.State, result.State.ConsecutiveFailures,
-		result.State.CooldownLevel, timeOrNil(result.State.NextProbeAt), validObservation,
-		success, result.FirstByteMS, string(result.Class), result.StatusCode); err != nil {
-		return fmt.Errorf("更新探活健康状态：%w", err)
+	affected, err := updated.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("确认自动模型检查结果：%w", err)
 	}
-	if result.Class == healthFailureHard {
-		if _, err := tx.ExecContext(ctx, `UPDATE merchant_channels SET status = 'disabled', updated_at = now() WHERE id = $1`, result.Probe.MerchantChannelID); err != nil {
-			return fmt.Errorf("停用硬故障渠道：%w", err)
-		}
+	if affected == 0 {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO channel_model_health_events
+    (channel_model_binding_id, source, outcome, status_code, first_byte_ms, failure_summary)
+VALUES ($1, 'automatic_check', $2, NULLIF($3, 0), $4, NULLIF($5, ''))
+`, result.Probe.BindingID, outcome, result.StatusCode, result.FirstByteMS, result.Summary); err != nil {
+		return fmt.Errorf("记录自动模型检查事件：%w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("提交探活结果事务：%w", err)
@@ -1679,21 +1658,20 @@ WITH usage_stats AS (
            max(snapshot.metrics_updated_at) AS metrics_updated_at
     FROM route_metric_snapshots snapshot
     JOIN merchant_channels channel ON channel.id = snapshot.merchant_channel_id
-    WHERE channel.status = 'active'
+    WHERE channel.deleted_at IS NULL
     GROUP BY channel.merchant_profile_id, snapshot.canonical_model_id
 )
 SELECT o.id, mp.id, mp.display_name, cm.public_name,
        o.multiplier_bps, o.official_price_version_id,
-       count(*) FILTER (WHERE h.state IN ('healthy', 'degraded')),
+       count(*) FILTER (WHERE binding.health_state = 'healthy'),
        CASE
-           WHEN bool_or(h.state = 'healthy') THEN 'healthy'
-           WHEN bool_or(h.state = 'degraded') THEN 'degraded'
-           WHEN bool_or(h.state = 'recovering') THEN 'recovering'
-           WHEN bool_or(h.state = 'cooling') THEN 'cooling'
-           ELSE 'disabled'
+           WHEN bool_or(binding.health_state = 'healthy') THEN 'healthy'
+           WHEN bool_or(binding.health_state = 'cooling') THEN 'cooling'
+           WHEN bool_or(binding.health_state = 'error') THEN 'error'
+           ELSE 'pending'
        END,
-       COALESCE(max(h.availability_ppm) FILTER (WHERE h.state IN ('healthy', 'degraded')), 0),
-       COALESCE(max(h.ttft_p95_ms) FILTER (WHERE h.state IN ('healthy', 'degraded')), 0),
+	   COALESCE(max(channel_metric.availability_ppm) FILTER (WHERE binding.health_state = 'healthy'), 0),
+	   COALESCE(max(channel_metric.average_ttft_ms) FILTER (WHERE binding.health_state = 'healthy'), 0),
 	       COALESCE(stats.call_count, 0), COALESCE(stats.token_usage, 0), stats.last_called_at,
 	       CASE WHEN COALESCE(metric.prompt_tokens, 0) = 0 THEN 0
 	            ELSE LEAST(1000000, (metric.cache_tokens * 1000000 / metric.prompt_tokens)::integer) END,
@@ -1702,20 +1680,26 @@ SELECT o.id, mp.id, mp.display_name, cm.public_name,
 FROM offer_versions o
 JOIN canonical_models cm ON cm.id = o.canonical_model_id
 JOIN offer_channel_aliases aliases ON aliases.offer_version_id = o.id
-JOIN merchant_channels mc ON mc.id = aliases.merchant_channel_id
+JOIN merchant_channels mc ON mc.id = aliases.merchant_channel_id AND mc.deleted_at IS NULL
 JOIN merchant_profiles mp ON mp.id = mc.merchant_profile_id
-JOIN channel_health h ON h.merchant_channel_id = mc.id
+JOIN merchant_channel_model_bindings binding
+  ON binding.merchant_channel_id = mc.id
+ AND binding.canonical_model_id = o.canonical_model_id
+ AND binding.match_status = 'matched'
+	LEFT JOIN route_metric_snapshots channel_metric
+	  ON channel_metric.merchant_channel_id = mc.id
+	 AND channel_metric.canonical_model_id = o.canonical_model_id
 	LEFT JOIN usage_stats stats ON stats.merchant_profile_id = o.merchant_profile_id
 	    AND stats.canonical_model_id = o.canonical_model_id
 	LEFT JOIN metric_stats metric ON metric.merchant_profile_id = o.merchant_profile_id
 	    AND metric.canonical_model_id = o.canonical_model_id
-WHERE o.status = 'active' AND mc.status = 'active' AND mp.status = 'active'
+WHERE o.status = 'active' AND mp.status = 'active'
   AND cm.status = 'active'
   AND ($1 = '' OR cm.public_name = $1)
 	GROUP BY o.id, mp.id, mp.display_name, cm.public_name,
 	         stats.call_count, stats.token_usage, stats.last_called_at,
 	         metric.prompt_tokens, metric.cache_tokens, metric.metrics_updated_at
-HAVING count(*) FILTER (WHERE h.state IN ('healthy', 'degraded')) > 0
+HAVING count(*) FILTER (WHERE binding.health_state = 'healthy') > 0
 ORDER BY cm.public_name, o.multiplier_bps, o.id
 `, strings.TrimSpace(publicModel))
 	if err != nil {
@@ -1764,41 +1748,6 @@ func applyMarketPrice(offer *MarketOffer) error {
 	_, tiers, err := buildTieredExpression(offer.OfficialPrice, offer.MultiplierBPS)
 	offer.PriceTiers = tiers
 	return err
-}
-
-func (s *SQLRoutingStore) ChannelForHealthReset(ctx context.Context, channelID int64) (int, error) {
-	var newAPIChannelID int
-	err := s.database.QueryRowContext(ctx, `SELECT newapi_channel_id FROM merchant_channels WHERE id = $1`, channelID).Scan(&newAPIChannelID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, ErrRoutingNotFound
-	}
-	if err != nil {
-		return 0, fmt.Errorf("读取待恢复渠道：%w", err)
-	}
-	return newAPIChannelID, nil
-}
-
-func (s *SQLRoutingStore) ResetChannelHealth(ctx context.Context, channelID int64) error {
-	tx, err := s.database.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("开始渠道恢复事务：%w", err)
-	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `UPDATE merchant_channels SET status = 'active', updated_at = now() WHERE id = $1`, channelID); err != nil {
-		return fmt.Errorf("恢复平台渠道：%w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-UPDATE channel_health
-SET state = 'healthy', consecutive_failures = 0, cooldown_level = 0,
-    next_probe_at = NULL, cooldown_until = NULL, updated_at = now()
-WHERE merchant_channel_id = $1
-`, channelID); err != nil {
-		return fmt.Errorf("重置渠道健康状态：%w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("提交渠道恢复事务：%w", err)
-	}
-	return nil
 }
 
 func (s *SQLRoutingStore) PublishOfficialPrice(ctx context.Context, modelID int64, adminID int, price OfficialPrice) (OfficialPrice, error) {
@@ -1911,10 +1860,10 @@ WITH latest AS (
 SELECT o.id, cm.public_name, o.multiplier_bps, o.status,
        COALESCE(o.sync_error, ''), o.official_price_version_id,
        COALESCE(stats.call_count, 0), COALESCE(stats.token_usage, 0), stats.last_called_at,
-       count(*) FILTER (WHERE mc.status = 'active' AND h.state IN ('healthy', 'degraded'))
+       count(*) FILTER (WHERE mc.deleted_at IS NULL AND binding.health_state = 'healthy')
            OVER (PARTITION BY o.id),
-	       mc.id, mc.channel_name, COALESCE(h.state, 'healthy'),
-	       COALESCE(h.availability_ppm, 0), COALESCE(h.ttft_p95_ms, 0),
+	       mc.id, mc.channel_name, binding.health_state,
+	       COALESCE(metric.availability_ppm, 0), COALESCE(metric.average_ttft_ms, 0),
 	       COALESCE(metric.cache_hit_ppm, 0), COALESCE(metric.prompt_tokens, 0),
 	       COALESCE(metric.cache_weight_ready, false), metric.metrics_updated_at
 FROM offer_versions o
@@ -1923,7 +1872,10 @@ JOIN offer_channel_aliases aliases ON aliases.offer_version_id = o.id
 JOIN merchant_channels mc ON mc.id = aliases.merchant_channel_id
 JOIN merchant_profiles mp ON mp.id = mc.merchant_profile_id
 JOIN canonical_models cm ON cm.id = o.canonical_model_id
-	LEFT JOIN channel_health h ON h.merchant_channel_id = mc.id
+	JOIN merchant_channel_model_bindings binding
+	  ON binding.merchant_channel_id = mc.id
+	 AND binding.canonical_model_id = o.canonical_model_id
+	 AND binding.match_status = 'matched'
 	LEFT JOIN route_metric_snapshots metric ON metric.merchant_channel_id = mc.id
 	    AND metric.canonical_model_id = o.canonical_model_id
 LEFT JOIN usage_stats stats ON stats.merchant_profile_id = o.merchant_profile_id
@@ -2050,10 +2002,7 @@ func (s *SQLRoutingStore) DeleteCanonicalModel(ctx context.Context, modelID int6
 	var referenced bool
 	err = tx.QueryRowContext(ctx, `
 SELECT EXISTS (
-    SELECT 1 FROM merchant_channel_tests WHERE canonical_model_id = $1
-    UNION ALL SELECT 1 FROM merchant_channel_reviews WHERE canonical_model_id = $1
-    UNION ALL SELECT 1 FROM merchant_channels WHERE canonical_model_id = $1
-    UNION ALL SELECT 1 FROM merchant_channel_model_bindings WHERE canonical_model_id = $1
+    SELECT 1 FROM merchant_channel_model_bindings WHERE canonical_model_id = $1
     UNION ALL SELECT 1 FROM offer_versions WHERE canonical_model_id = $1
 )
 FROM canonical_models

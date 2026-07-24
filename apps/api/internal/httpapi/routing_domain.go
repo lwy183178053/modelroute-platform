@@ -13,17 +13,15 @@ import (
 )
 
 type HealthProbe struct {
-	OfferChannelAliasID int64
-	OfferID             int64
-	MerchantChannelID   int64
-	CanonicalModelID    int64
-	NewAPIChannelID     int
-	InternalAlias       string
-	PriceKind           string
-	State               string
-	ConsecutiveFailures int
-	CooldownLevel       int
-	NextProbeAt         time.Time
+	BindingID              int64
+	Model                  CanonicalModel
+	AutomaticCheckFailures int
+	MerchantChannelID      int64
+	CanonicalModelID       int64
+	NewAPIChannelID        int
+	State                  string
+	ConsecutiveFailures    int
+	NextProbeAt            time.Time
 }
 
 type RouteCandidate struct {
@@ -325,58 +323,4 @@ func weightedFloatIndex(weights []float64, random float64) int {
 		point -= weight
 	}
 	return len(weights) - 1
-}
-
-func nextProbeState(probe HealthProbe, class healthFailureClass, now time.Time, retryAfter time.Duration) HealthProbe {
-	result := probe
-	switch class {
-	case healthFailureHard:
-		result.State = "disabled"
-		result.NextProbeAt = time.Time{}
-	case healthFailureNone:
-		result.ConsecutiveFailures = 0
-		result.CooldownLevel = 0
-		result.State = "healthy"
-		result.NextProbeAt = time.Time{}
-	case healthFailureTemporary:
-		result.ConsecutiveFailures++
-		if probe.State == "cooling" || probe.State == "recovering" || result.ConsecutiveFailures >= 3 {
-			result.State = "cooling"
-			result.CooldownLevel++
-			cooldown := cooldownForLevel(result.CooldownLevel)
-			if retryAfter > cooldown {
-				cooldown = retryAfter
-			}
-			result.NextProbeAt = now.Add(cooldown)
-		} else {
-			result.State = "degraded"
-			result.NextProbeAt = time.Time{}
-		}
-	case healthFailureIgnored:
-		if probe.State == "cooling" || probe.State == "recovering" {
-			result.State = "cooling"
-			result.CooldownLevel++
-			result.NextProbeAt = now.Add(cooldownForLevel(result.CooldownLevel))
-		} else {
-			result.NextProbeAt = time.Time{}
-		}
-	}
-	return result
-}
-
-func cooldownForLevel(level int) time.Duration {
-	switch level {
-	case 1:
-		return time.Minute
-	case 2:
-		return 5 * time.Minute
-	case 3:
-		return 15 * time.Minute
-	case 4:
-		return 30 * time.Minute
-	case 5:
-		return 60 * time.Minute
-	default:
-		return 120 * time.Minute
-	}
 }

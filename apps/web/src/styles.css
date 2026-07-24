@@ -287,7 +287,7 @@ main { min-height: calc(100vh - 66px); }
 .modal-header h2 { margin: 0; font-size: 17px; line-height: 25px; }.modal-header p { margin: 3px 0 0; color: var(--muted); font-size: 11px; line-height: 18px; }
 .modal-body { min-height: 0; padding: 18px; overflow-y: auto; }
 .channel-models-wrap { max-height: min(60vh, 520px); overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
-.channel-models-table { min-width: 760px; }
+.channel-models-table { min-width: 1160px; }
 .channel-models-table td { height: 58px; }
 .channel-model-error { max-width: 260px; white-space: normal; overflow-wrap: anywhere; color: var(--muted); }
 .modal-footer { min-height: 62px; padding: 12px 18px; border-top: 1px solid var(--line); background: #fafcfc; display: flex; justify-content: flex-end; align-items: center; gap: 8px; }

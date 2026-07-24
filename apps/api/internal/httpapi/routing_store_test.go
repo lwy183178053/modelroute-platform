@@ -384,7 +384,7 @@ func TestResolveRouteFiltersInsufficientCacheSampleAndKnownLowValue(t *testing.T
 		WithArgs(int64(81), "gpt-5.6", "OpenAI").
 		WillReturnRows(sqlmock.NewRows([]string{"policy_id", "model_id", "priority", "price_kind", "minimum_cache_hit_ppm"}).
 			AddRow(91, 61, "cache", "text", 600_000))
-	mock.ExpectQuery(regexp.QuoteMeta("WITH merchant_metrics AS")).
+	mock.ExpectQuery(regexp.QuoteMeta("JOIN merchant_channel_model_bindings binding ON binding.merchant_channel_id = mc.id")).
 		WithArgs(int64(91), int64(61)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"offer_id", "alias_id", "merchant_id", "channel_id", "upstream_channel_id", "model_id", "internal_alias",
@@ -413,7 +413,7 @@ func TestPreviewRouteUsesCandidateFiltersAndDistinctCounts(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM canonical_models model")).
 		WithArgs(int64(61)).
 		WillReturnRows(sqlmock.NewRows([]string{"price_kind"}).AddRow("text"))
-	mock.ExpectQuery(regexp.QuoteMeta("WITH merchant_metrics AS")).
+	mock.ExpectQuery(regexp.QuoteMeta("JOIN merchant_channel_model_bindings binding ON binding.merchant_channel_id = channel.id")).
 		WithArgs(int64(61), 5_000, 12_000).
 		WillReturnRows(sqlmock.NewRows([]string{"merchant_id", "channel_id", "merchant_cache_hit_ppm", "merchant_cache_weight_ready"}).
 			AddRow(31, 51, 700_000, true).
@@ -514,7 +514,7 @@ func TestCreateOfferRequiresOwnedActiveChannelAndCurrentOfficialPrice(t *testing
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT mp.id, cm.current_official_price_version_id")).
 		WithArgs(7, int64(61)).WillReturnRows(sqlmock.NewRows([]string{"merchant_id", "price_id", "public_name", "price_kind", "previous_id", "version"}).
 		AddRow(31, 71, "gpt-5.6", "text", 40, 2))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, newapi_channel_id, channel_name FROM merchant_channels")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT channel.id, channel.newapi_channel_id, channel.channel_name")).
 		WithArgs(int64(31), int64(61)).WillReturnRows(sqlmock.NewRows([]string{"id", "newapi_channel_id", "channel_name"}).
 		AddRow(51, 41, "主线路").AddRow(52, 42, "备用线路"))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO offer_versions")).
@@ -643,22 +643,26 @@ func TestOfferChannelRoutesKeepsAllActiveAndSyncingAliases(t *testing.T) {
 	}
 }
 
-func TestSaveProbeHardFailureDisablesPlatformChannelInSameTransaction(t *testing.T) {
+func TestUnauthorizedRequestMarksEveryModelOnChannelAsError(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer database.Close()
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT state, consecutive_failures, cooldown_level")).
-		WithArgs(int64(51)).WillReturnRows(sqlmock.NewRows([]string{"state", "consecutive_failures", "cooldown_level"}).AddRow("healthy", 0, 0))
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO channel_health_events")).WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE channel_health")).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM merchant_channel_model_bindings binding")).
+		WithArgs(int64(51), int64(61)).WillReturnRows(sqlmock.NewRows([]string{
+		"id", "health_state", "consecutive_request_failures", "automatic_check_failures", "next_check_at", "price_kind",
+	}).AddRow(91, "healthy", 0, 0, nil, "text"))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO channel_model_health_events")).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE merchant_channel_model_bindings")).
+		WithArgs(int64(91), "error", 0, 0, nil, 401, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO route_metric_buckets")).
 		WithArgs(int64(51), int64(61), sqlmock.AnyArg(), int64(1), int64(0), int64(0), int64(0)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE merchant_channels SET status = 'disabled'")).
-		WithArgs(int64(51)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("SET health_state = 'error'")).
+		WithArgs(int64(51), 401).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	store := NewSQLRoutingStore(database)
 	candidate := RouteCandidate{OfferID: 42, OfferChannelAliasID: 81, MerchantChannelID: 51, CanonicalModelID: 61}
@@ -666,6 +670,36 @@ func TestSaveProbeHardFailureDisablesPlatformChannelInSameTransaction(t *testing
 		Candidate: candidate, Outcome: "hard_failure", StatusCode: 401, FirstByteMS: 25,
 	}); err != nil {
 		t.Fatalf("保存硬故障失败：%v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestForbiddenRequestMarksOnlyCurrentChannelModelAsError(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("FROM merchant_channel_model_bindings binding")).
+		WithArgs(int64(51), int64(61)).WillReturnRows(sqlmock.NewRows([]string{
+		"id", "health_state", "consecutive_request_failures", "automatic_check_failures", "next_check_at", "price_kind",
+	}).AddRow(91, "healthy", 0, 0, nil, "text"))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO channel_model_health_events")).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE merchant_channel_model_bindings")).
+		WithArgs(int64(91), "error", 0, 0, nil, 403, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO route_metric_buckets")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	store := NewSQLRoutingStore(database)
+	if err := store.RecordRouteObservation(context.Background(), RouteObservation{
+		Candidate: RouteCandidate{OfferChannelAliasID: 81, MerchantChannelID: 51, CanonicalModelID: 61},
+		Outcome:   "hard_failure", StatusCode: 403, FirstByteMS: 25,
+	}); err != nil {
+		t.Fatalf("保存 403 故障失败：%v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

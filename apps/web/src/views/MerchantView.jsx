@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  BadgeDollarSign, CloudCog, HeartPulse, Landmark, LayoutDashboard,
+  BadgeDollarSign, HeartPulse, Landmark, LayoutDashboard,
   Plus, ServerCog, Settings2, WalletCards, Waypoints, FileText,
 } from 'lucide-react';
 import { apiRequest, formatCompactCount, formatLastCalled, formatQuota, getQuotaPerUnit } from '../api';
@@ -9,13 +9,11 @@ import { UsageLogTable, useUsage } from './UsagePanels';
 import ChannelModelsModal, { ChannelModelsButton } from '../ChannelModelsModal';
 
 const statusNames = {
-  pending: '审核中', verifying: '审核中', verified: '已验证', approving: '审核中',
-  approved: '已审核', rejected: '不通过', active: '已审核', archived: '已删除',
-  syncing: '同步中', sync_failed: '同步失败', disabled: '已下架', inactive: '已下架', deleted: '已删除',
+  active: '已上架', inactive: '已下架', deleted: '已删除',
 };
 const withdrawalStatusNames = { pending: '待审核', approved: '待打款', paid: '已打款', rejected: '已驳回' };
 const healthNames = {
-  pending: '待调用', healthy: '健康', degraded: '降级', cooling: '冷却', recovering: '恢复中', disabled: '已停用',
+  pending: '待检查', healthy: '正常', cooling: '冷却', error: '错误',
 };
 const merchantSections = [
   { id: 'overview', label: '经营概览', icon: LayoutDashboard },
@@ -52,20 +50,18 @@ function formatCacheHit(value, ready, isImage = false) {
   return `${(Number(value || 0) / 10_000).toFixed(2)}%`;
 }
 
-function channelLifecycleRows(reviews, channels) {
-  const importedReviews = new Set(channels.map((channel) => Number(channel.review_id || 0)).filter(Boolean));
-  const reviewRows = reviews
-    .filter((review) => !importedReviews.has(Number(review.id)) && review.status !== 'approved')
-    .map((review) => ({ ...review, kind: 'review' }));
-  return [...channels.map((channel) => ({ ...channel, kind: 'channel' })), ...reviewRows]
-    .sort((left, right) => new Date(right.created_at || 0) - new Date(left.created_at || 0));
+function countModelStates(models = []) {
+  return models.reduce((counts, model) => {
+    const state = model.health_state || 'pending';
+    counts[state] = (counts[state] || 0) + 1;
+    return counts;
+  }, { pending: 0, healthy: 0, cooling: 0, error: 0 });
 }
 
 export default function MerchantView({ account, openModal }) {
   const minimumWithdrawalQuota = 50 * getQuotaPerUnit();
   const [section, setSection] = useState('overview');
   const [channels, setChannels] = useState([]);
-  const [reviews, setReviews] = useState([]);
   const [merchant, setMerchant] = useState(null);
   const [models, setModels] = useState([]);
   const [offers, setOffers] = useState([]);
@@ -104,7 +100,6 @@ export default function MerchantView({ account, openModal }) {
         apiRequest('/api/merchant/channels'), apiRequest('/api/merchant/profile'), apiRequest('/api/models'), apiRequest('/api/merchant/offers'), ...financeRequests,
       ]);
       setChannels(channelData?.items || []);
-      setReviews(channelData?.reviews || []);
       setMerchant(profileData || channelData?.merchant || null);
       setBusinessDescription(profileData?.business_description || '');
       setModels(modelData || []);
@@ -127,11 +122,18 @@ export default function MerchantView({ account, openModal }) {
     catch (requestError) { setError(requestError.message || '同步渠道模型失败'); }
     finally { setBusyChannel(0); }
   };
-  const toggleChannel = async (channel) => {
-    setBusyChannel(channel.id);
-    try { await apiRequest(`/api/merchant/channels/${channel.id}/status`, { method: 'POST', body: { enabled: channel.status !== 'active' } }); await load(); }
-    catch (requestError) { setError(requestError.message || '修改渠道状态失败'); }
-    finally { setBusyChannel(0); }
+  const checkChannelModel = async (channel, model) => {
+    setBusyChannel(`model-${model.id}`);
+    setError('');
+    try {
+      await apiRequest(`/api/merchant/channels/${channel.id}/models/${model.id}/check`, { method: 'POST' });
+      await load();
+    } catch (requestError) {
+      await load();
+      setError(requestError.message || '模型检查失败');
+    } finally {
+      setBusyChannel(0);
+    }
   };
   const deleteChannel = async (channel) => {
     if (!window.confirm(`确认删除渠道“${channel.channel_name}”吗？`)) return;
@@ -139,12 +141,6 @@ export default function MerchantView({ account, openModal }) {
     try { await apiRequest(`/api/merchant/channels/${channel.id}`, { method: 'DELETE' }); await load(); }
     catch (requestError) { setError(requestError.message || '删除渠道失败'); }
     finally { setBusyChannel(0); }
-  };
-  const deleteReview = async (review) => {
-    const action = review.status === 'rejected' ? '删除记录' : '撤销审核';
-    if (!window.confirm(`确认${action}“${review.channel_name}”吗？`)) return;
-    try { await apiRequest(`/api/merchant/channel-reviews/${review.id}`, { method: 'DELETE' }); await load(); }
-    catch (requestError) { setError(requestError.message || `${action}失败`); }
   };
   const modelForOffer = (offer) => models.find((item) => item.public_name === offer.model);
   const changeOfferStatus = async (offer, enabled) => {
@@ -179,13 +175,10 @@ export default function MerchantView({ account, openModal }) {
     }
   };
 
-  const activeCount = channels.filter((channel) => channel.status === 'active').length;
-  const pendingCount = reviews.filter((review) => ['pending', 'verifying', 'verified', 'approving'].includes(review.status)).length;
+  const channelModelCounts = countModelStates(channels.flatMap((channel) => channel.models || []));
   const activeOffers = offers.filter((offer) => offer.offer_status === 'active').length;
-  const healthyChannels = offers.flatMap((offer) => offer.channels || []).filter((channel) => channel.health_state === 'healthy').length;
   const canSubmit = Boolean(account?.is_merchant || Number(account?.role) >= 10);
-  const lifecycleRows = channelLifecycleRows(reviews, channels);
-  const selectedModelRow = modelTarget ? lifecycleRows.find((item) => item.kind === modelTarget.kind && item.id === modelTarget.id) : null;
+  const selectedModelRow = modelTarget ? channels.find((item) => item.id === modelTarget) : null;
   const merchantName = merchant?.display_name || merchant?.merchant_name || '';
 
   return (
@@ -202,10 +195,10 @@ export default function MerchantView({ account, openModal }) {
         <div className="admin-content">
           {section === 'overview' && <>
             <div className="metrics-grid">
-              <Metric label="渠道总数" value={String(channels.length)} hint={`正常 ${activeCount} 个`} icon={Waypoints} />
-              <Metric label="审核处理中" value={String(pendingCount)} hint="密钥提交后不再回显" icon={CloudCog} tone="amber" />
-              <Metric label="上架模型" value={String(activeOffers)} hint={`共维护 ${offers.length} 个模型`} icon={ServerCog} tone="blue" />
-              <Metric label="健康渠道" value={String(healthyChannels)} hint="来自真实调用结果" icon={HeartPulse} tone="green" />
+              <Metric label="渠道总数" value={String(channels.length)} hint="渠道内模型独立维护状态" icon={Waypoints} />
+              <Metric label="正常模型" value={String(channelModelCounts.healthy)} hint={`${channelModelCounts.pending} 个待检查`} icon={HeartPulse} tone="green" />
+              <Metric label="冷却模型" value={String(channelModelCounts.cooling)} hint="每 3 分钟自动检查" icon={ServerCog} tone="amber" />
+              <Metric label="错误模型" value={String(channelModelCounts.error)} hint={`${activeOffers} 个模型正在上架`} icon={ServerCog} tone="blue" />
             </div>
             <div className="metrics-grid">
               <Metric label="可提现余额" value={formatQuota(balance?.available_quota)} hint="成功调用后自动入账" icon={WalletCards} />
@@ -215,16 +208,19 @@ export default function MerchantView({ account, openModal }) {
             </div>
           </>}
 
-          {section === 'channels' && <Section title="渠道管理" description="审核中、已审核、不通过和已下架渠道统一展示" actions={canSubmit && <Button icon={Plus} variant="primary" onClick={() => openModal({ type: 'channel', onSaved: load })}>提交新渠道</Button>}>
-            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>渠道</th><th>厂商</th><th>模型</th><th>基础地址</th><th>状态</th><th>结果</th><th>操作</th></tr></thead><tbody>
-              {lifecycleRows.map((item) => <tr key={`${item.kind}-${item.id}`}><td><code>{item.id}</code></td><td><strong>{item.channel_name}</strong>{item.kind === 'channel' && <small>密钥 {item.credential_fingerprint || '-'}</small>}</td><td>{item.provider || '-'}</td><td><ChannelModelsButton item={item} onClick={() => setModelTarget({ kind: item.kind, id: item.id })} /></td><td><code>{item.base_url}</code></td><td><Status>{item.kind === 'channel' && item.status === 'disabled' ? '已下架' : statusNames[item.status] || item.status}</Status></td><td>{item.verification_error || item.review_reason || '-'}</td><td>{item.kind === 'channel' ? <ActionMenu items={[{ label: '同步模型', disabled: busyChannel === item.id, onClick: () => syncChannel(item) }, { label: item.status === 'active' ? '下架' : '重新启用', disabled: busyChannel === item.id || item.status === 'archived', onClick: () => toggleChannel(item) }, { label: '删除', danger: true, disabled: busyChannel === item.id, onClick: () => deleteChannel(item) }]} /> : <ActionMenu items={[['pending', 'verified'].includes(item.status) && { label: '撤销审核', onClick: () => deleteReview(item) }, item.status === 'rejected' && { label: '删除记录', danger: true, onClick: () => deleteReview(item) }]} />}</td></tr>)}
-              {!loading && lifecycleRows.length === 0 && <tr><td className="table-message" colSpan="8">暂无渠道</td></tr>}
-              {loading && <tr><td className="table-message" colSpan="8">正在读取渠道</td></tr>}
+          {section === 'channels' && <Section title="渠道管理" description="创建渠道后逐模型检查，只有正常模型进入上架和路由" actions={canSubmit && <Button icon={Plus} variant="primary" onClick={() => openModal({ type: 'channel', onSaved: load })}>提交新渠道</Button>}>
+            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>渠道</th><th>厂商</th><th>模型</th><th>基础地址</th><th>模型状态</th><th>操作</th></tr></thead><tbody>
+              {channels.map((item) => {
+                const counts = countModelStates(item.models);
+                return <tr key={item.id}><td><code>{item.id}</code></td><td><strong>{item.channel_name}</strong><small>密钥 {item.credential_fingerprint || '-'}</small></td><td>{item.provider || '-'}</td><td><ChannelModelsButton item={item} manage onClick={() => setModelTarget(item.id)} /></td><td><code>{item.base_url}</code></td><td><small>正常 {counts.healthy} · 待检查 {counts.pending} · 冷却 {counts.cooling} · 错误 {counts.error}</small></td><td><ActionMenu items={[{ label: '管理模型', disabled: Boolean(busyChannel), onClick: () => setModelTarget(item.id) }, { label: '同步模型', disabled: Boolean(busyChannel), onClick: () => syncChannel(item) }, { label: '删除', danger: true, disabled: Boolean(busyChannel), onClick: () => deleteChannel(item) }]} /></td></tr>;
+              })}
+              {!loading && channels.length === 0 && <tr><td className="table-message" colSpan="7">暂无渠道</td></tr>}
+              {loading && <tr><td className="table-message" colSpan="7">正在读取渠道</td></tr>}
             </tbody></table></div>
           </Section>}
-          {selectedModelRow && <ChannelModelsModal item={selectedModelRow} onClose={() => setModelTarget(null)} />}
+          {selectedModelRow && <ChannelModelsModal item={selectedModelRow} busyID={busyChannel} onClose={() => setModelTarget(null)} onTest={checkChannelModel} />}
 
-          {section === 'offers' && <Section title="上架模型" description="一个模型统一设置价格，可由多个已审核渠道承载" actions={canSubmit && <Button disabled={!channels.length || !models.length} icon={BadgeDollarSign} variant="primary" onClick={() => openModal({ type: 'quote', models: models.filter((model) => model.status === 'active'), onSaved: load })}>设置模型价格</Button>}>
+          {section === 'offers' && <Section title="上架模型" description="一个模型统一设置价格，可由多个正常渠道模型承载" actions={canSubmit && <Button disabled={!channels.length || !models.length} icon={BadgeDollarSign} variant="primary" onClick={() => openModal({ type: 'quote', models: models.filter((model) => model.status === 'active'), onSaved: load })}>设置模型价格</Button>}>
             <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>模型</th><th>价格倍率</th><th>调用次数</th><th>Token 用量</th><th>缓存命中率</th><th>最后调用</th><th>可用渠道</th><th>状态</th><th>健康</th><th>操作</th></tr></thead><tbody>
               {offers.map((offer) => <FragmentOfferRow key={offer.offer_id} offer={offer} expanded={expandedOffer === offer.offer_id} actions={<ActionMenu items={[{ label: '修改模型价格', onClick: () => openModal({ type: 'quote', models, offer, onSaved: load }) }, offer.offer_status === 'active' ? { label: '下架', onClick: () => changeOfferStatus(offer, false) } : { label: '上架', onClick: () => changeOfferStatus(offer, true) }, { label: expandedOffer === offer.offer_id ? '收起渠道状态' : '查看渠道状态', onClick: () => setExpandedOffer(expandedOffer === offer.offer_id ? 0 : offer.offer_id) }, { label: '删除', danger: true, onClick: () => deleteOffer(offer) }]} /> } />)}
               {!loading && offers.length === 0 && <tr><td className="table-message" colSpan="11">暂无上架模型</td></tr>}

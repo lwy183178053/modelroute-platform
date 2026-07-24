@@ -4,7 +4,7 @@ import { apiRequest, formatCompactCount, formatLastCalled } from '../api';
 import { Button, InlineNotice, Metric, PageHeader, Pagination, ProviderLogo, Section, Select, Status, TextInput } from '../ui';
 
 const healthNames = {
-  pending: '待探测', healthy: '健康', degraded: '降级', cooling: '冷却', recovering: '恢复中', disabled: '已停用',
+  pending: '待检查', healthy: '正常', cooling: '冷却', error: '错误',
 };
 
 function formatAvailability(value) {
@@ -110,7 +110,7 @@ export default function MarketView({ navigate }) {
       <div className="metrics-row market-metrics">
         <Metric label="在售模型" value={String(activeModels)} hint={`已发布 ${models.length} 个标准模型`} icon={Boxes} />
         <Metric label="活跃商户" value={String(activeMerchants)} hint={`${marketOffers.length} 个有效报价`} icon={Store} tone="blue" />
-        <Metric label="健康报价" value={String(healthyOffers)} hint="来自真实请求与冷却恢复检测" icon={Activity} tone="green" />
+        <Metric label="正常报价" value={String(healthyOffers)} hint="来自真实请求与冷却恢复检查" icon={Activity} tone="green" />
         <Metric label="中位 P95 首字" value={formatLatency(medianP95)} hint="按当前有效报价统计" icon={Clock3} tone="amber" />
       </div>
 

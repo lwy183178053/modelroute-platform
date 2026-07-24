@@ -15,13 +15,12 @@ type AdminOverviewSnapshot struct {
 	TodayRequestCount           int64      `json:"today_request_count"`
 	TodaySuccessfulRequests     int64      `json:"today_successful_requests"`
 	PendingMerchantApplications int64      `json:"pending_merchant_applications"`
-	PendingChannelReviews       int64      `json:"pending_channel_reviews"`
 	PendingWithdrawals          int64      `json:"pending_withdrawals"`
 	OpenReconciliation          int64      `json:"open_reconciliation"`
 	TotalChannels               int64      `json:"total_channels"`
 	ActiveChannels              int64      `json:"active_channels"`
-	CoolingChannels             int64      `json:"cooling_channels"`
-	DisabledChannels            int64      `json:"disabled_channels"`
+	CoolingModels               int64      `json:"cooling_models"`
+	ErrorModels                 int64      `json:"error_models"`
 	PaymentEnabled              bool       `json:"payment_enabled"`
 	LastSyncedThrough           int64      `json:"last_synced_through"`
 	LastSyncSuccessAt           *time.Time `json:"last_sync_success_at,omitempty"`
@@ -46,15 +45,21 @@ func (s *SQLAdminOverviewStore) Snapshot(ctx context.Context, now time.Time) (Ad
 	err := s.database.QueryRowContext(ctx, `
 SELECT
     (SELECT count(*) FROM merchant_applications WHERE status IN ('pending', 'verifying', 'verified', 'approving')),
-    (SELECT count(*) FROM merchant_channel_reviews WHERE status IN ('pending', 'verifying', 'verified', 'approving')),
     (SELECT count(*) FROM merchant_withdrawals WHERE status = 'pending'),
     (SELECT count(*) FROM settlement_reconciliation_items WHERE status = 'open'),
-    (SELECT count(*) FROM merchant_channels),
-    (SELECT count(*) FROM merchant_channels WHERE status = 'active'),
-    (SELECT count(*) FROM channel_health WHERE state = 'cooling'),
-    (SELECT count(*) FROM merchant_channels mc
-       WHERE mc.status = 'disabled'
-          OR EXISTS (SELECT 1 FROM channel_health h WHERE h.merchant_channel_id = mc.id AND h.state = 'disabled')),
+    (SELECT count(*) FROM merchant_channels WHERE deleted_at IS NULL),
+    (SELECT count(*) FROM merchant_channels channel
+       WHERE channel.deleted_at IS NULL
+         AND EXISTS (
+             SELECT 1 FROM merchant_channel_model_bindings binding
+             WHERE binding.merchant_channel_id = channel.id AND binding.health_state = 'healthy'
+         )),
+    (SELECT count(*) FROM merchant_channel_model_bindings binding
+       JOIN merchant_channels channel ON channel.id = binding.merchant_channel_id
+       WHERE channel.deleted_at IS NULL AND binding.health_state = 'cooling'),
+    (SELECT count(*) FROM merchant_channel_model_bindings binding
+       JOIN merchant_channels channel ON channel.id = binding.merchant_channel_id
+       WHERE channel.deleted_at IS NULL AND binding.health_state = 'error'),
     COALESCE((SELECT enabled FROM payment_setting_versions WHERE is_current LIMIT 1), false),
     COALESCE((SELECT sum(CASE WHEN source_type = 2 THEN gross_quota ELSE -gross_quota END)
                 FROM settlement_sources WHERE status = 'settled' AND source_created_at >= $1), 0),
@@ -71,9 +76,9 @@ SELECT
 FROM settlement_sync_state
 WHERE singleton
 `, dayStart).Scan(
-		&snapshot.PendingMerchantApplications, &snapshot.PendingChannelReviews,
+		&snapshot.PendingMerchantApplications,
 		&snapshot.PendingWithdrawals, &snapshot.OpenReconciliation,
-		&snapshot.TotalChannels, &snapshot.ActiveChannels, &snapshot.CoolingChannels, &snapshot.DisabledChannels,
+		&snapshot.TotalChannels, &snapshot.ActiveChannels, &snapshot.CoolingModels, &snapshot.ErrorModels,
 		&snapshot.PaymentEnabled, &snapshot.TodayGrossQuota, &snapshot.TodayMerchantQuota, &snapshot.TodayPlatformQuota,
 		&snapshot.TodayRefundQuota, &snapshot.TodayRequestCount, &snapshot.TodaySuccessfulRequests,
 		&snapshot.LastSyncedThrough, &lastSuccess, &lastError,

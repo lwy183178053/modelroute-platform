@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
-	"time"
 )
 
 func TestScaledDecimalUsesIntegerArithmetic(t *testing.T) {
@@ -22,38 +21,6 @@ func TestScaledDecimalUsesIntegerArithmetic(t *testing.T) {
 		if got := scaledDecimal(test.value, test.scale); got != test.want {
 			t.Fatalf("scaledDecimal(%d, %d) = %q，期望 %q", test.value, test.scale, got, test.want)
 		}
-	}
-}
-
-func TestNextProbeStateAppliesThreeFailuresAndSingleRecoveryProbe(t *testing.T) {
-	now := time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC)
-	probe := HealthProbe{State: "healthy", ConsecutiveFailures: 2, CooldownLevel: 0}
-	failure := nextProbeState(probe, healthFailureTemporary, now, 0)
-	if failure.State != "cooling" || failure.CooldownLevel != 1 || !failure.NextProbeAt.Equal(now.Add(time.Minute)) {
-		t.Fatalf("第三次失败状态=%+v", failure)
-	}
-	recovered := nextProbeState(HealthProbe{State: "cooling", CooldownLevel: 1}, healthFailureNone, now.Add(time.Minute), 0)
-	if recovered.State != "healthy" || recovered.CooldownLevel != 0 || !recovered.NextProbeAt.IsZero() {
-		t.Fatalf("一次恢复探测后的状态=%+v", recovered)
-	}
-}
-
-func TestNextProbeStateUsesEscalatingCooldownAndRetryAfter(t *testing.T) {
-	now := time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC)
-	state := nextProbeState(HealthProbe{State: "recovering", CooldownLevel: 2}, healthFailureTemporary, now, 20*time.Minute)
-	if state.CooldownLevel != 3 || !state.NextProbeAt.Equal(now.Add(20*time.Minute)) {
-		t.Fatalf("升级冷却状态=%+v", state)
-	}
-}
-
-func TestCooldownCapsAtTwoHoursAndHealthyRequestsDoNotScheduleProbe(t *testing.T) {
-	if got := cooldownForLevel(6); got != 120*time.Minute {
-		t.Fatalf("第六档冷却=%s", got)
-	}
-	now := time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC)
-	healthy := nextProbeState(HealthProbe{State: "healthy"}, healthFailureNone, now, 0)
-	if !healthy.NextProbeAt.IsZero() {
-		t.Fatalf("健康请求安排了主动探活：%s", healthy.NextProbeAt)
 	}
 }
 

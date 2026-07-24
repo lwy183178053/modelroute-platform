@@ -2,19 +2,14 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
+	"errors"
 	"testing"
 	"time"
-
-	"github.com/lwy183178053/modelroute-platform/apps/api/internal/newapi"
 )
 
 type healthRepositoryStub struct {
-	probes       []HealthProbe
-	result       HealthProbeResult
-	probeTokenID int
+	probes []HealthProbe
+	result HealthProbeResult
 }
 
 func (s *healthRepositoryStub) ClaimHealthProbes(context.Context, time.Time, int) ([]HealthProbe, error) {
@@ -26,42 +21,51 @@ func (s *healthRepositoryStub) SaveProbeResult(_ context.Context, result HealthP
 	return nil
 }
 
-func (s *healthRepositoryStub) RegisterProbeToken(_ context.Context, tokenID int) error {
-	s.probeTokenID = tokenID
-	return nil
+type existingChannelTesterStub struct {
+	channelID int
+	model     CanonicalModel
+	outcome   ChannelTestOutcome
+	err       error
 }
 
-type probeTokenSourceStub struct{ token newapi.ProbeToken }
-
-func (s probeTokenSourceStub) ProbeToken(context.Context) (newapi.ProbeToken, error) {
-	return s.token, nil
+func (s *existingChannelTesterStub) TestExisting(_ context.Context, channelID int, model CanonicalModel) (ChannelTestOutcome, error) {
+	s.channelID = channelID
+	s.model = model
+	return s.outcome, s.err
 }
 
-func TestHealthRunnerMovesThirdTemporaryFailureIntoCooldown(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer sk-probe" {
-			t.Fatalf("探活请求=%s，鉴权=%q", r.URL.Path, r.Header.Get("Authorization"))
-		}
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		messages, _ := body["messages"].([]any)
-		if body["model"] != "mkt-ov-42" || len(messages) != 1 {
-			t.Fatalf("探活正文=%v", body)
-		}
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte(`{"error":{"message":"temporary"}}`))
-	}))
-	defer upstream.Close()
+func TestHealthRunnerChecksDueModelThroughFormalChannel(t *testing.T) {
 	repository := &healthRepositoryStub{probes: []HealthProbe{{
-		OfferChannelAliasID: 81, OfferID: 42, MerchantChannelID: 51, CanonicalModelID: 61, NewAPIChannelID: 41,
-		InternalAlias: "mkt-ov-42", PriceKind: "text", State: "healthy", ConsecutiveFailures: 2,
+		BindingID: 91, MerchantChannelID: 51, CanonicalModelID: 61, NewAPIChannelID: 41,
+		Model: CanonicalModel{ID: 61, PublicName: "gpt-5.5", Price: OfficialPrice{PriceKind: "text"}},
+		State: "cooling", AutomaticCheckFailures: 4,
 	}}}
-	runner := NewHealthRunner(repository, probeTokenSourceStub{token: newapi.ProbeToken{ID: 77, Key: "sk-probe"}}, newapi.NewClient(upstream.URL, time.Second), &adminNewAPIStub{})
-	now := time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC)
+	tester := &existingChannelTesterStub{outcome: ChannelTestOutcome{LatencyMS: 35}}
+	runner := NewHealthRunner(repository, tester)
+	now := time.Date(2026, 7, 25, 4, 0, 0, 0, time.UTC)
 	if err := runner.RunCycle(context.Background(), now); err != nil {
-		t.Fatalf("执行探活失败：%v", err)
+		t.Fatalf("执行自动检查失败：%v", err)
 	}
-	if repository.probeTokenID != 77 || repository.result.State.State != "cooling" || repository.result.Class != healthFailureTemporary || repository.result.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("探活结果=%+v，探活令牌=%d", repository.result, repository.probeTokenID)
+	if tester.channelID != 41 || tester.model.PublicName != "gpt-5.5" {
+		t.Fatalf("正式渠道检查参数=%d %+v", tester.channelID, tester.model)
+	}
+	if repository.result.Class != healthFailureNone || repository.result.State.State != "healthy" || repository.result.FirstByteMS != 35 {
+		t.Fatalf("自动检查结果=%+v", repository.result)
+	}
+}
+
+func TestHealthRunnerKeepsThreeMinuteCooldownAfterFailedAutomaticCheck(t *testing.T) {
+	now := time.Date(2026, 7, 25, 4, 0, 0, 0, time.UTC)
+	repository := &healthRepositoryStub{probes: []HealthProbe{{
+		BindingID: 91, MerchantChannelID: 51, CanonicalModelID: 61, NewAPIChannelID: 41,
+		Model: CanonicalModel{ID: 61, PublicName: "gpt-5.5", Price: OfficialPrice{PriceKind: "text"}},
+		State: "cooling", AutomaticCheckFailures: 8,
+	}}}
+	runner := NewHealthRunner(repository, &existingChannelTesterStub{outcome: ChannelTestOutcome{LatencyMS: 50}, err: errors.New("上游失败")})
+	if err := runner.RunCycle(context.Background(), now); err != nil {
+		t.Fatalf("自动检查周期失败：%v", err)
+	}
+	if repository.result.Class != healthFailureTemporary || repository.result.State.AutomaticCheckFailures != 9 || !repository.result.State.NextCheckAt.Equal(now.Add(3*time.Minute)) {
+		t.Fatalf("自动检查失败结果=%+v", repository.result)
 	}
 }

@@ -27,10 +27,10 @@ func TestSQLRoutingStoreAgainstPostgres(t *testing.T) {
 	}
 	if _, err := database.ExecContext(ctx, `
 TRUNCATE route_metric_snapshots, route_metric_buckets, merchant_name_reservations,
-         channel_health_events, performance_rollups, routing_decisions,
+         channel_model_health_events, routing_decisions,
 		 token_model_routes, routing_policies, token_bindings,
-         channel_health, offer_channel_aliases, offer_versions,
-         merchant_channels, merchant_channel_reviews, merchant_channel_tests,
+         offer_channel_aliases, offer_versions, merchant_channel_model_bindings,
+         merchant_channels,
          merchant_profiles, merchant_applications, text_price_tiers,
          image_price_items, official_price_versions, canonical_models
 RESTART IDENTITY CASCADE
@@ -52,7 +52,7 @@ RESTART IDENTITY CASCADE
 		t.Fatalf("创建标准模型：%v", err)
 	}
 
-	var applicationID, merchantID, testID, reviewID, channelID int64
+	var applicationID, merchantID, channelID int64
 	if err := database.QueryRowContext(ctx, `
 INSERT INTO merchant_applications
     (newapi_user_id, display_name, display_name_key, website_url, business_description, status)
@@ -70,41 +70,22 @@ RETURNING id
 		t.Fatalf("创建商户资料：%v", err)
 	}
 	if err := database.QueryRowContext(ctx, `
-INSERT INTO merchant_channel_tests
-    (newapi_user_id, canonical_model_id, base_url, credential_fingerprint,
-     adapter_type, capabilities, latency_ms, receipt_token_hash, expires_at, consumed_at)
-VALUES (7, $1, 'https://upstream.test/v1', $2, 'openai_compatible',
-        '["text"]'::jsonb, 10, $3, now() + interval '15 minutes', now())
-RETURNING id
-`, model.ID,
-		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc").Scan(&testID); err != nil {
-		t.Fatalf("创建渠道检测：%v", err)
-	}
-	if err := database.QueryRowContext(ctx, `
-INSERT INTO merchant_channel_reviews
-    (merchant_newapi_user_id, merchant_profile_id, application_id, canonical_model_id,
-     channel_test_id, channel_name, base_url, provider, adapter_type, credential_fingerprint, status)
-VALUES (7, $1, $2, $3, $4, '集成测试渠道', 'https://upstream.test/v1',
-        'OpenAI', 'openai_compatible', $5, 'approved')
-RETURNING id
-`, merchantID, applicationID, model.ID, testID,
-		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").Scan(&reviewID); err != nil {
-		t.Fatalf("创建渠道审核：%v", err)
-	}
-	if err := database.QueryRowContext(ctx, `
 INSERT INTO merchant_channels
-    (merchant_profile_id, review_id, canonical_model_id, newapi_channel_id,
+    (merchant_profile_id, newapi_channel_id,
      channel_name, base_url, provider, adapter_type, credential_fingerprint)
-VALUES ($1, $2, $3, 41, '集成测试渠道', 'https://upstream.test/v1',
-        'OpenAI', 'openai_compatible', $4)
+VALUES ($1, 41, '集成测试渠道', 'https://upstream.test/v1',
+        'OpenAI', 'openai_compatible', $2)
 RETURNING id
-`, merchantID, reviewID, model.ID,
+`, merchantID,
 		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").Scan(&channelID); err != nil {
 		t.Fatalf("创建商户渠道：%v", err)
 	}
-	if _, err := database.ExecContext(ctx, `INSERT INTO channel_health (merchant_channel_id) VALUES ($1)`, channelID); err != nil {
-		t.Fatalf("创建渠道健康状态：%v", err)
+	if _, err := database.ExecContext(ctx, `
+INSERT INTO merchant_channel_model_bindings
+    (merchant_channel_id, upstream_model_name, canonical_model_id, match_status, health_state)
+VALUES ($1, 'gpt-4o-mini', $2, 'matched', 'healthy')
+`, channelID, model.ID); err != nil {
+		t.Fatalf("创建渠道模型状态：%v", err)
 	}
 
 	offer, err := store.CreateOffer(ctx, CreateOfferCommand{UserID: 7, CanonicalModelID: model.ID, MultiplierBPS: 7200})
@@ -123,10 +104,10 @@ RETURNING id
 		t.Fatalf("市场折后价格=%+v，错误=%v", market, err)
 	}
 	if _, err := database.ExecContext(ctx, `
-UPDATE channel_health
-SET state = 'cooling', cooldown_until = now() + interval '5 minutes', next_probe_at = now() + interval '5 minutes'
-WHERE merchant_channel_id = $1
-`, channelID); err != nil {
+UPDATE merchant_channel_model_bindings
+SET health_state = 'cooling', next_check_at = now() + interval '3 minutes'
+WHERE merchant_channel_id = $1 AND canonical_model_id = $2
+`, channelID, model.ID); err != nil {
 		t.Fatalf("设置渠道冷却状态：%v", err)
 	}
 	market, err = store.ListMarketOffers(ctx, 0, "gpt-4o-mini")
@@ -134,15 +115,15 @@ WHERE merchant_channel_id = $1
 		t.Fatalf("冷却渠道不应出现在市场：报价=%+v，错误=%v", market, err)
 	}
 	if _, err := database.ExecContext(ctx, `
-UPDATE channel_health
-SET state = 'degraded', cooldown_until = NULL, next_probe_at = NULL
-WHERE merchant_channel_id = $1
-`, channelID); err != nil {
-		t.Fatalf("恢复渠道降级状态：%v", err)
+UPDATE merchant_channel_model_bindings
+SET health_state = 'healthy', next_check_at = NULL
+WHERE merchant_channel_id = $1 AND canonical_model_id = $2
+`, channelID, model.ID); err != nil {
+		t.Fatalf("恢复渠道模型状态：%v", err)
 	}
 	market, err = store.ListMarketOffers(ctx, 0, "gpt-4o-mini")
 	if err != nil || len(market) != 1 || market[0].ChannelCount != 1 {
-		t.Fatalf("降级渠道应作为可用渠道展示：报价=%+v，错误=%v", market, err)
+		t.Fatalf("健康模型应作为可用渠道展示：报价=%+v，错误=%v", market, err)
 	}
 	lastCalledAt := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Second)
 	if _, err := database.ExecContext(ctx, `
@@ -216,22 +197,55 @@ VALUES (9001, 21, $1, 2, $2, 41, 9, 'req-merchant-stats', 1000,
 			t.Fatalf("保存真实失败：%v", err)
 		}
 	}
-	probes, err = store.ClaimHealthProbes(ctx, now.Add(2*time.Minute), 20)
+	probeAt := time.Now().UTC().Add(4 * time.Minute)
+	probes, err = store.ClaimHealthProbes(ctx, probeAt, 20)
 	if err != nil || len(probes) != 1 {
 		t.Fatalf("领取冷却探活任务：数量=%d 错误=%v", len(probes), err)
 	}
-	next := nextProbeState(probes[0], healthFailureNone, now.Add(2*time.Minute), 0)
+	if _, err := database.ExecContext(ctx, `
+UPDATE merchant_channel_model_bindings
+SET health_state = 'healthy', next_check_at = NULL, check_lease_until = NULL
+WHERE id = $1
+`, probes[0].BindingID); err != nil {
+		t.Fatalf("模拟商户手动恢复模型：%v", err)
+	}
+	stale := nextModelHealthAfterAutomaticCheck(ModelHealthState{
+		State: probes[0].State, ConsecutiveRequestFailures: probes[0].ConsecutiveFailures,
+		AutomaticCheckFailures: probes[0].AutomaticCheckFailures, NextCheckAt: probes[0].NextProbeAt,
+	}, healthFailureTemporary, probeAt)
+	if err := store.SaveProbeResult(ctx, HealthProbeResult{
+		Probe: probes[0], State: stale, Class: healthFailureTemporary, Summary: "旧自动检查失败",
+	}); err != nil {
+		t.Fatalf("保存陈旧探活结果：%v", err)
+	}
+	var state string
+	if err := database.QueryRowContext(ctx, `
+SELECT health_state FROM merchant_channel_model_bindings WHERE id = $1
+`, probes[0].BindingID).Scan(&state); err != nil || state != "healthy" {
+		t.Fatalf("陈旧探活结果不应覆盖手动恢复：状态=%s 错误=%v", state, err)
+	}
+	if _, err := database.ExecContext(ctx, `
+UPDATE merchant_channel_model_bindings
+SET health_state = 'cooling', next_check_at = $2, check_lease_until = $3
+WHERE id = $1
+`, probes[0].BindingID, probes[0].NextProbeAt, probeAt.Add(2*time.Minute)); err != nil {
+		t.Fatalf("恢复有效探活租约：%v", err)
+	}
+	next := nextModelHealthAfterAutomaticCheck(ModelHealthState{
+		State: probes[0].State, ConsecutiveRequestFailures: probes[0].ConsecutiveFailures,
+		AutomaticCheckFailures: probes[0].AutomaticCheckFailures, NextCheckAt: probes[0].NextProbeAt,
+	}, healthFailureNone, probeAt)
 	if err := store.SaveProbeResult(ctx, HealthProbeResult{
 		Probe: probes[0], State: next, Class: healthFailureNone,
 		StatusCode: 200, FirstByteMS: 120,
 	}); err != nil {
 		t.Fatalf("保存恢复探活结果：%v", err)
 	}
-	var state string
 	var nextProbe sql.NullTime
 	if err := database.QueryRowContext(ctx, `
-SELECT state, next_probe_at FROM channel_health WHERE merchant_channel_id = $1
-`, channelID).Scan(&state, &nextProbe); err != nil {
+SELECT health_state, next_check_at FROM merchant_channel_model_bindings
+WHERE merchant_channel_id = $1 AND canonical_model_id = $2
+`, channelID, model.ID).Scan(&state, &nextProbe); err != nil {
 		t.Fatalf("读取探活结果：%v", err)
 	}
 	if state != "healthy" || nextProbe.Valid {

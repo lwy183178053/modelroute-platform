@@ -425,16 +425,16 @@ function ChannelModal({ close, config, notify }) {
         channel_name: channelName.trim(), provider, base_url: baseURL.trim(), api_key: apiKey,
       } });
       await config.onSaved?.();
-      notify('渠道已提交审核');
+      notify('渠道已创建，请逐模型检查');
       close();
     } catch (requestError) {
-      setError(requestError.message || '提交渠道失败');
+      setError(requestError.message || '创建渠道失败');
     } finally {
       setBusy(false);
     }
   };
   return (
-    <Modal title="提交新渠道" description="一个渠道只承载所选厂商的模型，平台会自动匹配已收录型号。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !syncedModels.some((model) => model.match_status === 'matched')} icon={Plus} onClick={submitChannel} variant="primary">{busy ? '提交中' : '提交渠道审核'}</Button></>}>
+    <Modal title="提交新渠道" description="先获取该厂商的已收录模型；创建后需要在渠道模型面板逐个检查。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !syncedModels.some((model) => model.match_status === 'matched')} icon={Plus} onClick={submitChannel} variant="primary">{busy ? '创建中' : '创建渠道'}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
       <Field label="渠道名称"><TextInput onChange={(event) => setChannelName(event.target.value)} placeholder="例如 OpenAI 企业线路" value={channelName} /></Field>
       <Field label="模型厂商"><Select value={provider} onChange={(event) => { setProvider(event.target.value); setSyncedModels([]); }}><option value="OpenAI">OpenAI</option><option value="Anthropic">Anthropic</option><option value="Gemini">Gemini</option><option value="DeepSeek">DeepSeek</option><option value="Qwen">Qwen</option><option value="Moonshot">Moonshot</option></Select></Field>

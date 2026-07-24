@@ -3532,3 +3532,73 @@
 - `docs/部署运行手册.md`：补充本地同构开发、GHCR 凭据边界、不可变镜像发布和日常更新流程。
 - `progress.md`：追加本轮实现、验证证据、改动清单和回滚点。
 - 回滚点：本轮施工前提交为 `242694b65110`；提交后执行 `git revert <本轮提交哈希>` 可回退工具链与文档。本轮没有数据库结构或业务数据变更，不影响现有账号、渠道、模型、路由和调用记录。
+
+## 2026-07-25 - Task: 渠道逐模型检查与健康状态简化
+
+### What was done
+
+- 将渠道收敛为只保存厂商、地址、密钥指纹和核心渠道编号的容器，删除渠道审核、管理员验证批准、渠道级启停和渠道级健康运行路径；商户同步模型后直接创建正式渠道。
+- 将健康状态全部落到渠道模型绑定：新模型待检查，商户逐模型检查成功后正常；文本真实请求连续 3 次临时失败后冷却，每 3 分钟自动检查一次，连续 10 次失败后错误；图片临时失败直接错误。
+- 路由、报价和模型市场只读取正常模型绑定；`401/402` 联动同渠道全部模型错误，`403` 只影响当前模型。商户手动检查成功可恢复待检查、冷却或错误模型。
+- 增加自动检查租约保护，商户手动恢复后，已经在途的旧自动检查结果不会覆盖新状态。
+- 商户渠道页改为逐模型管理弹窗，管理员渠道页改为只读模型弹窗和删除操作；运营总览改为统计冷却模型与错误模型。
+
+### Testing
+
+- 并发回归测试先复现“陈旧自动结果把手动恢复的正常状态覆盖为冷却”，修复后 `TestSQLRoutingStoreAgainstPostgres` 通过。
+- `go test ./... -count=1`、`go vet ./...`、`go build ./...`：通过。
+- PostgreSQL 集成测试 `MODELROUTE_TEST_DATABASE_URL=... go test ./internal/httpapi ./internal/migrations -count=1`：通过，覆盖第 12 号迁移、三次失败冷却、自动恢复和陈旧结果保护。
+- `npm.cmd test`、`npm.cmd run build`、`npm.cmd run test:ui`：通过，Vite 生产构建完成 1612 个模块转换。
+- `npm.cmd run capture`：通过，桌面和移动端渠道列表、商户逐模型弹窗、管理员只读弹窗均生成截图，根页面无横向溢出。
+- 部署 Python 测试：35 项通过；生产与开发 Compose 配置校验通过。
+- `deploy/scripts/dev.ps1 verify`：通过，开发环境 `http://127.0.0.1:57723/` 返回版本 `dev`。
+- `deploy/scripts/dev.ps1 preflight`：通过，生产 Dockerfile、Nginx、API、Worker、核心服务和第 12 号迁移在 `http://127.0.0.1:28100/` 验收通过，随后成功恢复热更新环境。
+
+### Notes
+
+- `apps/api/internal/bootstrap/resources.go`：移除已下线渠道审核资源的启动装配。
+- `apps/api/internal/httpapi/channel_detector.go`：保留正式渠道单模型检查所需的核心检测能力。
+- `apps/api/internal/httpapi/channel_detector_test.go`：补充正式渠道文本和图片检查回归断言。
+- `apps/api/internal/httpapi/channel_models_handlers.go`：实现现有渠道模型同步、商户逐模型检查和渠道归档入口。
+- `apps/api/internal/httpapi/health_runner.go`：将 Worker 恢复任务改为逐模型三分钟自动检查。
+- `apps/api/internal/httpapi/health_runner_test.go`：覆盖逐模型自动检查成功、失败和十次错误边界。
+- `apps/api/internal/httpapi/merchant_channel_store.go`：新增正式渠道创建、模型同步和手动检查的事务仓储。
+- `apps/api/internal/httpapi/merchant_handlers.go`：渠道提交改为服务端重同步后直接创建正式多模型渠道。
+- `apps/api/internal/httpapi/merchant_handlers_test.go`：删除旧审核流程用例并保留商户申请、资料和渠道权限覆盖。
+- `apps/api/internal/httpapi/merchant_store.go`：移除渠道审核和渠道级状态仓储，保留商户资料与正式渠道查询。
+- `apps/api/internal/httpapi/merchant_store_test.go`：同步精简后的商户仓储契约测试。
+- `apps/api/internal/httpapi/merchant_types.go`：将渠道类型收敛为容器字段和逐模型健康字段。
+- `apps/api/internal/httpapi/model_health.go`：新增待检查、正常、冷却、错误的逐模型状态转换规则。
+- `apps/api/internal/httpapi/model_health_test.go`：覆盖三次真实失败、图片错误、三分钟检查、十次失败和手动恢复。
+- `apps/api/internal/httpapi/self_service_channels_test.go`：覆盖正式渠道直接创建、逐模型检查和跨商户隔离。
+- `apps/api/internal/httpapi/operations_handlers_test.go`：按正式渠道与逐模型统计调整运营接口测试数据。
+- `apps/api/internal/httpapi/overview_store.go`：运营总览改为冷却模型和错误模型计数。
+- `apps/api/internal/httpapi/overview_store_postgres_test.go`：更新真实 PostgreSQL 运营统计断言。
+- `apps/api/internal/httpapi/routing_domain.go`：删除旧渠道分档冷却规则并接入逐模型状态机。
+- `apps/api/internal/httpapi/routing_domain_test.go`：移除旧分档冷却用例。
+- `apps/api/internal/httpapi/routing_handlers.go`：删除渠道级状态和旧恢复入口。
+- `apps/api/internal/httpapi/routing_handlers_test.go`：移除对应旧接口测试。
+- `apps/api/internal/httpapi/routing_store.go`：路由、市场、报价和健康观察统一按正常模型绑定过滤，并保护自动检查租约。
+- `apps/api/internal/httpapi/routing_store_postgres_test.go`：覆盖逐模型冷却、自动检查、恢复和陈旧结果并发保护。
+- `apps/api/internal/httpapi/routing_store_test.go`：更新逐模型路由和市场 SQL 契约。
+- `apps/api/internal/httpapi/server.go`：注册逐模型检查与正式渠道接口，删除渠道审核和渠道级状态路由。
+- `apps/api/internal/httpapi/settlement_store_postgres_test.go`：按无渠道状态的新结构更新结算测试夹具。
+- `apps/api/internal/migrations/migrate_test.go`：验证第 12 号迁移新增逐模型健康并删除旧表。
+- `apps/api/internal/migrations/sql/000012_model_channel_health.sql`：新增模型健康字段与事件表，物理删除渠道审核和渠道级健康结构。
+- `apps/web/scripts/capture.mjs`：更新渠道模型弹窗桌面和移动端截图流程。
+- `apps/web/scripts/ui-smoke.mjs`：覆盖正式渠道、逐模型检查、管理员只读和旧接口消失。
+- `apps/web/src/ChannelModelsModal.jsx`：统一逐模型状态详情弹窗，按商户权限显示检查操作。
+- `apps/web/src/Modals.jsx`：渠道创建完成文案改为引导逐模型检查。
+- `apps/web/src/styles.css`：为逐模型详情错误文本补充紧凑布局。
+- `apps/web/src/views/AdminView.jsx`：移除渠道审核待办计数和旧页面数据流。
+- `apps/web/src/views/MarketView.jsx`：将模型市场健康文案统一为逐模型状态。
+- `apps/web/src/views/MerchantView.jsx`：渠道页改为正式渠道列表、模型状态汇总和逐模型管理弹窗。
+- `apps/web/src/views/admin/AdminChannels.jsx`：管理员渠道页改为搜索、筛选、只读模型弹窗和删除。
+- `docs/V2数据基线.md`：记录逐模型健康结构和固定三分钟检查规则。
+- `docs/商户与渠道审核接口.md`：重写为商户申请、正式渠道创建、逐模型检查和权限接口说明。
+- `docs/多模型渠道运营升级.md`：同步无渠道审核、无渠道状态的新流程和数据边界。
+- `docs/模型报价路由与健康.md`：同步逐模型路由过滤、故障分类、自动检查和接口清单。
+- `docs/运营管理与升级验收.md`：更新管理员渠道边界和运营总览指标。
+- `docs/部署运行手册.md`：更新平台加密密钥和核心管理员凭据的当前用途。
+- `progress.md`：追加本轮实现、验证证据、改动清单和回滚点。
+- 回滚点：生产部署前为提交 `81a6a82afdfb`，可执行 `git revert <本轮提交哈希>` 回退代码和文档。第 12 号迁移会物理删除旧渠道审核及渠道级健康表，部署后属于前向结构变更；切回旧程序前必须先恢复迁移前的平台数据库，不能只切换旧镜像。

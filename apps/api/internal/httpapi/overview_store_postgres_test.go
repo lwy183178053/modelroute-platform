@@ -69,7 +69,7 @@ VALUES ($1, 1, 0, 600000, 4000000, 500000)
 		t.Fatal(err)
 	}
 
-	var pendingApplicationID, approvedApplicationID, merchantID, pendingTestID, approvedTestID, approvedReviewID, channelID int64
+	var pendingApplicationID, approvedApplicationID, merchantID, channelID int64
 	if err := database.QueryRowContext(ctx, `
 INSERT INTO merchant_applications
     (newapi_user_id, display_name, display_name_key, website_url, business_description, status)
@@ -92,56 +92,21 @@ VALUES (8, $1, '已审商户', 'https://approved.example', 1) RETURNING id
 		t.Fatal(err)
 	}
 	if err := database.QueryRowContext(ctx, `
-INSERT INTO merchant_channel_tests
-    (newapi_user_id, canonical_model_id, base_url, credential_fingerprint, adapter_type,
-     capabilities, latency_ms, receipt_token_hash, expires_at, consumed_at)
-VALUES (7, $1, 'https://pending-upstream.example', $2, 'openai_compatible',
-        '["chat_completions"]'::jsonb, 20, $3, now() + interval '15 minutes', now())
-RETURNING id
-`, modelID,
-		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		"1111111111111111111111111111111111111111111111111111111111111111").Scan(&pendingTestID); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.QueryRowContext(ctx, `
-INSERT INTO merchant_channel_tests
-    (newapi_user_id, canonical_model_id, base_url, credential_fingerprint, adapter_type,
-     capabilities, latency_ms, receipt_token_hash, expires_at, consumed_at)
-VALUES (8, $1, 'https://approved-upstream.example', $2, 'openai_compatible',
-        '["chat_completions"]'::jsonb, 18, $3, now() + interval '15 minutes', now())
-RETURNING id
-`, modelID,
-		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-		"2222222222222222222222222222222222222222222222222222222222222222").Scan(&approvedTestID); err != nil {
+INSERT INTO merchant_channels
+	(merchant_profile_id, newapi_channel_id, channel_name,
+	 base_url, provider, adapter_type, credential_fingerprint)
+VALUES ($1, 41, '已审渠道', 'https://approved-upstream.example',
+	'OpenAI', 'openai_compatible', $2) RETURNING id
+`, merchantID,
+		"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc").Scan(&channelID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.ExecContext(ctx, `
-INSERT INTO merchant_channel_reviews
-	(merchant_newapi_user_id, application_id, canonical_model_id, channel_test_id, channel_name,
-	 base_url, provider, adapter_type, encrypted_credential, credential_fingerprint, status)
-VALUES (7, $1, $2, $3, '待审渠道', 'https://pending-upstream.example',
-	'OpenAI', 'openai_compatible', 'encrypted', $4, 'pending')
-`, pendingApplicationID, modelID, pendingTestID, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.QueryRowContext(ctx, `
-INSERT INTO merchant_channel_reviews
-	(merchant_newapi_user_id, merchant_profile_id, application_id, canonical_model_id, channel_test_id,
-	 channel_name, base_url, provider, adapter_type, credential_fingerprint, status)
-VALUES (8, $1, $2, $3, $4, '已审渠道', 'https://approved-upstream.example',
-	'OpenAI', 'openai_compatible', $5, 'approved') RETURNING id
-`, merchantID, approvedApplicationID, modelID, approvedTestID,
-		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").Scan(&approvedReviewID); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.QueryRowContext(ctx, `
-INSERT INTO merchant_channels
-	(merchant_profile_id, review_id, canonical_model_id, newapi_channel_id, channel_name,
-	 base_url, provider, adapter_type, credential_fingerprint)
-VALUES ($1, $2, $3, 41, '已审渠道', 'https://approved-upstream.example',
-	'OpenAI', 'openai_compatible', $4) RETURNING id
-`, merchantID, approvedReviewID, modelID,
-		"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc").Scan(&channelID); err != nil {
+INSERT INTO merchant_channel_model_bindings
+    (merchant_channel_id, upstream_model_name, canonical_model_id, match_status,
+     health_state, automatic_check_failures, next_check_at)
+VALUES ($1, 'gpt-4o-mini', $2, 'matched', 'cooling', 1, $3)
+`, channelID, modelID, now); err != nil {
 		t.Fatal(err)
 	}
 	const alias = "mkt-ov-0123456789abcdef01234567"
@@ -158,12 +123,6 @@ VALUES ($1, $2, $3, 9000, 1, 'active', 8, $4) RETURNING id
 INSERT INTO offer_channel_aliases (offer_version_id, merchant_channel_id, internal_alias)
 VALUES ($1, $2, $3)
 `, offerID, channelID, alias); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.ExecContext(ctx, `
-INSERT INTO channel_health (merchant_channel_id, state, next_probe_at, cooldown_until)
-VALUES ($1, 'cooling', $2, $2)
-`, channelID, now); err != nil {
 		t.Fatal(err)
 	}
 	var routingPolicyID int64
@@ -252,10 +211,10 @@ SELECT id, 'offer_mapping_missing', '{}'::jsonb FROM settlement_sources WHERE ne
 	if snapshot.TodayGrossQuota != 900 || snapshot.TodayMerchantQuota != 810 || snapshot.TodayPlatformQuota != 90 || snapshot.TodayRefundQuota != 100 {
 		t.Fatalf("总览整数账务=%+v", snapshot)
 	}
-	if snapshot.TodayRequestCount != 2 || snapshot.TodaySuccessfulRequests != 1 || snapshot.PendingMerchantApplications != 1 || snapshot.PendingChannelReviews != 1 || snapshot.PendingWithdrawals != 1 || snapshot.OpenReconciliation != 1 {
+	if snapshot.TodayRequestCount != 2 || snapshot.TodaySuccessfulRequests != 1 || snapshot.PendingMerchantApplications != 1 || snapshot.PendingWithdrawals != 1 || snapshot.OpenReconciliation != 1 {
 		t.Fatalf("总览请求与待办=%+v", snapshot)
 	}
-	if snapshot.TotalChannels != 1 || snapshot.ActiveChannels != 1 || snapshot.CoolingChannels != 1 || snapshot.DisabledChannels != 0 || !snapshot.PaymentEnabled || snapshot.LastSyncedThrough == 0 || snapshot.LastSyncSuccessAt == nil {
+	if snapshot.TotalChannels != 1 || snapshot.ActiveChannels != 0 || snapshot.CoolingModels != 1 || snapshot.ErrorModels != 0 || !snapshot.PaymentEnabled || snapshot.LastSyncedThrough == 0 || snapshot.LastSyncSuccessAt == nil {
 		t.Fatalf("总览运行状态=%+v", snapshot)
 	}
 

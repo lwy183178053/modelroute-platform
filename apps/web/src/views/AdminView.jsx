@@ -57,11 +57,9 @@ function successRate(successful, total) {
 function AdminOverview({ data, error, loading, reload, setSection }) {
   const summary = data?.summary || {};
   const pendingCount = Number(summary.pending_merchant_applications || 0)
-    + Number(summary.pending_channel_reviews || 0)
     + Number(summary.pending_withdrawals || 0);
-  const channelAttention = Number(summary.pending_channel_reviews || 0)
-    + Number(summary.cooling_channels || 0)
-    + Number(summary.disabled_channels || 0);
+  const channelAttention = Number(summary.cooling_models || 0)
+    + Number(summary.error_models || 0);
   const syncHealthy = !summary.last_sync_error;
 
   if (loading) return <div className="table-message">正在读取运营总览</div>;
@@ -71,8 +69,8 @@ function AdminOverview({ data, error, loading, reload, setSection }) {
     <>
       <div className="metrics-grid admin-metrics">
         <Metric label="今日平台成交" value={formatQuota(summary.today_gross_quota)} hint={`平台收入 ${formatQuota(summary.today_platform_quota)}`} icon={BadgeDollarSign} />
-        <Metric label="活跃渠道" value={`${summary.active_channels || 0} / ${summary.total_channels || 0}`} hint={`${summary.cooling_channels || 0} 个冷却 · ${summary.disabled_channels || 0} 个停用`} icon={HeartPulse} tone="green" />
-        <Metric label="待处理事项" value={String(pendingCount)} hint="商户、渠道与提现" icon={ClipboardCheck} tone="amber" />
+        <Metric label="活跃渠道" value={`${summary.active_channels || 0} / ${summary.total_channels || 0}`} hint={`${summary.cooling_models || 0} 个模型冷却 · ${summary.error_models || 0} 个错误`} icon={HeartPulse} tone="green" />
+        <Metric label="待处理事项" value={String(pendingCount)} hint="商户与提现" icon={ClipboardCheck} tone="amber" />
         <Metric label="计费同步" value={syncHealthy ? '正常' : '异常'} hint={`日志延迟 ${Number(data?.sync_delay_seconds || 0)} 秒`} icon={ShieldCheck} tone="blue" />
       </div>
 
@@ -81,7 +79,7 @@ function AdminOverview({ data, error, loading, reload, setSection }) {
           <div className="task-list">
             <button onClick={() => setSection('merchants')} type="button"><span className="task-icon task-warning"><Building2 size={17} /></span><span><strong>商户入驻待审核</strong><small>等待验证或批准</small></span><Status>{summary.pending_merchant_applications || 0} 项</Status></button>
             <button onClick={() => setSection('withdrawals')} type="button"><span className="task-icon task-blue"><Landmark size={17} /></span><span><strong>提现待处理</strong><small>等待审核或确认打款</small></span><Status>{summary.pending_withdrawals || 0} 笔</Status></button>
-            <button onClick={() => setSection('channels')} type="button"><span className="task-icon task-warning"><HeartPulse size={17} /></span><span><strong>渠道待处理</strong><small>{summary.cooling_channels || 0} 个冷却，{summary.disabled_channels || 0} 个停用</small></span><Status>{channelAttention} 项</Status></button>
+            <button onClick={() => setSection('channels')} type="button"><span className="task-icon task-warning"><HeartPulse size={17} /></span><span><strong>模型状态关注</strong><small>{summary.cooling_models || 0} 个冷却，{summary.error_models || 0} 个错误</small></span><Status>{channelAttention} 项</Status></button>
           </div>
         </Section>
 
@@ -130,7 +128,7 @@ export default function AdminView({ section, setSection, openModal, notify }) {
     const summary = overview?.summary || {};
     const counts = {
       merchants: Number(summary.pending_merchant_applications || 0),
-      channels: Number(summary.pending_channel_reviews || 0) + Number(summary.cooling_channels || 0) + Number(summary.disabled_channels || 0),
+      channels: Number(summary.cooling_models || 0) + Number(summary.error_models || 0),
       withdrawals: Number(summary.pending_withdrawals || 0),
     };
     return baseSections.map((item) => ({ ...item, count: counts[item.id] || 0 }));

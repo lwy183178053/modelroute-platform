@@ -44,19 +44,41 @@ func (d *NewAPIChannelDetector) Test(ctx context.Context, request ChannelTestReq
 	return ChannelTestOutcome{}, fmt.Errorf("全部适配器检测失败：%w", errors.Join(attempts...))
 }
 
-func (d *NewAPIChannelDetector) testAdapter(ctx context.Context, request ChannelTestRequest, adapter channelAdapter) (int, error) {
+func (d *NewAPIChannelDetector) TestExisting(ctx context.Context, channelID int, model CanonicalModel) (ChannelTestOutcome, error) {
+	if d == nil || d.admin == nil || channelID <= 0 || model.ID <= 0 {
+		return ChannelTestOutcome{}, errors.New("正式渠道模型检测参数无效")
+	}
+	started := time.Now()
+	_, err := d.admin.Do(ctx, http.MethodGet, channelModelTestPath(channelID, model), nil)
+	latency := int(time.Since(started).Milliseconds())
+	if latency < 1 {
+		latency = 1
+	}
+	if err != nil {
+		return ChannelTestOutcome{LatencyMS: latency}, err
+	}
+	return ChannelTestOutcome{Capabilities: []string{model.Price.PriceKind}, LatencyMS: latency}, nil
+}
+
+func channelModelTestPath(channelID int, model CanonicalModel) string {
+	testQuery := url.Values{"model": {model.PublicName}}
+	if model.Price.PriceKind == "image" {
+		testQuery.Set("endpoint_type", "image-generation")
+	}
+	return fmt.Sprintf("/api/channel/test/%d?%s", channelID, testQuery.Encode())
+}
+
+func (d *NewAPIChannelDetector) createTemporaryChannel(ctx context.Context, baseURL, apiKey string, adapter channelAdapter, models []string) (int, error) {
 	name, err := temporaryChannelName()
 	if err != nil {
 		return 0, err
 	}
-	baseURL := newAPIChannelBaseURL(adapter.channelType, request.BaseURL)
 	if _, err := d.admin.Do(ctx, http.MethodPost, "/api/channel/", map[string]any{
 		"mode": "single",
 		"channel": map[string]any{
-			"type": adapter.channelType, "key": request.APIKey, "name": name,
-			"base_url": baseURL, "models": request.Model.PublicName,
-			"group": "default", "status": 1, "test_model": request.Model.PublicName,
-			"tag": "modelroute-channel-test",
+			"type": adapter.channelType, "key": apiKey, "name": name,
+			"base_url": newAPIChannelBaseURL(adapter.channelType, baseURL), "models": strings.Join(models, ","),
+			"group": "default", "status": 1, "test_model": models[0], "tag": "modelroute-channel-test",
 		},
 	}); err != nil {
 		return 0, fmt.Errorf("创建临时渠道：%w", err)
@@ -75,13 +97,16 @@ func (d *NewAPIChannelDetector) testAdapter(ctx context.Context, request Channel
 	if err := json.Unmarshal(data, &result); err != nil || len(result.Items) == 0 || result.Items[0].ID <= 0 {
 		return 0, errors.New("临时渠道编号缺失")
 	}
-	channelID := result.Items[0].ID
-	started := time.Now()
-	testQuery := url.Values{"model": {request.Model.PublicName}}
-	if request.Model.Price.PriceKind == "image" {
-		testQuery.Set("endpoint_type", "image-generation")
+	return result.Items[0].ID, nil
+}
+
+func (d *NewAPIChannelDetector) testAdapter(ctx context.Context, request ChannelTestRequest, adapter channelAdapter) (int, error) {
+	channelID, err := d.createTemporaryChannel(ctx, request.BaseURL, request.APIKey, adapter, []string{request.Model.PublicName})
+	if err != nil {
+		return 0, err
 	}
-	_, testErr := d.admin.Do(ctx, http.MethodGet, fmt.Sprintf("/api/channel/test/%d?%s", channelID, testQuery.Encode()), nil)
+	started := time.Now()
+	_, testErr := d.admin.Do(ctx, http.MethodGet, channelModelTestPath(channelID, request.Model), nil)
 	latency := int(time.Since(started).Milliseconds())
 	if latency < 1 {
 		latency = 1

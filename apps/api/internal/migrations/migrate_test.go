@@ -18,8 +18,8 @@ func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Files() 返回错误：%v", err)
 	}
-	if len(files) != 11 {
-		t.Fatalf("V2 必须包含十一份连续迁移，实际 = %d", len(files))
+	if len(files) != 12 {
+		t.Fatalf("V2 必须包含十二份连续迁移，实际 = %d", len(files))
 	}
 	file := files[0]
 	if file.Version != 1 || file.Name != "000001_v2_baseline.sql" {
@@ -183,6 +183,23 @@ func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
 	}
 	if strings.Contains(files[10].SQL, "DELETE FROM routing_decisions") {
 		t.Fatal("单厂商密钥迁移不得删除历史调用路由记录")
+	}
+	for _, fragment := range []string{
+		"health_state text NOT NULL DEFAULT 'pending'",
+		"consecutive_request_failures integer NOT NULL DEFAULT 0",
+		"automatic_check_failures integer NOT NULL DEFAULT 0",
+		"next_check_at timestamptz",
+		"deleted_at timestamptz",
+		"DROP TABLE merchant_channel_reviews",
+		"DROP TABLE merchant_review_model_bindings",
+		"DROP TABLE channel_health",
+	} {
+		if !strings.Contains(files[11].SQL, fragment) {
+			t.Fatalf("逐模型健康迁移缺少 %q", fragment)
+		}
+	}
+	if strings.Contains(files[11].SQL, "merchant_channel_test_receipts") {
+		t.Fatal("逐模型检查迁移不应保留批量检测凭证表")
 	}
 }
 

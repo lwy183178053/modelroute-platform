@@ -484,32 +484,6 @@ func (s *server) merchantOffers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": offers})
 }
 
-func (s *server) adminResetChannelHealth(w http.ResponseWriter, r *http.Request) {
-	_, _, ok := s.requireSession(w, r, roleAdmin)
-	if !ok || !s.requireSameOrigin(w, r) || !s.routingReady(w, false) || s.services.AdminNewAPI == nil {
-		return
-	}
-	channelID, ok := pathInt64(w, r, "id", "渠道编号无效")
-	if !ok {
-		return
-	}
-	newAPIChannelID, err := s.services.Routing.ChannelForHealthReset(r.Context(), channelID)
-	if err != nil {
-		writeAPIError(w, http.StatusNotFound, "channel_not_found", "渠道不存在")
-		return
-	}
-	if _, err := s.services.AdminNewAPI.Do(r.Context(), http.MethodPost, "/api/channel/"+strconv.Itoa(newAPIChannelID)+"/status", map[string]int{"status": 1}); err != nil {
-		writeAPIError(w, http.StatusBadGateway, "channel_enable_failed", "恢复 New API 渠道失败")
-		return
-	}
-	if err := s.services.Routing.ResetChannelHealth(r.Context(), channelID); err != nil {
-		_, _ = s.services.AdminNewAPI.Do(r.Context(), http.MethodPost, "/api/channel/"+strconv.Itoa(newAPIChannelID)+"/status", map[string]int{"status": 2})
-		writeAPIError(w, http.StatusInternalServerError, "channel_reset_failed", "恢复平台渠道失败")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"channel_id": channelID, "health_state": "pending"}})
-}
-
 func (s *server) bindTokenRoutes(r *http.Request, userID int, cookie string, tokenID int, provider string, policyIDs []int64) (TokenRoutingBinding, error) {
 	if s.services.Credentials == nil {
 		return TokenRoutingBinding{}, errors.New("密钥指纹服务尚未就绪")

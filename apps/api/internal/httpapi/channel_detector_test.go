@@ -106,3 +106,17 @@ func TestNewAPIChannelDetectorUsesImageEndpointForImageModels(t *testing.T) {
 		t.Fatal("图片模型未调用渠道检测")
 	}
 }
+
+func TestExistingChannelDetectorUsesFormalChannelModelTest(t *testing.T) {
+	admin := &imageChannelDetectorAdminStub{}
+	detector := NewNewAPIChannelDetector(admin)
+	result, err := detector.TestExisting(context.Background(), 51, CanonicalModel{
+		ID: 71, PublicName: "gpt-image-1", Provider: "OpenAI", Price: OfficialPrice{PriceKind: "image"},
+	})
+	if err != nil || result.LatencyMS < 1 {
+		t.Fatalf("正式渠道检查结果=%+v，错误=%v", result, err)
+	}
+	if !strings.Contains(admin.testPath, "model=gpt-image-1") || !strings.Contains(admin.testPath, "endpoint_type=image-generation") {
+		t.Fatalf("正式渠道检查路径=%s", admin.testPath)
+	}
+}

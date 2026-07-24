@@ -31,8 +31,6 @@ type routingRepositoryStub struct {
 	revokeToken        func(context.Context, int, int) error
 	listOffers         func(context.Context, int, string) ([]MarketOffer, error)
 	listMerchantOffers func(context.Context, int) ([]MerchantOfferView, error)
-	prepareHealth      func(context.Context, int64) (int, error)
-	resetHealth        func(context.Context, int64) error
 	listModels         func(context.Context) ([]CanonicalModel, error)
 	deleteModel        func(context.Context, int64) (string, error)
 	previewRoute       func(context.Context, RoutingPreviewInput) (RoutingPreview, error)
@@ -107,14 +105,6 @@ func (s *routingRepositoryStub) ListMarketOffers(ctx context.Context, userID int
 
 func (s *routingRepositoryStub) ListMerchantOffers(ctx context.Context, userID int) ([]MerchantOfferView, error) {
 	return s.listMerchantOffers(ctx, userID)
-}
-
-func (s *routingRepositoryStub) ChannelForHealthReset(ctx context.Context, channelID int64) (int, error) {
-	return s.prepareHealth(ctx, channelID)
-}
-
-func (s *routingRepositoryStub) ResetChannelHealth(ctx context.Context, channelID int64) error {
-	return s.resetHealth(ctx, channelID)
 }
 
 func (s *routingRepositoryStub) RevokeTokenBinding(ctx context.Context, userID int, tokenID int) error {
@@ -862,47 +852,5 @@ func TestMerchantOffersReturnAggregateAndChannelCacheMetrics(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"cache_hit_ppm":720000`) || !strings.Contains(response.Body.String(), `"cache_hit_ppm":680000`) {
 		t.Fatalf("商户模型缓存响应=%d %s", response.Code, response.Body.String())
-	}
-}
-
-type adminStatusStub struct {
-	channelID int
-}
-
-func (s *adminStatusStub) Do(_ context.Context, method string, path string, body any) ([]byte, error) {
-	if method != http.MethodPost || path != "/api/channel/41/status" || body.(map[string]int)["status"] != 1 {
-		return nil, fmt.Errorf("恢复 New API 参数=%s %s %v", method, path, body)
-	}
-	s.channelID = 41
-	return []byte(`true`), nil
-}
-
-func TestAdminHealthResetEnablesNewAPIBeforePlatformChannel(t *testing.T) {
-	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	repository := &routingRepositoryStub{}
-	admin := &adminStatusStub{}
-	repository.prepareHealth = func(_ context.Context, channelID int64) (int, error) {
-		if channelID != 51 {
-			t.Fatalf("准备恢复渠道=%d", channelID)
-		}
-		return 41, nil
-	}
-	repository.resetHealth = func(_ context.Context, channelID int64) error {
-		if channelID != 51 || admin.channelID != 41 {
-			t.Fatalf("平台恢复早于 New API：channel=%d upstream=%d", channelID, admin.channelID)
-		}
-		return nil
-	}
-	services.Routing = repository
-	services.AdminNewAPI = admin
-	token := createPlatformSession(t, services, 1, 100)
-	handler := NewServerWithServices("test", Dependencies{}, services)
-	request := httptest.NewRequest(http.MethodPost, "/api/admin/channels/51/health/reset", nil)
-	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
-	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("恢复响应=%d %s", response.Code, response.Body.String())
 	}
 }

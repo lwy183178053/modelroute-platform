@@ -435,11 +435,11 @@ func truncateSettlementTables(t *testing.T, database *sql.DB) {
 	_, err := database.Exec(`
 TRUNCATE merchant_ledger_entries, settlement_refund_allocations,
          settlement_reconciliation_items, settlement_sources, merchant_withdrawals,
-         merchant_balances, channel_health_events, performance_rollups, routing_decisions,
-         routing_policies, token_bindings, channel_health,
+         merchant_balances, channel_model_health_events, routing_decisions,
+         routing_policies, token_bindings,
          offer_channel_aliases, offer_versions, text_price_tiers, image_price_items,
-         official_price_versions, merchant_channels, merchant_channel_reviews,
-         merchant_channel_tests, merchant_profiles, merchant_applications, canonical_models
+         official_price_versions, merchant_channel_model_bindings, merchant_channels,
+         merchant_profiles, merchant_applications, canonical_models
 RESTART IDENTITY CASCADE
 `)
 	if err != nil {
@@ -481,7 +481,7 @@ VALUES ($1, 1, 0, 1000000, 1000000)
 		t.Fatal(err)
 	}
 
-	var applicationID, merchantID, testID, reviewID, channelID int64
+	var applicationID, merchantID, channelID int64
 	if err := database.QueryRow(`
 INSERT INTO merchant_applications
     (newapi_user_id, display_name, display_name_key, website_url, business_description, status)
@@ -497,34 +497,19 @@ VALUES (17, $1, '结算测试商户', 'https://merchant.test', 1) RETURNING id
 		t.Fatal(err)
 	}
 	if err := database.QueryRow(`
-INSERT INTO merchant_channel_tests
-    (newapi_user_id, canonical_model_id, base_url, credential_fingerprint, adapter_type,
-     capabilities, latency_ms, receipt_token_hash, expires_at, consumed_at)
-VALUES (17, $1, 'https://upstream.test', $2, 'openai_compatible',
-        '["chat_completions"]'::jsonb, 10, $3, now() + interval '15 minutes', now())
-RETURNING id
-`, modelID, strings64("d"), strings64("f")).Scan(&testID); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.QueryRow(`
-INSERT INTO merchant_channel_reviews
-	(merchant_newapi_user_id, merchant_profile_id, application_id, canonical_model_id,
-	 channel_test_id, channel_name, base_url, adapter_type, credential_fingerprint, status)
-VALUES (17, $1, $2, $3, $4, '结算测试渠道', 'https://upstream.test',
-	'openai_compatible', $5, 'approved') RETURNING id
-`, merchantID, applicationID, modelID, testID, strings64("d")).Scan(&reviewID); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.QueryRow(`
 INSERT INTO merchant_channels
-	(merchant_profile_id, review_id, canonical_model_id, newapi_channel_id, channel_name,
-	 base_url, adapter_type, credential_fingerprint)
-VALUES ($1, $2, $3, $4, '结算测试渠道', 'https://upstream.test', 'openai_compatible', $5)
+	(merchant_profile_id, newapi_channel_id, channel_name, base_url, provider,
+	 adapter_type, credential_fingerprint)
+VALUES ($1, $2, '结算测试渠道', 'https://upstream.test', 'OpenAI', 'openai_compatible', $3)
 RETURNING id
-`, merchantID, reviewID, modelID, newAPIChannelID, strings64("e")).Scan(&channelID); err != nil {
+`, merchantID, newAPIChannelID, strings64("e")).Scan(&channelID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Exec(`INSERT INTO channel_health (merchant_channel_id) VALUES ($1)`, channelID); err != nil {
+	if _, err := database.Exec(`
+INSERT INTO merchant_channel_model_bindings
+    (merchant_channel_id, upstream_model_name, canonical_model_id, match_status, health_state)
+VALUES ($1, 'gpt-test', $2, 'matched', 'healthy')
+`, channelID, modelID); err != nil {
 		t.Fatal(err)
 	}
 	var offerID int64

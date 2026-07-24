@@ -95,6 +95,7 @@ func buildHTTPServices(database *sql.DB, redisClient *redis.Client, cfg config.C
 	routing := httpapi.NewSQLRoutingStore(database)
 	payments := httpapi.NewSQLPaymentStore(database)
 	settlement := httpapi.NewSQLSettlementStore(database)
+	channelDetector := httpapi.NewNewAPIChannelDetector(adminNewAPI)
 	services := httpapi.Services{
 		Sessions:      platformauth.NewStore(redisClient, cfg.SessionTTL),
 		NewAPI:        newAPIClient,
@@ -102,7 +103,7 @@ func buildHTTPServices(database *sql.DB, redisClient *redis.Client, cfg config.C
 		AdminUsername: cfg.NewAPIAdminUsername,
 		Merchants:     httpapi.NewSQLMerchantStore(database),
 		Credentials:   credentials,
-		ChannelTests:  httpapi.NewNewAPIChannelDetector(adminNewAPI),
+		ChannelTests:  channelDetector,
 		Routing:       routing,
 		OfferSync:     httpapi.NewPriceSynchronizer(routing, adminNewAPI),
 		RouteMetrics:  routing,
@@ -120,7 +121,7 @@ func buildHTTPServices(database *sql.DB, redisClient *redis.Client, cfg config.C
 			MaxAge:       cfg.SessionTTL,
 		},
 	}
-	services.Health = httpapi.NewHealthRunner(routing, adminNewAPI, newAPIClient, adminNewAPI)
+	services.Health = httpapi.NewHealthRunner(routing, channelDetector)
 	services.PaymentCredit = httpapi.NewPaymentCreditRunner(payments, adminNewAPI)
 	services.SettlementSync = httpapi.NewSettlementSyncRunner(settlement, adminNewAPI)
 	return services, nil

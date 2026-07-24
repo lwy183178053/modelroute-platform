@@ -315,7 +315,12 @@ items = data.get("data", []) if isinstance(data, dict) else data
 assert isinstance(items, list) and len(items) == 0
 PY
 
-curl -fsS -b "$COOKIE_JAR" -H "Origin: $BASE_URL" -X DELETE "$BASE_URL/api/keys/$KEY_ID" >"$WORK_DIR/delete-key.json"
+cleanup
+REMAINING_TOKEN_COUNT="$(docker compose --env-file .env exec -T postgres \
+  psql -At -U "$POSTGRES_SUPERUSER" -d "$NEWAPI_DB_NAME" \
+  -c "SELECT count(1) FROM tokens WHERE id = $KEY_ID AND name = '$KEY_NAME'" </dev/null)"
+test "$REMAINING_TOKEN_COUNT" = "0"
+trap - EXIT INT TERM
 KEY_ID=""
 
 echo "单厂商密钥与模型路由契约验证通过"

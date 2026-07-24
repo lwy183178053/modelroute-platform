@@ -91,6 +91,7 @@ class ReleaseToolContractTest(unittest.TestCase):
             'assert "*" in str(match.get("key", ""))',
             "SELECT key FROM tokens WHERE id = $KEY_ID",
             "DELETE FROM tokens WHERE id = $KEY_ID AND name = '$KEY_NAME'",
+            'test "$REMAINING_TOKEN_COUNT" = "0"',
             'assert int(policy["minimum_multiplier_bps"]) == 0',
             'assert int(policy["maximum_multiplier_bps"]) == 50000',
             '"minimum_multiplier_bps": 0',

@@ -85,12 +85,14 @@ async function mockAdminAPI(targetPage, state, account = null) {
       return json({ success: true, data: [
         { id: 101, public_name: 'gpt-4o-mini', provider: 'OpenAI', status: 'active', price: { id: 501, version: 2, price_kind: 'text', tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 150000, output_price_micros: 600000, cache_read_price_micros: 75000, cache_write_price_micros: 200000 }] } },
         { id: 102, public_name: 'gpt-4o-legacy', provider: 'OpenAI', status: 'archived', price: { id: 502, version: 1, price_kind: 'text', tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 300000, output_price_micros: 1200000 }] } },
+        { id: 103, public_name: 'claude-opus-4.8', provider: 'Anthropic', status: 'active', price: { id: 503, version: 1, price_kind: 'text', tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 900000, output_price_micros: 4500000 }] } },
       ] });
     }
     if (url.pathname === '/api/offers') {
       return json({ success: true, data: [
         { offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', model: 'gpt-4o-mini', multiplier_bps: 7200, call_count: 32400, token_usage: 2600000000, last_called_at: new Date(Date.now() - 10 * 60_000).toISOString(), price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 108000, output_price_micros: 432000, cache_read_price_micros: 54000, cache_write_price_micros: 144000 }], channel_count: 1, health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200, cache_hit_ppm: 720000, cache_sample_input_tokens: 2000000, cache_weight_ready: true },
         { offer_id: 202, merchant_id: 32, merchant_name: '矩阵算力', model: 'gpt-4o-mini', multiplier_bps: 5800, call_count: 1200, token_usage: 640000, last_called_at: new Date(Date.now() - 2 * 60 * 60_000).toISOString(), price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 87000, output_price_micros: 348000, cache_read_price_micros: 43500, cache_write_price_micros: 116000 }], channel_count: 1, health_state: 'degraded', availability_ppm: 987500, ttft_p95_ms: 1650, cache_hit_ppm: 0, cache_sample_input_tokens: 320000, cache_weight_ready: false },
+        { offer_id: 203, merchant_id: 33, merchant_name: '星河模型', model: 'claude-opus-4.8', multiplier_bps: 8500, call_count: 80, token_usage: 120000, last_called_at: new Date(Date.now() - 30 * 60_000).toISOString(), price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 765000, output_price_micros: 3825000 }], channel_count: 1, health_state: 'healthy', availability_ppm: 999000, ttft_p95_ms: 1400, cache_hit_ppm: 0, cache_sample_input_tokens: 0, cache_weight_ready: false },
       ] });
     }
     if (url.pathname === '/api/keys' && request.method() === 'GET') {
@@ -423,6 +425,17 @@ try {
   await page.getByText('平台管理员').waitFor();
   await page.getByText('gpt-4o-mini').first().waitFor();
   await page.getByText('北辰云智').first().waitFor();
+  const modelPills = page.getByRole('group', { name: '具体模型' });
+  assert(await modelPills.getByRole('button', { name: '全部模型', exact: true }).count() === 1, '模型筛选缺少全部模型');
+  assert(await modelPills.getByRole('button', { name: 'gpt-4o-mini', exact: true }).count() === 1, '模型筛选缺少可用 OpenAI 模型');
+  assert(await modelPills.getByRole('button', { name: 'claude-opus-4.8', exact: true }).count() === 1, '模型筛选缺少可用 Anthropic 模型');
+  await modelPills.getByRole('button', { name: 'gpt-4o-mini', exact: true }).click();
+  assert(await page.locator('.market-table tbody tr').count() === 2, '选择具体模型后报价行未按模型筛选');
+  await page.getByRole('group', { name: '模型厂商' }).getByRole('button', { name: 'Anthropic', exact: true }).click();
+  assert(await modelPills.getByRole('button', { name: 'gpt-4o-mini', exact: true }).count() === 0, '切换厂商后仍显示其他厂商模型');
+  assert((await modelPills.locator('button.active').textContent()).trim() === '全部模型', '切换厂商后没有重置模型筛选');
+  assert(await page.locator('.market-table tbody tr').count() === 1, '切换厂商后报价行未按厂商筛选');
+  await page.getByRole('group', { name: '模型厂商' }).getByRole('button', { name: '全部', exact: true }).click();
   for (const label of ['缓存命中率', '调用次数', 'Token 用量', '最后调用']) {
     assert(await page.getByRole('columnheader', { name: label, exact: true }).count() === 1, `模型市场缺少${label}列名`);
   }
@@ -838,6 +851,10 @@ try {
     quota: 500000, used_quota: 120000, is_merchant: true, merchant_id: 31, merchant_status: 'active',
   });
   await merchantPage.goto(baseUrl, { waitUntil: 'networkidle' });
+  const mobileModelPills = merchantPage.getByRole('group', { name: '具体模型' });
+  await mobileModelPills.getByRole('button', { name: '全部模型', exact: true }).waitFor();
+  assert(await mobileModelPills.evaluate((element) => getComputedStyle(element).flexWrap === 'wrap'), '移动端具体模型筛选没有自动换行');
+  assert(await merchantPage.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), '移动端模型市场出现页面级横向溢出');
   assert(await merchantPage.getByRole('button', { name: '管理后台', exact: true }).count() === 0, '普通商户显示了管理后台入口');
   await merchantPage.getByRole('button', { name: '打开菜单' }).click();
   await merchantPage.getByRole('button', { name: '商户中心', exact: true }).click();

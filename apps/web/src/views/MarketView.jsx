@@ -39,6 +39,7 @@ export default function MarketView({ navigate }) {
   const [models, setModels] = useState([]);
   const [marketOffers, setMarketOffers] = useState([]);
   const [provider, setProvider] = useState('全部');
+  const [modelFilter, setModelFilter] = useState('全部模型');
   const [sort, setSort] = useState('stability');
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
@@ -64,11 +65,19 @@ export default function MarketView({ navigate }) {
     () => ['全部', ...new Set(models.map((model) => model.provider).filter(Boolean))],
     [models],
   );
+  const modelOptions = useMemo(() => {
+    const availableModels = new Set(marketOffers.filter((offer) => Number(offer.channel_count || 0) > 0).map((offer) => offer.model));
+    return models
+      .filter((model) => model.status === 'active' && availableModels.has(model.public_name))
+      .filter((model) => provider === '全部' || model.provider === provider)
+      .map((model) => model.public_name);
+  }, [marketOffers, models, provider]);
   const offers = useMemo(() => {
     const filtered = marketOffers.filter((offer) => {
       if (Number(offer.channel_count || 0) <= 0) return false;
       const model = modelMap.get(offer.model);
       return (provider === '全部' || model?.provider === provider)
+        && (modelFilter === '全部模型' || offer.model === modelFilter)
         && `${offer.model}${offer.merchant_name}${offer.channel_name}`.toLowerCase().includes(query.trim().toLowerCase());
     });
     return [...filtered].sort((left, right) => {
@@ -76,9 +85,9 @@ export default function MarketView({ navigate }) {
       if (sort === 'availability') return right.availability_ppm - left.availability_ppm;
       return right.availability_ppm - left.availability_ppm || left.ttft_p95_ms - right.ttft_p95_ms || offerInputPrice(left) - offerInputPrice(right);
     });
-  }, [marketOffers, modelMap, provider, query, sort]);
+  }, [marketOffers, modelFilter, modelMap, provider, query, sort]);
 
-  useEffect(() => { setPage(1); }, [provider, sort, query]);
+  useEffect(() => { setPage(1); }, [modelFilter, provider, sort, query]);
 
   const visibleOffers = offers.slice((page - 1) * pageSize, page * pageSize);
 
@@ -116,11 +125,16 @@ export default function MarketView({ navigate }) {
           </Select>
         </div>
 
-        <div className="provider-pills" aria-label="模型厂商">
+        <div className="provider-pills" aria-label="模型厂商" role="group">
           {providers.map((item) => (
-            <button className={provider === item ? 'active' : ''} key={item} onClick={() => setProvider(item)} type="button">
+            <button className={provider === item ? 'active' : ''} key={item} onClick={() => { setProvider(item); setModelFilter('全部模型'); }} type="button">
               {item !== '全部' && <ProviderLogo provider={item} size={17} />}{item}
             </button>
+          ))}
+        </div>
+        <div className="model-pills" aria-label="具体模型" role="group">
+          {['全部模型', ...modelOptions].map((item) => (
+            <button className={modelFilter === item ? 'active' : ''} key={item} onClick={() => setModelFilter(item)} type="button">{item}</button>
           ))}
         </div>
 

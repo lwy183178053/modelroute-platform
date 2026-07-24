@@ -122,7 +122,7 @@ main { min-height: calc(100vh - 66px); }
 .section-header { min-height: 68px; padding: 15px 18px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .section-header h2 { margin: 0; font-size: 16px; line-height: 24px; }
 .section-header p { margin: 2px 0 0; color: var(--muted); font-size: 12px; line-height: 18px; }
-.section > :not(.section-header):not(.table-wrap):not(.filter-toolbar):not(.provider-pills):not(.pagination) { margin-left: 18px; margin-right: 18px; }
+.section > :not(.section-header):not(.table-wrap):not(.filter-toolbar):not(.provider-pills):not(.model-pills):not(.pagination) { margin-left: 18px; margin-right: 18px; }
 
 .table-wrap { width: 100%; overflow-x: auto; }
 .data-table { width: 100%; min-width: 980px; border-collapse: collapse; text-align: left; }
@@ -179,6 +179,10 @@ main { min-height: calc(100vh - 66px); }
 .provider-pills button { min-height: 32px; padding: 5px 11px; border: 1px solid var(--line); border-radius: 16px; background: #f6f8f8; display: flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12px; }
 .provider-pills button:hover { border-color: #a9c7c1; }
 .provider-pills button.active { border-color: var(--teal); background: var(--teal); color: white; }
+.model-pills { padding: 0 18px 14px; display: flex; flex-wrap: wrap; gap: 7px; }
+.model-pills button { min-height: 32px; padding: 5px 11px; border: 1px solid var(--line); border-radius: 16px; background: #f6f8f8; font-size: 12px; }
+.model-pills button:hover { border-color: #a9c7c1; }
+.model-pills button.active { border-color: var(--teal); background: var(--teal); color: white; }
 .market-table-wrap { border-top: 1px solid var(--line); }
 .market-table { min-width: 1260px; }
 .market-table td { height: 76px; }
@@ -437,13 +441,14 @@ main { min-height: calc(100vh - 66px); }
   .section-header { min-height: 62px; padding: 12px; align-items: flex-start; }
   .section-header h2 { font-size: 14px; }
   .section-actions { justify-content: flex-end; }
-  .section > :not(.section-header):not(.table-wrap):not(.filter-toolbar):not(.provider-pills):not(.pagination) { margin-left: 12px; margin-right: 12px; }
+  .section > :not(.section-header):not(.table-wrap):not(.filter-toolbar):not(.provider-pills):not(.model-pills):not(.pagination) { margin-left: 12px; margin-right: 12px; }
   .filter-toolbar { padding: 12px; display: grid; grid-template-columns: 1fr 1fr; }
   .filter-search { width: 100%; min-width: 0; grid-column: 1 / -1; }
   .search-box { grid-column: 1 / -1; }
   .select-wrap { min-width: 0; width: 100%; }
   .filter-toolbar > .button { grid-column: 1 / -1; }
   .provider-pills { padding: 0 12px 12px; }
+  .model-pills { padding: 0 12px 12px; }
   .account-settings-content { padding: 16px 12px; grid-template-columns: 1fr; gap: 20px; }
   .account-identity { padding-right: 0; padding-bottom: 20px; border-right: 0; border-bottom: 1px solid var(--line); }
   .account-details-heading { min-height: 34px; }

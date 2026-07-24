@@ -3046,3 +3046,25 @@
 - `docs/商户与渠道审核接口.md`：记录批量验证的异步接口和状态边界。
 - `progress.md`：追加生产 504 根因、修复、验证和回滚说明。
 - 回滚点：前一提交为 `3cdf835dab83`；执行 `git revert <本轮补丁提交>` 可恢复同步验证行为。本轮不改数据库结构，生产中卡住的 ID 1 只需恢复到待审核后重新触发。
+
+## 2026-07-24 - Task: 发布渠道审核修复到 103
+
+### What was done
+
+- 发布候选 `3cdf835dab83` 后在真实 ID 1 复现旧同步批量验证的 60 秒 `504`，据此完成异步补丁 `4ad2ea845834` 并重新发布，生产 `current` 已原子切换到该版本。
+- 定点恢复 ID 1 的旧 `verifying` 遗留状态后重新触发验证；接口在 0 秒内返回 `202`，后台约 90 秒完成顺序检测，最终 8 个已匹配型号中 5 个通过、3 个失败。
+- 真实调用“通过”接口成功创建正式渠道 ID 1；渠道状态为启用，只导入 5 个验证成功型号，审核记录进入 `approved`，待审密钥密文已清除。
+
+### Testing
+
+- 新发布目录内外网 `deploy/scripts/verify.sh` 均通过；线上 `/api/version` 返回 `4ad2ea845834`。
+- 生产 `POST /api/admin/channel-reviews/1/verify` 返回 `202` 且耗时小于 1 秒，后台最终状态为 `verified`；`POST /api/admin/channel-reviews/1/approve` 返回 `200`。
+- 数据核对结果为 `approved | 渠道 ID 1 | active | 5 个型号 | 待审密钥已清除`。
+- 六个 ModelRoute 容器运行，五个带健康检查的容器均为 `healthy`；API 与 Worker 最近 10 分钟无 `panic/fatal`。
+- `api.lwylink.xyz`、`sdk.lwylink.xyz` 均返回 `200`；Sub2API、PostgreSQL 和 Redis 三个既有容器保持健康。
+
+### Notes
+
+- `progress.md`：追加真实 504 复现、异步验证、审批、版本、容器和隔离验收证据。
+- 生产发布目录：`/opt/modelroute-platform/releases/4ad2ea845834`，上一稳定指针为 `/opt/modelroute-platform/releases/e4d271672264`。
+- 代码回滚可把 `current` 切回 `e4d271672264` 后执行其部署脚本；本轮没有数据库迁移。正式渠道 ID 1 是本次验收产生的业务数据，代码回滚不会自动删除，可在管理后台下架或删除。

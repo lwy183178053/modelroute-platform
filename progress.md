@@ -3425,3 +3425,26 @@
 - `docs/账号与管理员接口.md`：记录密钥编号识别与单 API 实例约束。
 - `progress.md`：追加本轮检查、修复、验证证据和回滚点。
 - 回滚点：本轮前一提交为 `f3920b31e90d`；执行 `git revert <本轮提交哈希>` 可回退本轮修复。本轮没有数据库迁移，不影响现有账号、密钥、路由、渠道或调用记录数据。
+
+## 2026-07-24 - Task: 发布项目检查修复到 103
+
+### What was done
+
+- 将提交 `7767f69f428a` 生成不可变发布归档并上传到 103，服务器目录为 `/opt/modelroute-platform/releases/7767f69f428a`；保留共享 `.env`、数据和备份目录，未执行数据库重置。
+- 使用新目录重新构建平台 API、Worker、模型种子和网关，模型种子结果为新增 `0`、调价 `0`、未变化 `21`；完成后原子切换 `current` 到新发布目录。
+- 将提交推送到远端分支 `codex/full-platform`。
+
+### Testing
+
+- 本地与服务器发布归档 SHA-256 均为 `59546a5f8d81be633a5d695d2a2cedb2288de03d672af73620f37a651e4879b4`。
+- 新目录内网、公网 `verify.sh`：通过；`/api/version` 内外网均返回 `7767f69f428a`。
+- 账号、商户、单厂商密钥与模型路由、提现、运营五组生产契约：全部通过，契约测试临时密钥和路由已清理。
+- 只读压力测试 `REQUESTS=200 CONCURRENCY=10`：`200/200` 成功，平均 `0.0016s`，P95 `0.003869s`。
+- `current` 指向 `/opt/modelroute-platform/releases/7767f69f428a`；网关、New API、平台 API、Worker、PostgreSQL 和 Redis 均运行，带健康检查的服务为 healthy；`aggregate.lwylink.xyz`、`api.lwylink.xyz`、`sdk.lwylink.xyz` 均返回 `200`。
+- 最近 10 分钟平台 API、Worker 和 New API 日志无 `panic/fatal`。
+
+### Notes
+
+- `progress.md`：追加本次生产发布、专项契约、压力测试、稳定窗口和回滚点。
+- 生产发布目录：`/opt/modelroute-platform/releases/7767f69f428a`。
+- 回滚点：`/opt/modelroute-platform/releases/6772cc72c6ef`；可创建指向该目录的临时软链接并使用 `mv -Tf` 原子切回，再执行旧目录的 `deploy/scripts/deploy.sh` 和 `verify.sh`。本轮无数据库迁移，代码回滚不会改变账号、密钥、路由、渠道或调用记录。

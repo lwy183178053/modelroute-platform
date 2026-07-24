@@ -161,14 +161,17 @@ function PaymentModal({ close, config, notify }) {
   const [methods, setMethods] = useState(setting.payment_methods || ['alipay', 'wxpay']);
   const [minimumCNY, setMinimumCNY] = useState(String(Number(setting.minimum_cny_cents || 100) / 100));
   const [maximumCNY, setMaximumCNY] = useState(String(Number(setting.maximum_cny_cents || 2000000) / 100));
+  const [withdrawalTaxRate, setWithdrawalTaxRate] = useState(String(Number(setting.withdrawal_tax_bps ?? 300) / 100));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const toggleMethod = (method) => setMethods((current) => current.includes(method) ? current.filter((item) => item !== method) : [...current, method]);
   const submit = async () => {
     const minimumCNYCents = Math.round(Number(minimumCNY) * 100);
     const maximumCNYCents = Math.round(Number(maximumCNY) * 100);
-    if (!gatewayURL.trim() || methods.length === 0 || !Number.isInteger(minimumCNYCents) || !Number.isInteger(maximumCNYCents) || minimumCNYCents <= 0 || maximumCNYCents < minimumCNYCents) {
-      setError('请检查网关、支付方式和人民币充值范围');
+    const withdrawalTaxFormatOK = /^(?:100(?:\.0{1,2})?|\d{1,2}(?:\.\d{1,2})?)$/.test(withdrawalTaxRate.trim());
+    const withdrawalTaxBPS = Math.round(Number(withdrawalTaxRate) * 100);
+    if (!gatewayURL.trim() || methods.length === 0 || !Number.isInteger(minimumCNYCents) || !Number.isInteger(maximumCNYCents) || minimumCNYCents <= 0 || maximumCNYCents < minimumCNYCents || !withdrawalTaxFormatOK || withdrawalTaxBPS < 0 || withdrawalTaxBPS > 10_000) {
+      setError('请检查网关、支付方式、人民币充值范围和提现税率');
       return;
     }
     setBusy(true);
@@ -177,7 +180,7 @@ function PaymentModal({ close, config, notify }) {
       await apiRequest('/api/admin/payment-settings', { method: 'PUT', body: {
         gateway_url: gatewayURL.trim(), merchant_pid: merchantPID.trim(), merchant_key: merchantKey,
         enabled, payment_methods: methods, minimum_cny_cents: minimumCNYCents,
-        maximum_cny_cents: maximumCNYCents,
+        maximum_cny_cents: maximumCNYCents, withdrawal_tax_bps: withdrawalTaxBPS,
       } });
       await config.onSaved?.();
       notify('支付配置已保存为新版本');
@@ -198,6 +201,7 @@ function PaymentModal({ close, config, notify }) {
         <Field label="支付状态"><Select onChange={(event) => setEnabled(event.target.value === 'enabled')} value={enabled ? 'enabled' : 'disabled'}><option value="enabled">启用</option><option value="disabled">停用</option></Select></Field>
         <Field label="最低充值金额（人民币）"><TextInput min="0.01" onChange={(event) => setMinimumCNY(event.target.value)} step="0.01" type="number" value={minimumCNY} /></Field>
         <Field label="最高充值金额（人民币）"><TextInput min="0.01" onChange={(event) => setMaximumCNY(event.target.value)} step="0.01" type="number" value={maximumCNY} /></Field>
+        <Field label="提现税率（%）" hint="范围 0.00% - 100.00%，最多两位小数"><div className="suffix-input"><TextInput max="100" min="0" onChange={(event) => setWithdrawalTaxRate(event.target.value)} step="0.01" type="number" value={withdrawalTaxRate} /><span>%</span></div></Field>
       </div>
       <Field label="已启用支付方式"><div className="checkbox-line">{[['alipay', '支付宝'], ['wxpay', '微信'], ['qqpay', 'QQ 钱包']].map(([value, label]) => <label key={value}><input checked={methods.includes(value)} onChange={() => toggleMethod(value)} type="checkbox" />{label}</label>)}</div></Field>
       <InlineNotice tone="warning">保存会锁定为新配置版本；已创建订单继续使用原版本验签和金额。</InlineNotice>
@@ -407,13 +411,26 @@ function ChannelModal({ close, config, notify }) {
 function WithdrawalModal({ close, config, notify }) {
   const [amount, setAmount] = useState('');
   const [recipientAccount, setRecipientAccount] = useState('');
+  const [withdrawalTaxBPS, setWithdrawalTaxBPS] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  useEffect(() => {
+    let active = true;
+    apiRequest('/api/payment-settings').then((data) => {
+      const taxBPS = Number(data.withdrawal_tax_bps);
+      if (!Number.isInteger(taxBPS) || taxBPS < 0 || taxBPS > 10_000) throw new Error('提现税率配置无效');
+      if (active) setWithdrawalTaxBPS(taxBPS);
+    }).catch((requestError) => {
+      if (active) setError(requestError.message || '读取提现税率失败');
+    });
+    return () => { active = false; };
+  }, []);
   const availableQuota = Number(config.balance?.available_quota || 0);
   const amountYuan = Number(amount);
   const quotaPerUnit = getQuotaPerUnit();
   const amountQuota = Number.isInteger(amountYuan) ? amountYuan * quotaPerUnit : 0;
-  const taxQuota = amountQuota * 3 / 100;
+  const taxReady = Number.isInteger(withdrawalTaxBPS);
+  const taxQuota = taxReady ? Math.floor(amountQuota * withdrawalTaxBPS / 10_000) : 0;
   const netPayoutQuota = amountQuota - taxQuota;
   const submit = async () => {
     if (!Number.isInteger(amountYuan) || !Number.isSafeInteger(amountQuota) || amountYuan < 50 || amountQuota > availableQuota) {
@@ -441,10 +458,10 @@ function WithdrawalModal({ close, config, notify }) {
     }
   };
   return (
-    <Modal title="申请人工提现" description="提现收取 3% 税费，申请后冻结完整金额，由管理员审核并通过支付宝打款。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy} icon={Landmark} onClick={submit} variant="primary">{busy ? '提交中' : '提交提现申请'}</Button></>}>
+    <Modal title="申请人工提现" description={taxReady ? `提现收取 ${(withdrawalTaxBPS / 100).toFixed(2)}% 税费，申请后冻结完整金额，由管理员审核并通过支付宝打款。` : '正在读取当前提现税率。'} onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !taxReady} icon={Landmark} onClick={submit} variant="primary">{busy ? '提交中' : '提交提现申请'}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
       <Field label="提现金额（人民币）" hint={`当前可提现 ${formatQuota(availableQuota)}，最低 50 元且只支持整数`}><div className="prefix-input"><span>¥</span><TextInput max={Math.floor(availableQuota / quotaPerUnit)} min="50" onChange={(event) => setAmount(event.target.value)} step="1" type="number" value={amount} /></div></Field>
-      <div className="withdrawal-summary"><span>申请金额<strong>{formatQuota(amountQuota)}</strong></span><span>税费（3%）<strong>{formatQuota(taxQuota)}</strong></span><span>预计到账<strong>{formatQuota(netPayoutQuota)}</strong></span></div>
+      <div className="withdrawal-summary"><span>申请金额<strong>{formatQuota(amountQuota)}</strong></span><span>税费（{taxReady ? `${(withdrawalTaxBPS / 100).toFixed(2)}%` : '-'}）<strong>{taxReady ? formatQuota(taxQuota) : '-'}</strong></span><span>预计到账<strong>{taxReady ? formatQuota(netPayoutQuota) : '-'}</strong></span></div>
       <Field label="支付宝账户" hint="账户信息加密保存，仅管理员处理打款时可见"><TextInput maxLength="256" onChange={(event) => setRecipientAccount(event.target.value)} value={recipientAccount} /></Field>
     </Modal>
   );

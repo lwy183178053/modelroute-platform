@@ -28,6 +28,7 @@ type paymentSettingView struct {
 	PaymentMethods    []string  `json:"payment_methods"`
 	MinimumCNYCents   int64     `json:"minimum_cny_cents"`
 	MaximumCNYCents   int64     `json:"maximum_cny_cents"`
+	WithdrawalTaxBPS  int64     `json:"withdrawal_tax_bps"`
 	Enabled           bool      `json:"enabled"`
 	NotifyURL         string    `json:"notify_url"`
 	ReturnURL         string    `json:"return_url"`
@@ -35,11 +36,12 @@ type paymentSettingView struct {
 }
 
 type publicPaymentSettingView struct {
-	Version         int      `json:"version"`
-	PaymentMethods  []string `json:"payment_methods"`
-	MinimumCNYCents int64    `json:"minimum_cny_cents"`
-	MaximumCNYCents int64    `json:"maximum_cny_cents"`
-	Enabled         bool     `json:"enabled"`
+	Version          int      `json:"version"`
+	PaymentMethods   []string `json:"payment_methods"`
+	MinimumCNYCents  int64    `json:"minimum_cny_cents"`
+	MaximumCNYCents  int64    `json:"maximum_cny_cents"`
+	WithdrawalTaxBPS int64    `json:"withdrawal_tax_bps"`
+	Enabled          bool     `json:"enabled"`
 }
 
 func (s *server) paymentSettings(w http.ResponseWriter, r *http.Request) {
@@ -54,7 +56,8 @@ func (s *server) paymentSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": publicPaymentSettingView{
 		Version: setting.Version, PaymentMethods: setting.PaymentMethods,
 		MinimumCNYCents: setting.MinimumCNYCents, MaximumCNYCents: setting.MaximumCNYCents,
-		Enabled: setting.Enabled,
+		WithdrawalTaxBPS: setting.WithdrawalTaxBPS,
+		Enabled:          setting.Enabled,
 	}})
 }
 
@@ -225,13 +228,14 @@ func (s *server) adminCreatePaymentSetting(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var request struct {
-		GatewayURL      string   `json:"gateway_url"`
-		MerchantPID     string   `json:"merchant_pid"`
-		MerchantKey     string   `json:"merchant_key"`
-		Enabled         bool     `json:"enabled"`
-		PaymentMethods  []string `json:"payment_methods"`
-		MinimumCNYCents int64    `json:"minimum_cny_cents"`
-		MaximumCNYCents int64    `json:"maximum_cny_cents"`
+		GatewayURL       string   `json:"gateway_url"`
+		MerchantPID      string   `json:"merchant_pid"`
+		MerchantKey      string   `json:"merchant_key"`
+		Enabled          bool     `json:"enabled"`
+		PaymentMethods   []string `json:"payment_methods"`
+		MinimumCNYCents  int64    `json:"minimum_cny_cents"`
+		MaximumCNYCents  int64    `json:"maximum_cny_cents"`
+		WithdrawalTaxBPS int64    `json:"withdrawal_tax_bps"`
 	}
 	if err := decodeJSON(r, &request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_payment_setting", "支付配置参数无效")
@@ -254,7 +258,7 @@ func (s *server) adminCreatePaymentSetting(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	if err != nil || pid == "" || len(pid) > 128 || !methodsOK || request.MinimumCNYCents <= 0 ||
-		request.MaximumCNYCents < request.MinimumCNYCents {
+		request.MaximumCNYCents < request.MinimumCNYCents || request.WithdrawalTaxBPS < 0 || request.WithdrawalTaxBPS > 10_000 {
 		writeAPIError(w, http.StatusBadRequest, "invalid_payment_setting", "支付配置参数无效")
 		return
 	}
@@ -275,8 +279,9 @@ func (s *server) adminCreatePaymentSetting(w http.ResponseWriter, r *http.Reques
 	setting, err := s.services.Payments.CreatePaymentSetting(r.Context(), CreatePaymentSettingCommand{
 		AdminUserID: session.UserID, GatewayURL: gatewayURL, MerchantPID: pid, EncryptedKey: encryptedKey,
 		KeyFingerprint: fingerprint, PaymentMethods: methods, MinimumCNYCents: request.MinimumCNYCents,
-		MaximumCNYCents: request.MaximumCNYCents,
-		Enabled:         request.Enabled,
+		MaximumCNYCents:  request.MaximumCNYCents,
+		WithdrawalTaxBPS: request.WithdrawalTaxBPS,
+		Enabled:          request.Enabled,
 	})
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "payment_setting_save_failed", "保存支付配置失败")
@@ -417,8 +422,8 @@ func (s *server) paymentSettingView(setting PaymentSetting) paymentSettingView {
 		ID: setting.ID, Version: setting.Version, GatewayURL: setting.GatewayURL,
 		MerchantPIDMasked: maskPaymentPID(setting.MerchantPID), KeyConfigured: len(setting.EncryptedKey) > 0,
 		PaymentMethods: setting.PaymentMethods, MinimumCNYCents: setting.MinimumCNYCents,
-		MaximumCNYCents: setting.MaximumCNYCents,
-		Enabled:         setting.Enabled, NotifyURL: s.services.Cookie.PublicOrigin + "/api/payments/easypay/notify",
+		MaximumCNYCents: setting.MaximumCNYCents, WithdrawalTaxBPS: setting.WithdrawalTaxBPS,
+		Enabled: setting.Enabled, NotifyURL: s.services.Cookie.PublicOrigin + "/api/payments/easypay/notify",
 		ReturnURL: s.services.Cookie.PublicOrigin + "/payments/return", CreatedAt: setting.CreatedAt,
 	}
 }

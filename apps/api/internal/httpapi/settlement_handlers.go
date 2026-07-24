@@ -53,7 +53,12 @@ func (s *server) createMerchantWithdrawal(w http.ResponseWriter, r *http.Request
 		return
 	}
 	request.RecipientAccount = strings.TrimSpace(request.RecipientAccount)
-	if _, _, ok := withdrawalBreakdown(request.AmountQuota, s.services.QuotaPerUnit); !ok {
+	setting, err := s.currentPaymentSetting(r)
+	if err != nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "withdrawal_tax_unavailable", "提现税率尚未配置")
+		return
+	}
+	if _, _, ok := withdrawalBreakdown(request.AmountQuota, s.services.QuotaPerUnit, setting.WithdrawalTaxBPS); !ok {
 		writeAPIError(w, http.StatusBadRequest, "invalid_withdrawal_amount", "提现金额必须为不低于 50 元的整数")
 		return
 	}
@@ -76,7 +81,7 @@ func (s *server) createMerchantWithdrawal(w http.ResponseWriter, r *http.Request
 	}
 	withdrawal, err := s.services.Settlement.CreateMerchantWithdrawal(r.Context(), CreateMerchantWithdrawalCommand{
 		WithdrawalNo: withdrawalNo, UserID: session.UserID, AmountQuota: request.AmountQuota,
-		QuotaPerUnit:  s.services.QuotaPerUnit,
+		QuotaPerUnit: s.services.QuotaPerUnit, WithdrawalTaxBPS: setting.WithdrawalTaxBPS,
 		RecipientType: "alipay", EncryptedRecipientAccount: encrypted,
 		RecipientAccountMasked: maskRecipientAccount(request.RecipientAccount), CreatedAt: now,
 	})

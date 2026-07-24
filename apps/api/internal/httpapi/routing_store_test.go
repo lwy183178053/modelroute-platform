@@ -155,7 +155,7 @@ func TestListTokenRoutingBindingsReturnsPlatformRouteIdentity(t *testing.T) {
 	}
 }
 
-func TestResolveRouteKeepsInsufficientCacheSampleAndFiltersKnownLowValue(t *testing.T) {
+func TestResolveRouteFiltersInsufficientCacheSampleAndKnownLowValue(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +177,7 @@ func TestResolveRouteKeepsInsufficientCacheSampleAndFiltersKnownLowValue(t *test
 			AddRow(42, 82, 32, 52, 72, 61, "mkt-o42-c52", "gpt-5.6", 8500, "healthy", 980000, 900, 100, 500000, 2000000, true, 500000, true))
 
 	selection, err := NewSQLRoutingStore(database).ResolveRoute(context.Background(), fingerprint, "gpt-5.6")
-	if err != nil || len(selection.Candidates) != 1 || selection.Candidates[0].MerchantID != 31 {
+	if err != nil || len(selection.Candidates) != 0 {
 		t.Fatalf("缓存阈值候选=%+v err=%v", selection.Candidates, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

@@ -169,8 +169,8 @@ VALUES ($1, 'cooling', $2, $2)
 	var routingPolicyID int64
 	if err := database.QueryRowContext(ctx, `
 INSERT INTO routing_policies
-    (newapi_user_id, name, mode, priority, minimum_multiplier_bps, maximum_multiplier_bps)
-VALUES (7, '运营测试路由', 'smart', 'success', 0, 50000)
+	(newapi_user_id, name, priority, minimum_multiplier_bps, maximum_multiplier_bps)
+VALUES (7, '运营测试路由', 'success', 0, 50000)
 RETURNING id
 `).Scan(&routingPolicyID); err != nil {
 		t.Fatal(err)
@@ -183,18 +183,18 @@ VALUES (9, 7, $1, $2)
 	}
 	if _, err := database.ExecContext(ctx, `
 INSERT INTO routing_decisions
-    (request_id, token_binding_id, routing_policy_id, canonical_model_id, mode, priority,
-     algorithm_version, candidate_count, selected_metrics, result, upstream_status_code, created_at)
-SELECT 'req-ok', id, $1, $2, 'smart', 'success', 'weighted-v1', 1, '{}'::jsonb,
+	(request_id, token_binding_id, routing_policy_id, canonical_model_id, priority,
+	 algorithm_version, candidate_count, selected_metrics, result, upstream_status_code, created_at)
+SELECT 'req-ok', id, $1, $2, 'success', 'weighted-v1', 1, '{}'::jsonb,
        'completed', 200, $3 FROM token_bindings WHERE newapi_token_id = 9
 `, routingPolicyID, modelID, now.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.ExecContext(ctx, `
 INSERT INTO routing_decisions
-    (request_id, token_binding_id, routing_policy_id, canonical_model_id, mode, priority,
-     algorithm_version, candidate_count, selected_metrics, result, upstream_status_code, created_at)
-SELECT 'req-error', id, $1, $2, 'smart', 'success', 'weighted-v1', 1, '{}'::jsonb,
+	(request_id, token_binding_id, routing_policy_id, canonical_model_id, priority,
+	 algorithm_version, candidate_count, selected_metrics, result, upstream_status_code, created_at)
+SELECT 'req-error', id, $1, $2, 'success', 'weighted-v1', 1, '{}'::jsonb,
        'completed', 500, $3 FROM token_bindings WHERE newapi_token_id = 9
 `, routingPolicyID, modelID, now.Add(-time.Minute)); err != nil {
 		t.Fatal(err)

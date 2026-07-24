@@ -10,8 +10,8 @@ func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Files() 返回错误：%v", err)
 	}
-	if len(files) != 7 {
-		t.Fatalf("V2 动态额度单位必须包含七份连续迁移，实际 = %d", len(files))
+	if len(files) != 8 {
+		t.Fatalf("V2 必须包含八份连续迁移，实际 = %d", len(files))
 	}
 	file := files[0]
 	if file.Version != 1 || file.Name != "000001_v2_baseline.sql" {
@@ -127,6 +127,15 @@ func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
 	} {
 		if !strings.Contains(files[6].SQL, fragment) {
 			t.Fatalf("动态额度单位迁移缺少 %q", fragment)
+		}
+	}
+	for _, fragment := range []string{
+		"ADD COLUMN withdrawal_tax_bps integer NOT NULL DEFAULT 300",
+		"withdrawal_tax_bps BETWEEN 0 AND 10000",
+		"amount_quota * withdrawal_tax_bps / 10000",
+	} {
+		if !strings.Contains(files[7].SQL, fragment) {
+			t.Fatalf("提现税率迁移缺少 %q", fragment)
 		}
 	}
 }

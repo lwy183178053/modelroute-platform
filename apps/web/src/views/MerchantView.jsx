@@ -206,7 +206,7 @@ export default function MerchantView({ account, openModal }) {
 
           {section === 'withdrawals' && <Section title="提现记录" actions={canSubmit && <Button disabled={Number(balance?.available_quota || 0) < minimumWithdrawalQuota} icon={Landmark} variant="primary" onClick={() => openModal({ type: 'withdraw', balance, onSaved: load })}>申请提现</Button>}>
             {Number(balance?.available_quota || 0) < minimumWithdrawalQuota && <InlineNotice tone="warning">可提现余额满 ¥50.00 后开放申请，还差 {formatQuota(minimumWithdrawalQuota - Number(balance?.available_quota || 0))}。</InlineNotice>}
-            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>申请号</th><th>申请金额</th><th>税费（3%）</th><th>实际到账</th><th>支付宝账户</th><th>状态</th><th>申请时间</th></tr></thead><tbody>
+          <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>申请号</th><th>申请金额</th><th>税费</th><th>实际到账</th><th>支付宝账户</th><th>状态</th><th>申请时间</th></tr></thead><tbody>
               {withdrawals.map((item) => <tr key={item.id}><td><code>{item.id}</code></td><td><code>{item.withdrawal_no}</code></td><td><strong>{formatQuota(item.amount_quota)}</strong></td><td>{formatQuota(item.tax_quota)}</td><td><strong>{formatQuota(item.net_payout_quota)}</strong></td><td><code>{item.recipient_account_masked}</code></td><td><Status>{withdrawalStatusNames[item.status] || item.status}</Status></td><td>{formatDate(item.created_at)}</td></tr>)}
               {!loading && withdrawals.length === 0 && <tr><td className="table-message" colSpan="8">暂无提现申请</td></tr>}
             </tbody></table></div>

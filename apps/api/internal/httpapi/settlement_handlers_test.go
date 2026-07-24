@@ -28,10 +28,10 @@ func (s *settlementRepositoryStub) MerchantWithdrawals(context.Context, int, int
 
 func (s *settlementRepositoryStub) CreateMerchantWithdrawal(_ context.Context, command CreateMerchantWithdrawalCommand) (MerchantWithdrawal, error) {
 	s.created = command
-	taxQuota, netPayoutQuota, _ := withdrawalBreakdown(command.AmountQuota, command.QuotaPerUnit)
+	taxQuota, netPayoutQuota, _ := withdrawalBreakdown(command.AmountQuota, command.QuotaPerUnit, command.WithdrawalTaxBPS)
 	return MerchantWithdrawal{
 		ID: 8, WithdrawalNo: command.WithdrawalNo, MerchantID: 31, AmountQuota: command.AmountQuota,
-		TaxQuota: taxQuota, NetPayoutQuota: netPayoutQuota,
+		WithdrawalTaxBPS: command.WithdrawalTaxBPS, TaxQuota: taxQuota, NetPayoutQuota: netPayoutQuota,
 		RecipientType: command.RecipientType, RecipientAccountMasked: command.RecipientAccountMasked,
 		Status: "pending", CreatedAt: command.CreatedAt,
 	}, nil
@@ -64,6 +64,9 @@ func TestMerchantWithdrawalEncryptsRecipientAndReturnsOnlyMask(t *testing.T) {
 	}}
 	services.Credentials = testCredentialBox(t)
 	services.Settlement = repository
+	services.Payments = &paymentRepositoryStub{currentSetting: func(context.Context) (PaymentSetting, error) {
+		return PaymentSetting{WithdrawalTaxBPS: 750}, nil
+	}}
 	token := createPlatformSession(t, services, 7, 1)
 	handler := NewServerWithServices("test", Dependencies{}, services)
 	account := "13800132621"
@@ -85,7 +88,7 @@ func TestMerchantWithdrawalEncryptsRecipientAndReturnsOnlyMask(t *testing.T) {
 	if repository.created.RecipientType != "alipay" {
 		t.Fatalf("提现收款方式=%q，期望固定为 alipay", repository.created.RecipientType)
 	}
-	if !strings.Contains(response.Body.String(), `"tax_quota":750000`) || !strings.Contains(response.Body.String(), `"net_payout_quota":24250000`) {
+	if repository.created.WithdrawalTaxBPS != 750 || !strings.Contains(response.Body.String(), `"withdrawal_tax_bps":750`) || !strings.Contains(response.Body.String(), `"tax_quota":1875000`) || !strings.Contains(response.Body.String(), `"net_payout_quota":23125000`) {
 		t.Fatalf("提现响应缺少税费或实际到账金额：%s", response.Body.String())
 	}
 }
@@ -97,6 +100,9 @@ func TestMerchantWithdrawalRejectsInvalidAmountsAndLegacyRecipientType(t *testin
 	}}
 	services.Credentials = testCredentialBox(t)
 	services.Settlement = &settlementRepositoryStub{}
+	services.Payments = &paymentRepositoryStub{currentSetting: func(context.Context) (PaymentSetting, error) {
+		return PaymentSetting{WithdrawalTaxBPS: 300}, nil
+	}}
 	token := createPlatformSession(t, services, 7, 1)
 	handler := NewServerWithServices("test", Dependencies{}, services)
 

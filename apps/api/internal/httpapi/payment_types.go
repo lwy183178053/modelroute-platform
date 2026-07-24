@@ -13,29 +13,31 @@ var (
 )
 
 type PaymentSetting struct {
-	ID              int64     `json:"id"`
-	Version         int       `json:"version"`
-	GatewayURL      string    `json:"gateway_url"`
-	MerchantPID     string    `json:"-"`
-	EncryptedKey    []byte    `json:"-"`
-	KeyFingerprint  string    `json:"-"`
-	PaymentMethods  []string  `json:"payment_methods"`
-	MinimumCNYCents int64     `json:"minimum_cny_cents"`
-	MaximumCNYCents int64     `json:"maximum_cny_cents"`
-	Enabled         bool      `json:"enabled"`
-	CreatedAt       time.Time `json:"created_at"`
+	ID               int64     `json:"id"`
+	Version          int       `json:"version"`
+	GatewayURL       string    `json:"gateway_url"`
+	MerchantPID      string    `json:"-"`
+	EncryptedKey     []byte    `json:"-"`
+	KeyFingerprint   string    `json:"-"`
+	PaymentMethods   []string  `json:"payment_methods"`
+	MinimumCNYCents  int64     `json:"minimum_cny_cents"`
+	MaximumCNYCents  int64     `json:"maximum_cny_cents"`
+	WithdrawalTaxBPS int64     `json:"withdrawal_tax_bps"`
+	Enabled          bool      `json:"enabled"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 type CreatePaymentSettingCommand struct {
-	AdminUserID     int
-	GatewayURL      string
-	MerchantPID     string
-	EncryptedKey    []byte
-	KeyFingerprint  string
-	PaymentMethods  []string
-	MinimumCNYCents int64
-	MaximumCNYCents int64
-	Enabled         bool
+	AdminUserID      int
+	GatewayURL       string
+	MerchantPID      string
+	EncryptedKey     []byte
+	KeyFingerprint   string
+	PaymentMethods   []string
+	MinimumCNYCents  int64
+	MaximumCNYCents  int64
+	WithdrawalTaxBPS int64
+	Enabled          bool
 }
 
 type PaymentOrder struct {

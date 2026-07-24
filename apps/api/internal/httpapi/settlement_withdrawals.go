@@ -9,7 +9,7 @@ import (
 )
 
 const merchantWithdrawalColumns = `
-id, withdrawal_no, merchant_profile_id, amount_quota, tax_quota, net_payout_quota, available_before_quota,
+id, withdrawal_no, merchant_profile_id, amount_quota, withdrawal_tax_bps, tax_quota, net_payout_quota, available_before_quota,
 recipient_type, encrypted_recipient_account, recipient_account_masked, status,
 COALESCE(review_reason, ''), COALESCE(reviewed_by_newapi_user_id, 0), reviewed_at,
 COALESCE(payout_reference, ''), COALESCE(payout_proof, ''),
@@ -129,7 +129,7 @@ ORDER BY w.id DESC LIMIT $3 OFFSET $4
 }
 
 func (s *SQLSettlementStore) CreateMerchantWithdrawal(ctx context.Context, command CreateMerchantWithdrawalCommand) (MerchantWithdrawal, error) {
-	if _, _, ok := withdrawalBreakdown(command.AmountQuota, command.QuotaPerUnit); command.UserID <= 0 || command.WithdrawalNo == "" || !ok || command.RecipientType != "alipay" || len(command.EncryptedRecipientAccount) == 0 || command.RecipientAccountMasked == "" {
+	if _, _, ok := withdrawalBreakdown(command.AmountQuota, command.QuotaPerUnit, command.WithdrawalTaxBPS); command.UserID <= 0 || command.WithdrawalNo == "" || !ok || command.RecipientType != "alipay" || len(command.EncryptedRecipientAccount) == 0 || command.RecipientAccountMasked == "" {
 		return MerchantWithdrawal{}, ErrSettlementConflict
 	}
 	tx, err := s.database.BeginTx(ctx, nil)
@@ -161,11 +161,11 @@ SELECT available_quota, frozen_quota FROM merchant_balances WHERE merchant_profi
 	}
 	withdrawal, err := scanWithdrawal(tx.QueryRowContext(ctx, `
 INSERT INTO merchant_withdrawals
-    (withdrawal_no, merchant_profile_id, amount_quota, available_before_quota,
-     recipient_type, encrypted_recipient_account, recipient_account_masked, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+	    (withdrawal_no, merchant_profile_id, amount_quota, withdrawal_tax_bps, available_before_quota,
+	     recipient_type, encrypted_recipient_account, recipient_account_masked, created_at, updated_at)
+	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
 RETURNING `+merchantWithdrawalColumns,
-		command.WithdrawalNo, merchantID, command.AmountQuota, availableBefore, command.RecipientType,
+		command.WithdrawalNo, merchantID, command.AmountQuota, command.WithdrawalTaxBPS, availableBefore, command.RecipientType,
 		command.EncryptedRecipientAccount, command.RecipientAccountMasked, command.CreatedAt))
 	if err != nil {
 		return MerchantWithdrawal{}, fmt.Errorf("创建提现申请：%w", err)
@@ -328,7 +328,7 @@ func scanWithdrawal(scanner withdrawalScanner) (MerchantWithdrawal, error) {
 	var item MerchantWithdrawal
 	err := scanner.Scan(
 		&item.ID, &item.WithdrawalNo, &item.MerchantID, &item.AmountQuota,
-		&item.TaxQuota, &item.NetPayoutQuota, &item.AvailableBeforeQuota, &item.RecipientType, &item.EncryptedRecipientAccount,
+		&item.WithdrawalTaxBPS, &item.TaxQuota, &item.NetPayoutQuota, &item.AvailableBeforeQuota, &item.RecipientType, &item.EncryptedRecipientAccount,
 		&item.RecipientAccountMasked, &item.Status, &item.ReviewReason, &item.ReviewedByUserID,
 		&item.ReviewedAt, &item.PayoutReference, &item.PayoutProof, &item.PaidByUserID,
 		&item.PaidAt, &item.CreatedAt, &item.UpdatedAt,
@@ -340,7 +340,7 @@ func scanWithdrawalWithName(scanner withdrawalScanner) (MerchantWithdrawal, erro
 	var item MerchantWithdrawal
 	err := scanner.Scan(
 		&item.ID, &item.WithdrawalNo, &item.MerchantID, &item.AmountQuota,
-		&item.TaxQuota, &item.NetPayoutQuota, &item.AvailableBeforeQuota, &item.RecipientType, &item.EncryptedRecipientAccount,
+		&item.WithdrawalTaxBPS, &item.TaxQuota, &item.NetPayoutQuota, &item.AvailableBeforeQuota, &item.RecipientType, &item.EncryptedRecipientAccount,
 		&item.RecipientAccountMasked, &item.Status, &item.ReviewReason, &item.ReviewedByUserID,
 		&item.ReviewedAt, &item.PayoutReference, &item.PayoutProof, &item.PaidByUserID,
 		&item.PaidAt, &item.CreatedAt, &item.UpdatedAt, &item.MerchantName,
@@ -353,7 +353,7 @@ func scanWithdrawalWithName(scanner withdrawalScanner) (MerchantWithdrawal, erro
 
 func prefixedWithdrawalColumns(prefix string) string {
 	return prefix + `.id, ` + prefix + `.withdrawal_no, ` + prefix + `.merchant_profile_id, ` +
-		prefix + `.amount_quota, ` + prefix + `.tax_quota, ` + prefix + `.net_payout_quota, ` + prefix + `.available_before_quota, ` + prefix + `.recipient_type, ` +
+		prefix + `.amount_quota, ` + prefix + `.withdrawal_tax_bps, ` + prefix + `.tax_quota, ` + prefix + `.net_payout_quota, ` + prefix + `.available_before_quota, ` + prefix + `.recipient_type, ` +
 		prefix + `.encrypted_recipient_account, ` + prefix + `.recipient_account_masked, ` + prefix + `.status, ` +
 		`COALESCE(` + prefix + `.review_reason, ''), COALESCE(` + prefix + `.reviewed_by_newapi_user_id, 0), ` + prefix + `.reviewed_at, ` +
 		`COALESCE(` + prefix + `.payout_reference, ''), COALESCE(` + prefix + `.payout_proof, ''), ` +

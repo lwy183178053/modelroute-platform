@@ -73,7 +73,7 @@ func TestAdminCreatesEncryptedImmutablePaymentSetting(t *testing.T) {
 	repository := &paymentRepositoryStub{}
 	repository.currentSetting = func(context.Context) (PaymentSetting, error) { return PaymentSetting{}, ErrPaymentNotConfigured }
 	repository.createSetting = func(_ context.Context, command CreatePaymentSettingCommand) (PaymentSetting, error) {
-		if command.AdminUserID != 1 || command.GatewayURL != "https://zpayz.cn" || command.MerchantPID != "1001" {
+		if command.AdminUserID != 1 || command.GatewayURL != "https://zpayz.cn" || command.MerchantPID != "1001" || command.WithdrawalTaxBPS != 750 {
 			t.Fatalf("支付配置参数=%+v", command)
 		}
 		if strings.Contains(string(command.EncryptedKey), secret) || len(command.EncryptedKey) == 0 || len(command.KeyFingerprint) != 64 {
@@ -83,8 +83,8 @@ func TestAdminCreatesEncryptedImmutablePaymentSetting(t *testing.T) {
 			ID: 11, Version: 1, GatewayURL: command.GatewayURL, MerchantPID: command.MerchantPID,
 			EncryptedKey: command.EncryptedKey, KeyFingerprint: command.KeyFingerprint,
 			PaymentMethods: command.PaymentMethods, MinimumCNYCents: command.MinimumCNYCents,
-			MaximumCNYCents: command.MaximumCNYCents,
-			Enabled:         command.Enabled, CreatedAt: time.Date(2026, 7, 22, 9, 0, 0, 0, time.UTC),
+			MaximumCNYCents: command.MaximumCNYCents, WithdrawalTaxBPS: command.WithdrawalTaxBPS,
+			Enabled: command.Enabled, CreatedAt: time.Date(2026, 7, 22, 9, 0, 0, 0, time.UTC),
 		}, nil
 	}
 	services.Payments = repository
@@ -94,7 +94,7 @@ func TestAdminCreatesEncryptedImmutablePaymentSetting(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPut, "/api/admin/payment-settings", strings.NewReader(`{
 		"gateway_url":"https://zpayz.cn/","merchant_pid":"1001","merchant_key":"payment-secret",
 		"enabled":true,"payment_methods":["alipay","wxpay"],"minimum_cny_cents":100,
-		"maximum_cny_cents":2000000
+		"maximum_cny_cents":2000000,"withdrawal_tax_bps":750
 	}`))
 	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
@@ -106,8 +106,34 @@ func TestAdminCreatesEncryptedImmutablePaymentSetting(t *testing.T) {
 	if strings.Contains(response.Body.String(), secret) || strings.Contains(response.Body.String(), "encrypted_key") {
 		t.Fatalf("支付配置响应泄露 KEY：%s", response.Body.String())
 	}
-	if !strings.Contains(response.Body.String(), `"key_configured":true`) || !strings.Contains(response.Body.String(), `"version":1`) {
+	if !strings.Contains(response.Body.String(), `"key_configured":true`) || !strings.Contains(response.Body.String(), `"version":1`) || !strings.Contains(response.Body.String(), `"withdrawal_tax_bps":750`) {
 		t.Fatalf("支付配置响应=%s", response.Body.String())
+	}
+}
+
+func TestAdminRejectsWithdrawalTaxOutsideRange(t *testing.T) {
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	repository := &paymentRepositoryStub{createSetting: func(context.Context, CreatePaymentSettingCommand) (PaymentSetting, error) {
+		t.Fatal("税率越界时不应保存支付配置")
+		return PaymentSetting{}, nil
+	}}
+	services.Payments = repository
+	services.Credentials = testCredentialBox(t)
+	token := createPlatformSession(t, services, 1, 100)
+	handler := NewServerWithServices("test", Dependencies{}, services)
+
+	for _, taxBPS := range []int64{-1, 10_001} {
+		t.Run(strconv.FormatInt(taxBPS, 10), func(t *testing.T) {
+			body := `{"gateway_url":"https://zpayz.cn","merchant_pid":"1001","merchant_key":"payment-secret","enabled":true,"payment_methods":["alipay"],"minimum_cny_cents":100,"maximum_cny_cents":2000000,"withdrawal_tax_bps":` + strconv.FormatInt(taxBPS, 10) + `}`
+			request := httptest.NewRequest(http.MethodPut, "/api/admin/payment-settings", strings.NewReader(body))
+			request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
+			request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_payment_setting"`) {
+				t.Fatalf("税率=%d 响应=%d %s", taxBPS, response.Code, response.Body.String())
+			}
+		})
 	}
 }
 

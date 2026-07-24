@@ -127,6 +127,9 @@ async function mockAdminAPI(targetPage, state, account = null) {
     if (url.pathname === '/api/merchant/balance' && request.method() === 'GET') {
       return json({ success: true, data: { merchant_id: 31, available_quota: 90000000, frozen_quota: 25000000, lifetime_earned_quota: 140000000, lifetime_refunded_quota: 5000000, lifetime_paid_quota: 20000000 } });
     }
+    if (url.pathname === '/api/payment-settings' && request.method() === 'GET') {
+      return json({ success: true, data: { version: 3, payment_methods: ['alipay', 'wxpay'], minimum_cny_cents: 100, maximum_cny_cents: 2000000, withdrawal_tax_bps: 750, enabled: true } });
+    }
     if (url.pathname === '/api/merchant/usage' && request.method() === 'GET') {
       state.merchantUsageQuery = Object.fromEntries(url.searchParams);
       return json({ success: true, data: {
@@ -137,13 +140,13 @@ async function mockAdminAPI(targetPage, state, account = null) {
       } });
     }
     if (url.pathname === '/api/merchant/withdrawals' && request.method() === 'GET') {
-      const items = [state.createdWithdrawal, { id: 8, withdrawal_no: 'MW202607220001', merchant_id: 31, amount_quota: 25000000, tax_quota: 750000, net_payout_quota: 24250000, available_before_quota: 90000000, recipient_type: 'alipay', recipient_account_masked: '138****2621', status: 'pending', created_at: '2026-07-22T14:00:00Z' }].filter(Boolean);
+      const items = [state.createdWithdrawal, { id: 8, withdrawal_no: 'MW202607220001', merchant_id: 31, amount_quota: 25000000, withdrawal_tax_bps: 750, tax_quota: 1875000, net_payout_quota: 23125000, available_before_quota: 90000000, recipient_type: 'alipay', recipient_account_masked: '138****2621', status: 'pending', created_at: '2026-07-22T14:00:00Z' }].filter(Boolean);
       return json({ success: true, data: { page: Number(url.searchParams.get('p') || 1), page_size: Number(url.searchParams.get('page_size') || 20), total: items.length, items } });
     }
     if (url.pathname === '/api/merchant/withdrawals' && request.method() === 'POST') {
       state.withdrawalCreateCalls += 1;
       state.withdrawalCreateBody = request.postDataJSON();
-      state.createdWithdrawal = { id: 10, withdrawal_no: 'MW202607220010', merchant_id: 31, merchant_name: 'ModelRoute 官方', amount_quota: state.withdrawalCreateBody.amount_quota, tax_quota: state.withdrawalCreateBody.amount_quota * 3 / 100, net_payout_quota: state.withdrawalCreateBody.amount_quota * 97 / 100, available_before_quota: 90000000, recipient_type: 'alipay', recipient_account_masked: '138****2621', recipient_account: state.withdrawalCreateBody.recipient_account, status: 'pending', created_at: '2026-07-22T16:00:00Z' };
+      state.createdWithdrawal = { id: 10, withdrawal_no: 'MW202607220010', merchant_id: 31, merchant_name: 'ModelRoute 官方', amount_quota: state.withdrawalCreateBody.amount_quota, withdrawal_tax_bps: 750, tax_quota: state.withdrawalCreateBody.amount_quota * 7.5 / 100, net_payout_quota: state.withdrawalCreateBody.amount_quota * 92.5 / 100, available_before_quota: 90000000, recipient_type: 'alipay', recipient_account_masked: '138****2621', recipient_account: state.withdrawalCreateBody.recipient_account, status: 'pending', created_at: '2026-07-22T16:00:00Z' };
       return json({ success: true, data: state.createdWithdrawal }, 201);
     }
     if (url.pathname === '/api/merchant/offers/101' && request.method() === 'PUT') {
@@ -309,12 +312,12 @@ async function mockAdminAPI(targetPage, state, account = null) {
       return json({ success: true, data: { channel_id: 52, health_state: 'pending' } });
     }
     if (url.pathname === '/api/admin/payment-settings' && request.method() === 'GET') {
-      return json({ success: true, data: { id: 11, version: 3, gateway_url: 'https://zpayz.cn', merchant_pid_masked: '202***********878', key_configured: true, payment_methods: ['alipay', 'wxpay'], minimum_cny_cents: 100, maximum_cny_cents: 2000000, enabled: true, notify_url: 'https://aggregate.lwylink.xyz/api/payments/easypay/notify', return_url: 'https://aggregate.lwylink.xyz/payments/return', created_at: '2026-07-22T09:00:00Z' } });
+      return json({ success: true, data: { id: 11, version: 3, gateway_url: 'https://zpayz.cn', merchant_pid_masked: '202***********878', key_configured: true, payment_methods: ['alipay', 'wxpay'], minimum_cny_cents: 100, maximum_cny_cents: 2000000, withdrawal_tax_bps: 750, enabled: true, notify_url: 'https://aggregate.lwylink.xyz/api/payments/easypay/notify', return_url: 'https://aggregate.lwylink.xyz/payments/return', created_at: '2026-07-22T09:00:00Z' } });
     }
     if (url.pathname === '/api/admin/payment-settings' && request.method() === 'PUT') {
       state.paymentSettingCalls += 1;
       state.paymentSettingBody = request.postDataJSON();
-      return json({ success: true, data: { id: 12, version: 4, gateway_url: state.paymentSettingBody.gateway_url, merchant_pid_masked: '202***********878', key_configured: true, payment_methods: state.paymentSettingBody.payment_methods, minimum_cny_cents: state.paymentSettingBody.minimum_cny_cents, maximum_cny_cents: state.paymentSettingBody.maximum_cny_cents, enabled: state.paymentSettingBody.enabled, notify_url: 'https://aggregate.lwylink.xyz/api/payments/easypay/notify', return_url: 'https://aggregate.lwylink.xyz/payments/return', created_at: '2026-07-22T10:00:00Z' } }, 201);
+      return json({ success: true, data: { id: 12, version: 4, gateway_url: state.paymentSettingBody.gateway_url, merchant_pid_masked: '202***********878', key_configured: true, payment_methods: state.paymentSettingBody.payment_methods, minimum_cny_cents: state.paymentSettingBody.minimum_cny_cents, maximum_cny_cents: state.paymentSettingBody.maximum_cny_cents, withdrawal_tax_bps: state.paymentSettingBody.withdrawal_tax_bps, enabled: state.paymentSettingBody.enabled, notify_url: 'https://aggregate.lwylink.xyz/api/payments/easypay/notify', return_url: 'https://aggregate.lwylink.xyz/payments/return', created_at: '2026-07-22T10:00:00Z' } }, 201);
     }
     if (url.pathname === '/api/admin/payment-orders' && request.method() === 'GET') {
       return json({ success: true, data: { page: 1, page_size: 50, total: 2, items: [
@@ -527,6 +530,7 @@ try {
   assert(adminMockState.merchantUsageQuery.model_name === 'gpt-4o-mini', '商户调用记录模型筛选参数不正确');
   await merchantSidebar.getByRole('button', { name: '提现记录', exact: true }).click();
   await page.getByText('MW202607220001', { exact: true }).waitFor();
+  assert(!(await page.locator('body').innerText()).includes('税费（3%）'), '商户提现记录仍显示固定 3% 税率');
   await page.getByRole('button', { name: '申请提现' }).click();
   const withdrawalDialog = page.getByRole('dialog', { name: '申请人工提现' });
   await withdrawalDialog.getByLabel('提现金额（人民币）').fill('50.5');
@@ -535,8 +539,8 @@ try {
   assert(adminMockState.withdrawalCreateCalls === 0, '小数提现金额仍提交了请求');
   await withdrawalDialog.getByLabel('提现金额（人民币）').fill('100');
   assert(await withdrawalDialog.getByLabel('收款方式').count() === 0, '提现弹窗仍提供非支付宝收款方式');
-  await withdrawalDialog.getByText('¥3.00', { exact: true }).waitFor();
-  await withdrawalDialog.getByText('¥97.00', { exact: true }).waitFor();
+  await withdrawalDialog.getByText('¥7.50', { exact: true }).waitFor();
+  await withdrawalDialog.getByText('¥92.50', { exact: true }).waitFor();
   await withdrawalDialog.getByLabel('支付宝账户').fill('13800132621');
   await withdrawalDialog.getByRole('button', { name: '提交提现申请' }).click();
   assert(adminMockState.withdrawalCreateCalls === 1, '商户提现没有调用真实接口');
@@ -690,6 +694,7 @@ try {
     await page.getByText('https://zpayz.cn').isVisible(),
     '易支付网关未显示',
   );
+  await page.getByText('7.50%', { exact: true }).waitFor();
   const bodyText = await page.locator('body').innerText();
   assert(!/KEY[^\n]{0,24}[A-Za-z0-9]{24,}/.test(bodyText), '页面疑似显示了完整支付密钥');
   await page.getByText('MR202607220002').waitFor();
@@ -697,14 +702,18 @@ try {
   await page.getByRole('button', { name: '编辑配置' }).click();
   const paymentDialog = page.getByRole('dialog', { name: '编辑易支付配置' });
   await paymentDialog.getByLabel('最低充值金额（人民币）').fill('2');
+  assert(await paymentDialog.getByLabel('提现税率（%）').inputValue() === '7.5', '支付配置没有加载当前提现税率');
+  await paymentDialog.getByLabel('提现税率（%）').fill('4.25');
   await paymentDialog.getByRole('button', { name: '保存支付配置' }).click();
   assert(adminMockState.paymentSettingCalls === 1, '支付配置没有调用真实接口');
-  assert(adminMockState.paymentSettingBody.minimum_cny_cents === 200 && !('exchange_rate_cny_cents_per_usd' in adminMockState.paymentSettingBody), '人民币充值范围提交不正确');
+  assert(adminMockState.paymentSettingBody.minimum_cny_cents === 200 && adminMockState.paymentSettingBody.withdrawal_tax_bps === 425 && !('exchange_rate_cny_cents_per_usd' in adminMockState.paymentSettingBody), '人民币充值范围或提现税率提交不正确');
   await clickRowAction(page, '重试入账');
   await page.getByText('入账任务已重新排队').waitFor();
   assert(adminMockState.paymentRetryCalls === 1, '失败入账没有调用重试接口');
   await page.getByRole('button', { name: '提现审核' }).click();
   await page.getByText('MW202607220010').waitFor();
+  assert(!(await page.locator('body').innerText()).includes('税费（3%）'), '管理员提现审核仍显示固定 3% 税率');
+  await page.getByText('按申请时锁定的税率计算').waitFor();
   await page.getByLabel('筛选提现状态').selectOption('pending');
   await assertPagination(page);
   await clickActionInRow(page, 'MW202607220010', '通过');

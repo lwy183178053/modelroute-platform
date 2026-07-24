@@ -40,16 +40,16 @@ func (s *SQLPaymentStore) CreatePaymentSetting(ctx context.Context, command Crea
 		return PaymentSetting{}, fmt.Errorf("停用旧支付配置：%w", err)
 	}
 	setting, err := scanPaymentSetting(tx.QueryRowContext(ctx, `
-INSERT INTO payment_setting_versions
-    (version, gateway_url, merchant_pid, encrypted_key, key_fingerprint, payment_methods,
-     minimum_cny_cents, maximum_cny_cents, enabled, created_by_newapi_user_id)
+	INSERT INTO payment_setting_versions
+	    (version, gateway_url, merchant_pid, encrypted_key, key_fingerprint, payment_methods,
+	     minimum_cny_cents, maximum_cny_cents, withdrawal_tax_bps, enabled, created_by_newapi_user_id)
 VALUES
     ((SELECT COALESCE(max(version), 0) + 1 FROM payment_setting_versions),
-     $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)
-RETURNING id, version, gateway_url, merchant_pid, encrypted_key, key_fingerprint, payment_methods,
-          minimum_cny_cents, maximum_cny_cents, enabled, created_at
+	     $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10)
+	RETURNING id, version, gateway_url, merchant_pid, encrypted_key, key_fingerprint, payment_methods,
+	          minimum_cny_cents, maximum_cny_cents, withdrawal_tax_bps, enabled, created_at
 `, command.GatewayURL, command.MerchantPID, command.EncryptedKey, command.KeyFingerprint, methods,
-		command.MinimumCNYCents, command.MaximumCNYCents, command.Enabled, command.AdminUserID))
+		command.MinimumCNYCents, command.MaximumCNYCents, command.WithdrawalTaxBPS, command.Enabled, command.AdminUserID))
 	if err != nil {
 		return PaymentSetting{}, err
 	}
@@ -73,7 +73,7 @@ func (s *SQLPaymentStore) PaymentCallbackContext(ctx context.Context, orderNo st
 	row := s.database.QueryRowContext(ctx, `
 SELECT `+prefixedPaymentOrderColumns("o")+`,
        p.id, p.version, p.gateway_url, p.merchant_pid, p.encrypted_key, p.key_fingerprint,
-       p.payment_methods, p.minimum_cny_cents, p.maximum_cny_cents, p.enabled, p.created_at
+	       p.payment_methods, p.minimum_cny_cents, p.maximum_cny_cents, p.withdrawal_tax_bps, p.enabled, p.created_at
 FROM payment_orders o
 JOIN payment_setting_versions p ON p.id = o.setting_version_id
 WHERE o.order_no = $1
@@ -385,7 +385,7 @@ func truncatePaymentError(message string) string {
 
 const paymentSettingSelect = `
 SELECT id, version, gateway_url, merchant_pid, encrypted_key, key_fingerprint, payment_methods,
-       minimum_cny_cents, maximum_cny_cents, enabled, created_at
+	   minimum_cny_cents, maximum_cny_cents, withdrawal_tax_bps, enabled, created_at
 FROM payment_setting_versions`
 
 const paymentOrderColumns = `id, order_no, newapi_user_id, setting_version_id, payment_type,
@@ -414,7 +414,7 @@ func scanPaymentSetting(row rowScanner) (PaymentSetting, error) {
 	var methods []byte
 	err := row.Scan(&setting.ID, &setting.Version, &setting.GatewayURL, &setting.MerchantPID,
 		&setting.EncryptedKey, &setting.KeyFingerprint, &methods, &setting.MinimumCNYCents,
-		&setting.MaximumCNYCents, &setting.Enabled, &setting.CreatedAt)
+		&setting.MaximumCNYCents, &setting.WithdrawalTaxBPS, &setting.Enabled, &setting.CreatedAt)
 	if err != nil {
 		return PaymentSetting{}, paymentStoreError(err)
 	}
@@ -475,7 +475,7 @@ func scanPaymentCallbackContext(row rowScanner) (PaymentOrder, PaymentSetting, e
 		&order.ExpiresAt, &order.CreatedAt, &order.UpdatedAt,
 		&setting.ID, &setting.Version, &setting.GatewayURL, &setting.MerchantPID, &setting.EncryptedKey,
 		&setting.KeyFingerprint, &methods, &setting.MinimumCNYCents, &setting.MaximumCNYCents,
-		&setting.Enabled, &setting.CreatedAt)
+		&setting.WithdrawalTaxBPS, &setting.Enabled, &setting.CreatedAt)
 	if err != nil {
 		return PaymentOrder{}, PaymentSetting{}, paymentStoreError(err)
 	}

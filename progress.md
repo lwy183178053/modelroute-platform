@@ -2853,3 +2853,65 @@
 - `docs/模型报价路由与健康.md`：同步样本不足退出候选的业务口径。
 - `progress.md`：追加本轮实现、红绿验证和回滚信息。
 - 回滚点：执行 `git revert <本轮提交哈希>` 可恢复样本不足候选按中性分参与的旧行为；本轮不涉及数据库结构，未发布服务器。
+
+## 2026-07-24 - Task: 支持管理员配置提现税率
+
+### What was done
+
+- 管理员“支付与充值”增加提现税率设置，允许输入 `0.00%..100.00%` 且最多两位小数；服务端使用整数基点保存并随支付配置生成新版本。
+- 商户提交提现时读取当前配置并把税率锁定到申请记录，历史申请不随管理员后续调税变化；税费和实际到账继续由数据库整数生成列计算。
+- 商户提现弹窗动态读取并展示当前税率、税费和预计到账，配置读取完成前禁止提交；商户和管理员提现列表删除固定 `3%` 文案。
+- 修正上一轮遗留的 PostgreSQL 测试夹具：删除已废弃路由 `mode` 字段，并消除 Windows 与 Docker 时钟偏差造成的支付任务领取波动。
+- 刷新支付配置、商户提现和管理员提现审核的桌面与移动端验收图；本地 `57723` 预览同步使用可配置税率。
+
+### Testing
+
+- `npm.cmd run test:ui` 红灯一：修改测试为 `7.50%` 后稳定失败，提现弹窗仍显示固定 `¥3.00`；实现动态税率后通过。
+- `npm.cmd run test:ui` 红灯二：增加固定 `税费（3%）` 禁止出现断言后稳定失败；清理商户与管理员固定税率文案后通过。
+- `go test ./... -count=1`：通过，全部 Go 单元与契约测试无失败。
+- `go vet ./...`、`go build ./...`：通过。
+- 临时 PostgreSQL 17 执行 `go test ./internal/httpapi -count=1`：通过，8 份迁移、支付并发、提现冻结与税率锁定等完整数据库集成测试无失败；临时容器已关闭。
+- `npm.cmd run test:quota`、`npm.cmd run test:ui`、`npm.cmd run build`：通过。
+- `npm.cmd run capture`：通过，桌面和移动端页面无根级横向溢出；人工检查税率输入、提现摘要和管理员审核表无文字重叠。
+- `python -m unittest discover -s deploy/tests -p 'test_*.py'`：27 项通过。
+- `docker compose config --quiet`：通过；未加载本地生产环境变量时仅输出预期默认空值警告。
+- Playwright 直接访问 `http://127.0.0.1:57723/`：通过，当前税率显示 `3.00%`，编辑框值为 `3`，页面宽度与滚动宽度均为 `1440`，运行错误为 `0`。
+- `git diff --check`：通过。
+
+### Notes
+
+- `apps/api/internal/httpapi/payment_handlers.go`：支付配置读写接口增加提现税率并校验整数基点范围。
+- `apps/api/internal/httpapi/payment_handlers_test.go`：覆盖税率保存、响应和越界拒绝。
+- `apps/api/internal/httpapi/payment_store.go`：支付配置仓储增加税率列的写入、查询和扫描。
+- `apps/api/internal/httpapi/payment_store_test.go`：同步支付配置 SQL 与税率扫描契约。
+- `apps/api/internal/httpapi/payment_store_postgres_test.go`：使用确定性未来领取时间并增强失败诊断，消除跨环境时钟波动。
+- `apps/api/internal/httpapi/payment_types.go`：支付配置及创建命令增加税率基点字段。
+- `apps/api/internal/httpapi/settlement_domain.go`：提现拆分改为使用运行时税率基点。
+- `apps/api/internal/httpapi/settlement_domain_test.go`：覆盖 `7.50%` 拆分和税率范围边界。
+- `apps/api/internal/httpapi/settlement_handlers.go`：提现申请读取当前支付配置并传递锁定税率。
+- `apps/api/internal/httpapi/settlement_handlers_test.go`：覆盖当前税率读取、锁定和响应金额。
+- `apps/api/internal/httpapi/settlement_store_postgres_test.go`：真实提现事务显式使用锁定税率。
+- `apps/api/internal/httpapi/settlement_types.go`：提现记录和创建命令增加锁定税率字段。
+- `apps/api/internal/httpapi/settlement_withdrawals.go`：提现仓储写入、查询并返回申请税率。
+- `apps/api/internal/httpapi/overview_store_postgres_test.go`：移除已废弃路由模式字段，恢复当前数据库基线的完整集成测试。
+- `apps/api/internal/httpapi/routing_store_test.go`：同步最低缓存阈值对样本不足候选的既定过滤契约。
+- `apps/api/internal/migrations/migrate_test.go`：锁定第 8 份迁移及税率列、约束和生成公式。
+- `apps/api/internal/migrations/sql/000008_withdrawal_tax_setting.sql`：增加支付配置和提现申请税率，并按记录税率生成税费与实际到账。
+- `apps/web/src/Modals.jsx`：支付配置增加税率输入，提现弹窗动态读取并计算当前税率。
+- `apps/web/src/views/MerchantView.jsx`：商户提现列表删除固定税率表头。
+- `apps/web/src/views/admin/AdminPayment.jsx`：当前支付配置展示提现税率。
+- `apps/web/src/views/admin/AdminWithdrawals.jsx`：管理员审核说明与表头改为申请时锁定税率口径。
+- `apps/web/scripts/ui-smoke.mjs`：覆盖税率加载、提交、动态金额和固定文案清理。
+- `apps/web/scripts/capture.mjs`：截图夹具增加公共与管理员税率配置。
+- `apps/web/artifacts/payment-config-desktop.png`：更新管理员税率输入桌面验收图。
+- `apps/web/artifacts/payment-config-mobile.png`：更新管理员税率输入移动验收图。
+- `apps/web/artifacts/withdrawal-modal-desktop.png`：更新动态税费桌面验收图。
+- `apps/web/artifacts/withdrawal-modal-mobile.png`：更新动态税费移动验收图。
+- `apps/web/artifacts/admin-withdrawals-desktop.png`：更新申请时锁定税率的管理员桌面验收图。
+- `apps/web/artifacts/admin-withdrawals-mobile.png`：更新申请时锁定税率的管理员移动验收图。
+- `docs/V2数据基线.md`：将固定税率基线改为申请时锁定税率。
+- `docs/易支付充值.md`：记录税率配置范围、整数基点和配置版本边界。
+- `docs/结算与人工提现.md`：记录税率锁定、整数公式和历史申请不重算规则。
+- `data/ui-preview/vite.config.mjs`：本地预览接口增加可编辑税率及动态提现金额；该文件位于 Git 忽略目录。
+- `progress.md`：追加本轮实现、验证、文件清单和回滚点。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可恢复固定 `3%` 的代码、界面与测试；开发库需要精确回退时，切换到上一提交后按现有 V2 重置流程重建。本轮未发布服务器。

@@ -78,6 +78,7 @@ export default function AdminPayment({ notify, openModal }) {
             <div><span>商户密钥 KEY</span><strong>{setting.key_configured ? '已配置 · 不回显' : '未配置'}</strong></div>
             <div><span>支付方式</span><strong>{setting.payment_methods.map((method) => paymentMethodNames[method] || method).join('、')}</strong></div>
             <div><span>人民币充值范围</span><strong>{formatCNYCents(setting.minimum_cny_cents)} - {formatCNYCents(setting.maximum_cny_cents)}</strong></div>
+            <div><span>提现税率</span><strong>{(Number(setting.withdrawal_tax_bps || 0) / 100).toFixed(2)}%</strong></div>
             <div><span>异步回调</span><strong>{setting.notify_url}</strong></div>
             <div><span>浏览器返回页</span><strong>{setting.return_url}</strong></div>
           </div>

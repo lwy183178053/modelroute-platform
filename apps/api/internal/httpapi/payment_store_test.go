@@ -22,21 +22,22 @@ func TestCreatePaymentSettingPublishesOneCurrentVersion(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE payment_setting_versions SET is_current = false WHERE is_current")).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO payment_setting_versions")).
 		WithArgs("https://zpayz.cn", "1001", []byte("encrypted"), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-			jsonBytes(`[`+`"alipay"`+`]`), int64(100), int64(2_000_000), true, 1).
+			jsonBytes(`[`+`"alipay"`+`]`), int64(100), int64(2_000_000), int64(750), true, 1).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "version", "gateway_url", "merchant_pid", "encrypted_key", "key_fingerprint", "payment_methods",
-			"minimum_cny_cents", "maximum_cny_cents", "enabled", "created_at",
+			"minimum_cny_cents", "maximum_cny_cents", "withdrawal_tax_bps", "enabled", "created_at",
 		}).AddRow(11, 3, "https://zpayz.cn", "1001", []byte("encrypted"),
-			"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", `["alipay"]`, 100, 2_000_000, true, createdAt))
+			"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", `["alipay"]`, 100, 2_000_000, 750, true, createdAt))
 	mock.ExpectCommit()
 
 	store := NewSQLPaymentStore(database)
 	setting, err := store.CreatePaymentSetting(context.Background(), CreatePaymentSettingCommand{
 		AdminUserID: 1, GatewayURL: "https://zpayz.cn", MerchantPID: "1001", EncryptedKey: []byte("encrypted"),
 		KeyFingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		PaymentMethods: []string{"alipay"}, MinimumCNYCents: 100, MaximumCNYCents: 2_000_000, Enabled: true,
+		PaymentMethods: []string{"alipay"}, MinimumCNYCents: 100, MaximumCNYCents: 2_000_000,
+		WithdrawalTaxBPS: 750, Enabled: true,
 	})
-	if err != nil || setting.ID != 11 || setting.Version != 3 || len(setting.PaymentMethods) != 1 {
+	if err != nil || setting.ID != 11 || setting.Version != 3 || len(setting.PaymentMethods) != 1 || setting.WithdrawalTaxBPS != 750 {
 		t.Fatalf("支付配置=%+v，错误=%v", setting, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

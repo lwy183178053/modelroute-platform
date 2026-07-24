@@ -45,6 +45,7 @@ type MerchantWithdrawal struct {
 	MerchantID                int64      `json:"merchant_id"`
 	MerchantName              string     `json:"merchant_name,omitempty"`
 	AmountQuota               int64      `json:"amount_quota"`
+	WithdrawalTaxBPS          int64      `json:"withdrawal_tax_bps"`
 	TaxQuota                  int64      `json:"tax_quota"`
 	NetPayoutQuota            int64      `json:"net_payout_quota"`
 	AvailableBeforeQuota      int64      `json:"available_before_quota"`
@@ -69,6 +70,7 @@ type CreateMerchantWithdrawalCommand struct {
 	UserID                    int
 	AmountQuota               int64
 	QuotaPerUnit              int64
+	WithdrawalTaxBPS          int64
 	RecipientType             string
 	EncryptedRecipientAccount []byte
 	RecipientAccountMasked    string

@@ -32,19 +32,21 @@ func TestWithdrawalBreakdownRequiresWholeYuanAndMinimumAmount(t *testing.T) {
 	tests := []struct {
 		name    string
 		amount  int64
+		taxBPS  int64
 		wantTax int64
 		wantNet int64
 		wantOK  bool
 	}{
-		{name: "四十九元", amount: 49 * quotaPerCNY, wantOK: false},
-		{name: "五十元", amount: 50 * quotaPerCNY, wantTax: 750_000, wantNet: 24_250_000, wantOK: true},
-		{name: "五十一元", amount: 51 * quotaPerCNY, wantTax: 765_000, wantNet: 24_735_000, wantOK: true},
-		{name: "一百元", amount: 100 * quotaPerCNY, wantTax: 1_500_000, wantNet: 48_500_000, wantOK: true},
-		{name: "五十点五元", amount: 50*quotaPerCNY + quotaPerCNY/2, wantOK: false},
+		{name: "四十九元", amount: 49 * quotaPerCNY, taxBPS: 300, wantOK: false},
+		{name: "五十元", amount: 50 * quotaPerCNY, taxBPS: 300, wantTax: 750_000, wantNet: 24_250_000, wantOK: true},
+		{name: "五十一元", amount: 51 * quotaPerCNY, taxBPS: 300, wantTax: 765_000, wantNet: 24_735_000, wantOK: true},
+		{name: "一百元七点五税率", amount: 100 * quotaPerCNY, taxBPS: 750, wantTax: 3_750_000, wantNet: 46_250_000, wantOK: true},
+		{name: "五十点五元", amount: 50*quotaPerCNY + quotaPerCNY/2, taxBPS: 300, wantOK: false},
+		{name: "税率超出范围", amount: 50 * quotaPerCNY, taxBPS: 10_001, wantOK: false},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			tax, net, ok := withdrawalBreakdown(test.amount, quotaPerCNY)
+			tax, net, ok := withdrawalBreakdown(test.amount, quotaPerCNY, test.taxBPS)
 			if tax != test.wantTax || net != test.wantNet || ok != test.wantOK {
 				t.Fatalf("withdrawalBreakdown(%d)=(%d,%d,%t)，期望=(%d,%d,%t)", test.amount, tax, net, ok, test.wantTax, test.wantNet, test.wantOK)
 			}
@@ -53,11 +55,11 @@ func TestWithdrawalBreakdownRequiresWholeYuanAndMinimumAmount(t *testing.T) {
 }
 
 func TestWithdrawalBreakdownUsesRuntimeCoreQuotaUnit(t *testing.T) {
-	tax, net, ok := withdrawalBreakdown(50*750_000, 750_000)
+	tax, net, ok := withdrawalBreakdown(50*750_000, 750_000, 300)
 	if !ok || tax != 1_125_000 || net != 36_375_000 {
 		t.Fatalf("非默认额度单位提现拆分 tax=%d net=%d ok=%t", tax, net, ok)
 	}
-	if _, _, ok := withdrawalBreakdown(50*750_000+1, 750_000); ok {
+	if _, _, ok := withdrawalBreakdown(50*750_000+1, 750_000, 300); ok {
 		t.Fatal("应拒绝非人民币整数金额")
 	}
 }

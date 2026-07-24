@@ -49,14 +49,14 @@ export default function AdminWithdrawals({ notify, onSummaryRefresh, openModal }
   return (
     <>
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}
-      <Section title="人工提现审核" description="申请金额扣除 3% 税费后通过支付宝线下打款" actions={<Button icon={RefreshCw} onClick={load}>刷新</Button>}>
+    <Section title="人工提现审核" description="申请金额按申请时锁定的税率计算，审核后通过支付宝线下打款" actions={<Button icon={RefreshCw} onClick={load}>刷新</Button>}>
         <InlineNotice tone="warning">审核通过后仍保持冻结，录入支付宝打款流水和凭证才完成出账。</InlineNotice>
         <div className="filter-toolbar">
           <Select aria-label="筛选提现状态" onChange={(event) => { setStatus(event.target.value); setPage(1); }} value={status}>
             <option value="">全部状态</option><option value="pending">待审核</option><option value="approved">待打款</option><option value="paid">已打款</option><option value="rejected">已驳回</option>
           </Select>
         </div>
-        <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>申请号</th><th>商户</th><th>申请金额</th><th>税费（3%）</th><th>实际打款</th><th>申请前可用</th><th>支付宝账户</th><th>提交时间</th><th>状态</th><th>操作</th></tr></thead><tbody>
+      <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>申请号</th><th>商户</th><th>申请金额</th><th>税费</th><th>实际打款</th><th>申请前可用</th><th>支付宝账户</th><th>提交时间</th><th>状态</th><th>操作</th></tr></thead><tbody>
           {withdrawals.map((item) => <tr key={item.id}><td><code>{item.id}</code></td><td><code>{item.withdrawal_no}</code></td><td><strong>{item.merchant_name}</strong></td><td><strong>{formatQuota(item.amount_quota)}</strong></td><td>{formatQuota(item.tax_quota)}</td><td><strong>{formatQuota(item.net_payout_quota)}</strong></td><td>{formatQuota(item.available_before_quota)}</td><td><span>支付宝</span><small><code>{item.recipient_account}</code></small></td><td>{formatDate(item.created_at)}</td><td><Status>{statusNames[item.status] || item.status}</Status></td><td><ActionMenu items={[item.status === 'pending' && { label: '通过', icon: Check, onClick: () => action(item, 'approve') }, ['pending', 'approved'].includes(item.status) && { label: '驳回', icon: X, danger: true, onClick: () => action(item, 'reject') }, item.status === 'approved' && { label: '确认打款', icon: FileCheck2, onClick: () => action(item, 'paid') }]} /></td></tr>)}
           {!loading && withdrawals.length === 0 && <tr><td className="table-message" colSpan="11">暂无提现申请</td></tr>}
           {loading && <tr><td className="table-message" colSpan="11">正在读取提现申请</td></tr>}

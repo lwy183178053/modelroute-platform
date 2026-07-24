@@ -96,11 +96,12 @@ TRUNCATE payment_callback_events, newapi_credit_operations, payment_orders, paym
 
 	claimed := make(chan []PaymentCreditOperation, 2)
 	claimErrors := make(chan error, 2)
+	claimAt := now.Add(time.Minute)
 	for range 2 {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			operations, claimErr := store.ClaimPaymentCredits(ctx, now.Add(time.Second), 10)
+			operations, claimErr := store.ClaimPaymentCredits(ctx, claimAt, 10)
 			if claimErr != nil {
 				claimErrors <- claimErr
 				return
@@ -119,7 +120,17 @@ TRUNCATE payment_callback_events, newapi_credit_operations, payment_orders, paym
 		operations = append(operations, group...)
 	}
 	if len(operations) != 1 || operations[0].OrderID != order.ID || operations[0].Attempts != 1 {
-		t.Fatalf("并发领取结果=%+v", operations)
+		var creditStatus, paymentStatus string
+		var attempts int
+		var nextAttempt time.Time
+		if inspectErr := database.QueryRowContext(ctx, `
+SELECT c.status, c.attempt_count, c.next_attempt_at, o.payment_status
+FROM newapi_credit_operations c JOIN payment_orders o ON o.id = c.payment_order_id
+WHERE c.payment_order_id = $1
+`, order.ID).Scan(&creditStatus, &attempts, &nextAttempt, &paymentStatus); inspectErr != nil {
+			t.Fatalf("并发领取结果=%+v，读取任务状态失败：%v", operations, inspectErr)
+		}
+		t.Fatalf("并发领取结果=%+v，任务状态=%s，尝试=%d，下次执行=%s，领取时间=%s，支付状态=%s", operations, creditStatus, attempts, nextAttempt.Format(time.RFC3339Nano), claimAt.Format(time.RFC3339Nano), paymentStatus)
 	}
 	if err := store.CompletePaymentCredit(ctx, operations[0].ID, now.Add(2*time.Second)); err != nil {
 		t.Fatalf("完成入账：%v", err)
@@ -141,7 +152,7 @@ TRUNCATE payment_callback_events, newapi_credit_operations, payment_orders, paym
 	}); err != nil {
 		t.Fatal(err)
 	}
-	unknownOperations, err := store.ClaimPaymentCredits(ctx, now.Add(3*time.Second), 10)
+	unknownOperations, err := store.ClaimPaymentCredits(ctx, claimAt, 10)
 	if err != nil || len(unknownOperations) != 1 {
 		t.Fatalf("领取结果未知任务=%+v，错误=%v", unknownOperations, err)
 	}

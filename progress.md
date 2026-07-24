@@ -3225,3 +3225,28 @@
 - `deploy/tests/test_release_tools.py`：锁定路由验收必须验证 Token 清理结果。
 - `progress.md`：追加残留性质、根因、修复、验证和回滚说明。
 - 回滚点：本轮前一提交为 `6e84908`；执行 `git revert <本轮提交哈希>` 可回退脚本清理断言。本轮没有数据库迁移或业务数据结构变更。
+
+## 2026-07-24 - Task: 发布单厂商密钥与模型路由修复到 103
+
+### What was done
+
+- 将密钥公开形态指纹修复、真实密钥复制、单厂商生产契约、提现验收和测试 Token 清理补丁统一发布为 `5774c931c8ef`。
+- 发布过程中使用新 Git 哈希目录重新构建，不复用手工修改过的旧候选目录；第 11 号迁移按幂等路径保持现有数据结构，模型种子确认 21 个型号无新增、无重复调价。
+- 全部线上专项通过后，`current` 从 `4ad2ea845834` 原子切换到 `/opt/modelroute-platform/releases/5774c931c8ef`；内网和公网版本接口均返回同一哈希。
+- 定点物理删除两条已软删除的旧路由验收 Token；新脚本再次执行后，路由策略和核心 Token 测试夹具均保持为零。
+
+### Testing
+
+- 内网与公网 `verify.sh`：通过，页面、存活、就绪和模型入口鉴权状态正常。
+- `verify-accounts.sh`、`verify-merchants.sh`、`verify-routing.sh`、`verify-payments.sh`、`verify-withdrawals.sh`、`verify-operations.sh`：全部通过。
+- 真实路由诊断确认 `fingerprint_matches_raw=false`、`fingerprint_matches_prefixed=true`；单厂商临时密钥成功返回已绑定的 `gpt-5.6-luna`，未绑定模型返回预期 `403`，清理后测试路由与 Token 数量均为 `0`。
+- 只读压力测试：200 请求、10 并发全部成功，平均 `0.0018s`，P95 `0.004246s`。
+- 生产数据库：第 11 号迁移存在，启用模型 21 个，MiniMax 0 个；模型种子重复执行结果为新增 0、调价 0、未变化 21。
+- 六个 ModelRoute 容器运行，网关、API、核心服务、PostgreSQL 和 Redis 健康检查均为 `healthy`；API 与 Worker 最近窗口 `panic/fatal` 为 0，核心服务 `429` 为 0。
+- `api.lwylink.xyz` 与 `sdk.lwylink.xyz` 均返回 `200`；PostgreSQL、Redis 和核心服务仍只暴露容器内部端口。
+
+### Notes
+
+- `progress.md`：追加最终发布哈希、专项验收、残留清理、容器与隔离证据。
+- 生产发布目录：`/opt/modelroute-platform/releases/5774c931c8ef`。
+- 回滚点：上一稳定指针为 `/opt/modelroute-platform/releases/4ad2ea845834`；可使用固定目标临时软链接后 `mv -Tf` 原子切回，并执行旧目录的基础验收。本轮数据库迁移已在此前候选执行且不会因代码指针回滚自动恢复旧密钥和路由。

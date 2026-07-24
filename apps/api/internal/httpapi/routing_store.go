@@ -16,6 +16,8 @@ import (
 var (
 	ErrRoutingNotFound     = errors.New("路由对象不存在")
 	ErrRoutingInvalidState = errors.New("路由对象状态无效")
+	ErrTokenNotFound       = errors.New("密钥不存在或已停用")
+	ErrModelNotAllowed     = errors.New("密钥未绑定该模型")
 )
 
 type CreateOfferCommand struct {
@@ -58,10 +60,11 @@ type RoutingRepository interface {
 	ListRoutingPolicies(context.Context, int) ([]RoutingPolicy, error)
 	RoutingPolicy(context.Context, int, int64) (RoutingPolicy, error)
 	UpdateRoutingPolicy(context.Context, int, int64, RoutingPolicyInput) (RoutingPolicy, error)
-	DeleteRoutingPolicy(context.Context, int, int64) error
-	BindTokenToPolicy(context.Context, int, int, string, int64) (TokenRoutingBinding, error)
-	RebindTokenPolicy(context.Context, int, int, int64) (TokenRoutingBinding, error)
+	DeleteRoutingPolicy(context.Context, int, int64) (int, error)
+	CreateTokenBinding(context.Context, int, int, string, string, []int64) (TokenRoutingBinding, error)
+	ReplaceTokenRoutes(context.Context, int, int, []int64) (TokenRoutingBinding, error)
 	ListTokenRoutingBindings(context.Context, int) ([]TokenRoutingBinding, error)
+	SetTokenBindingStatus(context.Context, int, int, bool) error
 	RevokeTokenBinding(context.Context, int, int) error
 	ResolveRoute(context.Context, string, string) (RouteSelection, error)
 	StartRouteDecision(context.Context, RouteDecision) error
@@ -187,6 +190,7 @@ type RouteObservation struct {
 }
 
 type RoutingPolicyInput struct {
+	CanonicalModelID     int64  `json:"canonical_model_id"`
 	Name                 string `json:"name"`
 	Priority             string `json:"priority"`
 	MinimumMultiplierBPS int    `json:"minimum_multiplier_bps"`
@@ -215,6 +219,9 @@ type RoutingPolicy struct {
 	ID                   int64     `json:"id"`
 	Name                 string    `json:"name"`
 	UserID               int       `json:"user_id,omitempty"`
+	CanonicalModelID     int64     `json:"model_id"`
+	ModelName            string    `json:"model_name"`
+	Provider             string    `json:"provider"`
 	Priority             string    `json:"priority"`
 	MinimumMultiplierBPS int       `json:"minimum_multiplier_bps"`
 	MaximumMultiplierBPS int       `json:"maximum_multiplier_bps"`
@@ -224,9 +231,19 @@ type RoutingPolicy struct {
 }
 
 type TokenRoutingBinding struct {
-	TokenID    int    `json:"token_id"`
+	TokenID    int               `json:"token_id"`
+	Provider   string            `json:"provider"`
+	Routes     []TokenModelRoute `json:"routes"`
+	ModelCount int               `json:"model_count"`
+}
+
+type TokenModelRoute struct {
 	PolicyID   int64  `json:"routing_policy_id"`
 	PolicyName string `json:"routing_policy_name"`
+	ModelID    int64  `json:"model_id"`
+	ModelName  string `json:"model_name"`
+	Provider   string `json:"provider"`
+	Priority   string `json:"priority"`
 }
 
 type OfferSynchronizer interface {
@@ -270,22 +287,27 @@ func (s *SQLRoutingStore) RunCycle(ctx context.Context, now time.Time) error {
 
 func (s *SQLRoutingStore) CreateRoutingPolicy(ctx context.Context, userID int, input RoutingPolicyInput) (RoutingPolicy, error) {
 	input.Name = strings.TrimSpace(input.Name)
-	if userID <= 0 || validateRoutingPolicy(input) != nil {
+	if userID <= 0 || validateCreateRoutingPolicy(input) != nil {
 		return RoutingPolicy{}, ErrRoutingInvalidState
 	}
 	policy := RoutingPolicy{
-		Name: input.Name, UserID: userID, Priority: input.Priority,
+		Name: input.Name, UserID: userID, CanonicalModelID: input.CanonicalModelID, Priority: input.Priority,
 		MinimumMultiplierBPS: input.MinimumMultiplierBPS, MaximumMultiplierBPS: input.MaximumMultiplierBPS,
 		MinimumCacheHitPPM: input.MinimumCacheHitPPM,
 	}
 	err := s.database.QueryRowContext(ctx, `
 INSERT INTO routing_policies
-    (newapi_user_id, name, priority, minimum_multiplier_bps,
+    (newapi_user_id, canonical_model_id, name, priority, minimum_multiplier_bps,
      maximum_multiplier_bps, minimum_cache_hit_ppm)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, updated_at
-`, userID, input.Name, input.Priority, input.MinimumMultiplierBPS,
-		input.MaximumMultiplierBPS, input.MinimumCacheHitPPM).Scan(&policy.ID, &policy.UpdatedAt)
+	SELECT $1, model.id, $3, $4, $5, $6, $7
+	FROM canonical_models model
+	WHERE model.id = $2 AND model.status = 'active'
+RETURNING id,
+    (SELECT public_name FROM canonical_models WHERE id = canonical_model_id),
+    (SELECT provider FROM canonical_models WHERE id = canonical_model_id),
+    updated_at
+`, userID, input.CanonicalModelID, input.Name, input.Priority, input.MinimumMultiplierBPS,
+		input.MaximumMultiplierBPS, input.MinimumCacheHitPPM).Scan(&policy.ID, &policy.ModelName, &policy.Provider, &policy.UpdatedAt)
 	if err != nil {
 		return RoutingPolicy{}, routingStoreError(err)
 	}
@@ -344,12 +366,16 @@ SET name = $1, priority = $2,
 	minimum_cache_hit_ppm = $5, updated_at = now()
 WHERE newapi_user_id = $6 AND id = $7
 RETURNING id,
-    (SELECT count(*) FROM token_bindings binding
-     WHERE binding.routing_policy_id = routing_policies.id AND binding.status = 'active'),
+    canonical_model_id,
+    (SELECT public_name FROM canonical_models WHERE id = canonical_model_id),
+    (SELECT provider FROM canonical_models WHERE id = canonical_model_id),
+    (SELECT count(DISTINCT route.token_binding_id)
+     FROM token_model_routes route
+     WHERE route.routing_policy_id = routing_policies.id),
     updated_at
 `, input.Name, input.Priority, input.MinimumMultiplierBPS,
 		input.MaximumMultiplierBPS, input.MinimumCacheHitPPM, userID, policyID).
-		Scan(&policy.ID, &policy.BoundKeyCount, &policy.UpdatedAt)
+		Scan(&policy.ID, &policy.CanonicalModelID, &policy.ModelName, &policy.Provider, &policy.BoundKeyCount, &policy.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RoutingPolicy{}, ErrRoutingNotFound
 	}
@@ -360,20 +386,24 @@ RETURNING id,
 }
 
 const routingPolicySelect = `
-SELECT policy.id, policy.newapi_user_id, policy.name, policy.priority,
+SELECT policy.id, policy.newapi_user_id, policy.name,
+       model.id, model.public_name, model.provider, policy.priority,
        policy.minimum_multiplier_bps, policy.maximum_multiplier_bps,
        policy.minimum_cache_hit_ppm,
-       (SELECT count(*) FROM token_bindings binding
-        WHERE binding.routing_policy_id = policy.id AND binding.status = 'active'),
+       (SELECT count(DISTINCT route.token_binding_id)
+        FROM token_model_routes route
+        WHERE route.routing_policy_id = policy.id),
        policy.updated_at
 FROM routing_policies policy
+JOIN canonical_models model ON model.id = policy.canonical_model_id
 `
 
 func scanRoutingPolicy(scanner rowScanner) (RoutingPolicy, error) {
 	var policy RoutingPolicy
 	var cacheFloor sql.NullInt64
 	err := scanner.Scan(
-		&policy.ID, &policy.UserID, &policy.Name, &policy.Priority,
+		&policy.ID, &policy.UserID, &policy.Name,
+		&policy.CanonicalModelID, &policy.ModelName, &policy.Provider, &policy.Priority,
 		&policy.MinimumMultiplierBPS, &policy.MaximumMultiplierBPS, &cacheFloor,
 		&policy.BoundKeyCount, &policy.UpdatedAt,
 	)
@@ -390,70 +420,164 @@ func scanRoutingPolicy(scanner rowScanner) (RoutingPolicy, error) {
 	return policy, nil
 }
 
-func (s *SQLRoutingStore) BindTokenToPolicy(ctx context.Context, userID int, tokenID int, fingerprint string, policyID int64) (TokenRoutingBinding, error) {
-	var binding TokenRoutingBinding
-	err := s.database.QueryRowContext(ctx, `
+func (s *SQLRoutingStore) CreateTokenBinding(ctx context.Context, userID int, tokenID int, fingerprint string, provider string, policyIDs []int64) (TokenRoutingBinding, error) {
+	provider, err := normalizeChannelProvider(provider)
+	if err != nil || userID <= 0 || tokenID <= 0 || strings.TrimSpace(fingerprint) == "" {
+		return TokenRoutingBinding{}, ErrRoutingInvalidState
+	}
+	tx, err := s.database.BeginTx(ctx, nil)
+	if err != nil {
+		return TokenRoutingBinding{}, fmt.Errorf("开始创建密钥绑定事务：%w", err)
+	}
+	defer tx.Rollback()
+	var bindingID int64
+	err = tx.QueryRowContext(ctx, `
 INSERT INTO token_bindings
-    (newapi_token_id, newapi_user_id, token_fingerprint, routing_policy_id)
-SELECT $1, $2, $3, policy.id
-FROM routing_policies policy
-WHERE policy.id = $4 AND policy.newapi_user_id = $2
+    (newapi_token_id, newapi_user_id, token_fingerprint, provider)
+VALUES ($1, $2, $3, $4)
 ON CONFLICT (newapi_token_id) DO UPDATE
 SET token_fingerprint = EXCLUDED.token_fingerprint,
-    routing_policy_id = EXCLUDED.routing_policy_id,
+    provider = EXCLUDED.provider,
     status = 'active', synced_at = now()
 WHERE token_bindings.newapi_user_id = EXCLUDED.newapi_user_id
-RETURNING newapi_token_id, routing_policy_id,
-    (SELECT name FROM routing_policies WHERE id = routing_policy_id)
-`, tokenID, userID, fingerprint, policyID).Scan(&binding.TokenID, &binding.PolicyID, &binding.PolicyName)
+RETURNING id
+`, tokenID, userID, fingerprint, provider).Scan(&bindingID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return TokenRoutingBinding{}, ErrRoutingNotFound
 	}
 	if err != nil {
 		return TokenRoutingBinding{}, routingStoreError(err)
 	}
-	return binding, nil
+	routes, err := replaceTokenRoutesTx(ctx, tx, bindingID, userID, provider, policyIDs)
+	if err != nil {
+		return TokenRoutingBinding{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return TokenRoutingBinding{}, fmt.Errorf("提交创建密钥绑定事务：%w", err)
+	}
+	return TokenRoutingBinding{TokenID: tokenID, Provider: provider, Routes: routes, ModelCount: len(routes)}, nil
 }
 
-func (s *SQLRoutingStore) RebindTokenPolicy(ctx context.Context, userID int, tokenID int, policyID int64) (TokenRoutingBinding, error) {
-	var binding TokenRoutingBinding
-	err := s.database.QueryRowContext(ctx, `
-UPDATE token_bindings binding
-SET routing_policy_id = policy.id, synced_at = now()
-FROM routing_policies policy
-WHERE binding.newapi_user_id = $1 AND binding.newapi_token_id = $2
-  AND binding.status = 'active'
-  AND policy.id = $3 AND policy.newapi_user_id = $1
-RETURNING binding.newapi_token_id, binding.routing_policy_id, policy.name
-`, userID, tokenID, policyID).Scan(&binding.TokenID, &binding.PolicyID, &binding.PolicyName)
+func (s *SQLRoutingStore) ReplaceTokenRoutes(ctx context.Context, userID int, tokenID int, policyIDs []int64) (TokenRoutingBinding, error) {
+	if userID <= 0 || tokenID <= 0 {
+		return TokenRoutingBinding{}, ErrRoutingInvalidState
+	}
+	tx, err := s.database.BeginTx(ctx, nil)
+	if err != nil {
+		return TokenRoutingBinding{}, fmt.Errorf("开始修改密钥路由事务：%w", err)
+	}
+	defer tx.Rollback()
+	var bindingID int64
+	var provider string
+	err = tx.QueryRowContext(ctx, `
+SELECT id, provider
+FROM token_bindings
+WHERE newapi_user_id = $1 AND newapi_token_id = $2
+FOR UPDATE
+`, userID, tokenID).Scan(&bindingID, &provider)
 	if errors.Is(err, sql.ErrNoRows) {
 		return TokenRoutingBinding{}, ErrRoutingNotFound
 	}
 	if err != nil {
-		return TokenRoutingBinding{}, routingStoreError(err)
+		return TokenRoutingBinding{}, fmt.Errorf("锁定密钥绑定：%w", err)
 	}
-	return binding, nil
+	routes, err := replaceTokenRoutesTx(ctx, tx, bindingID, userID, provider, policyIDs)
+	if err != nil {
+		return TokenRoutingBinding{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return TokenRoutingBinding{}, fmt.Errorf("提交修改密钥路由事务：%w", err)
+	}
+	return TokenRoutingBinding{TokenID: tokenID, Provider: provider, Routes: routes, ModelCount: len(routes)}, nil
+}
+
+func replaceTokenRoutesTx(ctx context.Context, tx *sql.Tx, bindingID int64, userID int, provider string, policyIDs []int64) ([]TokenModelRoute, error) {
+	routes := make([]TokenModelRoute, 0, len(policyIDs))
+	seenPolicies := make(map[int64]struct{}, len(policyIDs))
+	seenModels := make(map[int64]struct{}, len(policyIDs))
+	for _, policyID := range policyIDs {
+		if policyID <= 0 {
+			return nil, ErrRoutingInvalidState
+		}
+		if _, exists := seenPolicies[policyID]; exists {
+			continue
+		}
+		seenPolicies[policyID] = struct{}{}
+		var route TokenModelRoute
+		err := tx.QueryRowContext(ctx, `
+SELECT policy.id, policy.name, model.id, model.public_name, model.provider, policy.priority
+FROM routing_policies policy
+JOIN canonical_models model ON model.id = policy.canonical_model_id AND model.status = 'active'
+WHERE policy.id = $1 AND policy.newapi_user_id = $2
+`, policyID, userID).Scan(&route.PolicyID, &route.PolicyName, &route.ModelID, &route.ModelName, &route.Provider, &route.Priority)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrRoutingNotFound
+		}
+		if err != nil {
+			return nil, fmt.Errorf("读取待绑定路由：%w", err)
+		}
+		if route.Provider != provider {
+			return nil, ErrRoutingInvalidState
+		}
+		if _, exists := seenModels[route.ModelID]; exists {
+			return nil, ErrRoutingInvalidState
+		}
+		seenModels[route.ModelID] = struct{}{}
+		routes = append(routes, route)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM token_model_routes WHERE token_binding_id = $1`, bindingID); err != nil {
+		return nil, fmt.Errorf("清理密钥模型路由：%w", err)
+	}
+	for _, route := range routes {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO token_model_routes (token_binding_id, canonical_model_id, routing_policy_id)
+VALUES ($1, $2, $3)
+`, bindingID, route.ModelID, route.PolicyID); err != nil {
+			return nil, routingStoreError(err)
+		}
+	}
+	return routes, nil
 }
 
 func (s *SQLRoutingStore) ListTokenRoutingBindings(ctx context.Context, userID int) ([]TokenRoutingBinding, error) {
 	rows, err := s.database.QueryContext(ctx, `
-SELECT binding.newapi_token_id, policy.id, policy.name
+SELECT binding.newapi_token_id, binding.provider,
+       policy.id, policy.name, model.id, model.public_name, model.provider, policy.priority
 FROM token_bindings binding
-JOIN routing_policies policy ON policy.id = binding.routing_policy_id
-WHERE binding.newapi_user_id = $1 AND binding.status = 'active'
-ORDER BY binding.newapi_token_id DESC
+LEFT JOIN token_model_routes route ON route.token_binding_id = binding.id
+LEFT JOIN routing_policies policy ON policy.id = route.routing_policy_id
+LEFT JOIN canonical_models model ON model.id = route.canonical_model_id
+WHERE binding.newapi_user_id = $1
+ORDER BY binding.newapi_token_id DESC, model.public_name, policy.id
 `, userID)
 	if err != nil {
 		return nil, fmt.Errorf("查询密钥路由绑定：%w", err)
 	}
 	defer rows.Close()
 	items := make([]TokenRoutingBinding, 0)
+	byToken := make(map[int]int)
 	for rows.Next() {
-		var item TokenRoutingBinding
-		if err := rows.Scan(&item.TokenID, &item.PolicyID, &item.PolicyName); err != nil {
+		var tokenID int
+		var provider string
+		var policyID, modelID sql.NullInt64
+		var policyName, modelName, modelProvider, priority sql.NullString
+		if err := rows.Scan(&tokenID, &provider, &policyID, &policyName, &modelID, &modelName, &modelProvider, &priority); err != nil {
 			return nil, fmt.Errorf("解析密钥路由绑定：%w", err)
 		}
-		items = append(items, item)
+		index, exists := byToken[tokenID]
+		if !exists {
+			index = len(items)
+			byToken[tokenID] = index
+			items = append(items, TokenRoutingBinding{TokenID: tokenID, Provider: provider, Routes: make([]TokenModelRoute, 0)})
+		}
+		if policyID.Valid {
+			items[index].Routes = append(items[index].Routes, TokenModelRoute{
+				PolicyID: policyID.Int64, PolicyName: policyName.String,
+				ModelID: modelID.Int64, ModelName: modelName.String,
+				Provider: modelProvider.String, Priority: priority.String,
+			})
+			items[index].ModelCount = len(items[index].Routes)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("遍历密钥路由绑定：%w", err)
@@ -461,36 +585,36 @@ ORDER BY binding.newapi_token_id DESC
 	return items, nil
 }
 
-func (s *SQLRoutingStore) DeleteRoutingPolicy(ctx context.Context, userID int, policyID int64) error {
+func (s *SQLRoutingStore) DeleteRoutingPolicy(ctx context.Context, userID int, policyID int64) (int, error) {
 	var boundKeyCount int
 	var deletedID sql.NullInt64
 	err := s.database.QueryRowContext(ctx, `
 WITH target AS (
     SELECT policy.id,
-           count(binding.id) FILTER (WHERE binding.status = 'active') AS bound_key_count
+           count(DISTINCT route.token_binding_id) AS bound_key_count
     FROM routing_policies policy
-    LEFT JOIN token_bindings binding ON binding.routing_policy_id = policy.id
+    LEFT JOIN token_model_routes route ON route.routing_policy_id = policy.id
     WHERE policy.newapi_user_id = $1 AND policy.id = $2
     GROUP BY policy.id
 ), deleted AS (
     DELETE FROM routing_policies policy
     USING target
-    WHERE policy.id = target.id AND target.bound_key_count = 0
+    WHERE policy.id = target.id
     RETURNING policy.id
 )
 SELECT target.bound_key_count, deleted.id
 FROM target LEFT JOIN deleted ON true
 `, userID, policyID).Scan(&boundKeyCount, &deletedID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrRoutingNotFound
+		return 0, ErrRoutingNotFound
 	}
 	if err != nil {
-		return routingStoreError(err)
+		return 0, routingStoreError(err)
 	}
-	if boundKeyCount > 0 || !deletedID.Valid {
-		return ErrRoutingInvalidState
+	if !deletedID.Valid {
+		return 0, ErrRoutingNotFound
 	}
-	return nil
+	return boundKeyCount, nil
 }
 
 func routingStoreError(err error) error {
@@ -971,11 +1095,33 @@ ORDER BY mc.id, aliases.id
 
 func (s *SQLRoutingStore) RevokeTokenBinding(ctx context.Context, userID int, tokenID int) error {
 	_, err := s.database.ExecContext(ctx, `
-UPDATE token_bindings SET status = 'revoked', synced_at = now()
+DELETE FROM token_bindings
 WHERE newapi_user_id = $1 AND newapi_token_id = $2
 `, userID, tokenID)
 	if err != nil {
-		return fmt.Errorf("撤销令牌路由绑定：%w", err)
+		return fmt.Errorf("删除密钥路由绑定：%w", err)
+	}
+	return nil
+}
+
+func (s *SQLRoutingStore) SetTokenBindingStatus(ctx context.Context, userID int, tokenID int, enabled bool) error {
+	status := "revoked"
+	if enabled {
+		status = "active"
+	}
+	result, err := s.database.ExecContext(ctx, `
+UPDATE token_bindings SET status = $1, synced_at = now()
+WHERE newapi_user_id = $2 AND newapi_token_id = $3
+`, status, userID, tokenID)
+	if err != nil {
+		return fmt.Errorf("更新密钥路由状态：%w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("读取密钥路由状态更新结果：%w", err)
+	}
+	if affected == 0 {
+		return ErrRoutingNotFound
 	}
 	return nil
 }
@@ -1057,17 +1203,31 @@ WHERE model.id = $1 AND model.status = 'active'
 
 func (s *SQLRoutingStore) ResolveRoute(ctx context.Context, fingerprint string, publicModel string) (RouteSelection, error) {
 	var selection RouteSelection
-	var cacheFloor sql.NullInt64
+	var provider string
 	err := s.database.QueryRowContext(ctx, `
-SELECT b.id, p.id, cm.id, p.priority, price.price_kind, p.minimum_cache_hit_ppm
-FROM token_bindings b
-JOIN routing_policies p ON p.id = b.routing_policy_id
-JOIN canonical_models cm ON cm.public_name = $2 AND cm.status = 'active'
-JOIN official_price_versions price ON price.id = cm.current_official_price_version_id
-WHERE b.token_fingerprint = $1 AND b.status = 'active'
-`, fingerprint, publicModel).Scan(&selection.TokenBindingID, &selection.PolicyID, &selection.CanonicalModelID, &selection.Priority, &selection.PriceKind, &cacheFloor)
+SELECT id, provider FROM token_bindings
+WHERE token_fingerprint = $1 AND status = 'active'
+`, fingerprint).Scan(&selection.TokenBindingID, &provider)
 	if errors.Is(err, sql.ErrNoRows) {
-		return RouteSelection{}, ErrRoutingNotFound
+		return RouteSelection{}, ErrTokenNotFound
+	}
+	if err != nil {
+		return RouteSelection{}, fmt.Errorf("读取密钥绑定：%w", err)
+	}
+	var cacheFloor sql.NullInt64
+	err = s.database.QueryRowContext(ctx, `
+SELECT p.id, cm.id, p.priority, price.price_kind, p.minimum_cache_hit_ppm
+FROM token_bindings binding
+JOIN token_model_routes route ON route.token_binding_id = binding.id
+JOIN routing_policies p ON p.id = route.routing_policy_id
+    AND p.canonical_model_id = route.canonical_model_id
+JOIN canonical_models cm ON cm.id = route.canonical_model_id
+    AND cm.public_name = $2 AND cm.provider = $3 AND cm.status = 'active'
+JOIN official_price_versions price ON price.id = cm.current_official_price_version_id
+WHERE binding.id = $1 AND binding.status = 'active' AND binding.provider = $3
+`, selection.TokenBindingID, publicModel, provider).Scan(&selection.PolicyID, &selection.CanonicalModelID, &selection.Priority, &selection.PriceKind, &cacheFloor)
+	if errors.Is(err, sql.ErrNoRows) {
+		return RouteSelection{}, ErrModelNotAllowed
 	}
 	if err != nil {
 		return RouteSelection{}, fmt.Errorf("读取路由策略：%w", err)

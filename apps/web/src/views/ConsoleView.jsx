@@ -169,7 +169,9 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
   };
 
   const deleteRoute = async (policy) => {
-    if (!window.confirm(`确认删除路由“${policy.name}”吗？`)) return;
+    const affected = Number(policy.bound_key_count || 0);
+    const impact = affected > 0 ? `，并从 ${affected} 把密钥中自动移除` : '';
+    if (!window.confirm(`确认删除路由“${policy.name}”吗${impact}？`)) return;
     try {
       await apiRequest(`/api/routing-policies/${policy.id}`, { method: 'DELETE' });
       notify('路由已删除');
@@ -209,25 +211,24 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
             <UsageTrend data={usage.data} error={usage.error} loading={usage.loading} />
           </>}
 
-          {section === 'routes' && <Section title="路由管理" description="路由可复用，并从全部合格商户中按价格、成功率、速度或缓存指标加权选择" actions={<Button icon={Plus} variant="primary" onClick={() => openModal({ type: 'route', models: models.filter((model) => model.status === 'active'), onSaved: loadKeys })}>创建路由</Button>}>
+          {section === 'routes' && <Section title="路由管理" description="每条路由固定一个厂商和模型，同一模型可创建多套规则供不同密钥复用" actions={<Button disabled={!models.some((model) => model.status === 'active')} icon={Plus} variant="primary" onClick={() => openModal({ type: 'route', models, onSaved: loadKeys })}>创建路由</Button>}>
             <div className="table-wrap">
               <table className="data-table">
-                <thead><tr><th>ID</th><th>名称</th><th>优先方式</th><th>倍率区间</th><th>最低缓存</th><th>绑定密钥</th><th>操作</th></tr></thead>
+                <thead><tr><th>ID</th><th>名称</th><th>厂商</th><th>模型</th><th>优先方式</th><th>倍率区间</th><th>最低缓存</th><th>绑定密钥</th><th>操作</th></tr></thead>
                 <tbody>{routingPolicies.map((policy) => <tr key={policy.id}>
-                  <td><code>{policy.id}</code></td><td><strong>{policy.name}</strong></td><td>{priorityName(policy.priority)}</td><td>{formatMultiplier(policy.minimum_multiplier_bps)} - {formatMultiplier(policy.maximum_multiplier_bps)}</td><td>{cacheFloorName(policy.minimum_cache_hit_ppm)}</td><td>{policy.bound_key_count || 0} 把</td><td><ActionMenu items={[{ label: '编辑', onClick: () => openModal({ type: 'route', policy, models: models.filter((model) => model.status === 'active'), onSaved: loadKeys }) }, { label: '删除', danger: true, disabled: Number(policy.bound_key_count || 0) > 0, onClick: () => deleteRoute(policy) }]} /></td>
+                  <td><code>{policy.id}</code></td><td><strong>{policy.name}</strong></td><td>{policy.provider}</td><td>{policy.model_name}</td><td>{priorityName(policy.priority)}</td><td>{formatMultiplier(policy.minimum_multiplier_bps)} - {formatMultiplier(policy.maximum_multiplier_bps)}</td><td>{cacheFloorName(policy.minimum_cache_hit_ppm)}</td><td>{policy.bound_key_count || 0} 把</td><td><ActionMenu items={[{ label: '编辑', onClick: () => openModal({ type: 'route', policy, models, onSaved: loadKeys }) }, { label: '删除', danger: true, onClick: () => deleteRoute(policy) }]} /></td>
                 </tr>)}
-                {!keyLoading && routingPolicies.length === 0 && <tr><td className="table-message" colSpan="7">{keyError || '尚未创建路由'}</td></tr>}
-                {keyLoading && <tr><td className="table-message" colSpan="7">正在读取路由</td></tr>}</tbody>
+                {!keyLoading && routingPolicies.length === 0 && <tr><td className="table-message" colSpan="9">{keyError || '尚未创建路由'}</td></tr>}
+                {keyLoading && <tr><td className="table-message" colSpan="9">正在读取路由</td></tr>}</tbody>
               </table>
             </div>
           </Section>}
 
-          {section === 'keys' && <Section title="API 密钥" description="创建密钥前需要先创建路由" actions={<Button disabled={!routingPolicies.length} icon={KeyRound} variant="primary" onClick={() => openModal({ type: 'key', routingPolicies, onSaved: loadKeys })}>创建密钥</Button>}>
-            {!routingPolicies.length && !keyLoading && <InlineNotice tone="warning">请先在“路由管理”中创建一条路由。</InlineNotice>}
-            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>名称 / 密钥</th><th>绑定路由</th><th>额度</th><th>状态</th><th>操作</th></tr></thead><tbody>
-              {keys.map((key) => <tr key={key.id}><td><code>{key.id}</code></td><td><strong>{key.name}</strong><CopyValue onCopy={() => copyKey(key)}>{displayKey(key.key)}</CopyValue></td><td><span className="route-kind"><Route size={15} /> {key.routing_policy_name || '未绑定'}</span></td><td>{key.unlimited_quota ? '不限额' : formatQuota(key.remain_quota)}</td><td><div className="status-control"><Status>{Number(key.status) === 1 ? '正常' : '停用'}</Status><label className="compact-switch" title={Number(key.status) === 1 ? '停用密钥' : '启用密钥'}><input aria-label={`启用${key.name}`} checked={Number(key.status) === 1} onChange={(event) => setKeyStatus(key, event.target.checked)} type="checkbox" /><span /></label></div></td><td><ActionMenu items={[{ label: '编辑', onClick: () => openModal({ type: 'key', key, routingPolicies, onSaved: loadKeys }) }, { label: '删除', danger: true, onClick: () => deleteKey(key) }]} /></td></tr>)}
-              {!keyLoading && keys.length === 0 && <tr><td className="table-message" colSpan="6">{keyError || '尚未创建 API 密钥'}</td></tr>}
-              {keyLoading && <tr><td className="table-message" colSpan="6">正在读取 API 密钥</td></tr>}
+          {section === 'keys' && <Section title="API 密钥" description="每把密钥固定一个厂商，可按模型配置同厂商路由，也可以暂时留空" actions={<Button icon={KeyRound} variant="primary" onClick={() => openModal({ type: 'key', routingPolicies, onSaved: loadKeys })}>创建密钥</Button>}>
+            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>名称 / 密钥</th><th>厂商类型</th><th>已配置模型</th><th>额度</th><th>状态</th><th>操作</th></tr></thead><tbody>
+              {keys.map((key) => <tr key={key.id}><td><code>{key.id}</code></td><td><strong>{key.name}</strong><CopyValue onCopy={() => copyKey(key)}>{displayKey(key.key)}</CopyValue></td><td>{key.provider || '-'}</td><td><span className="route-kind"><Route size={15} /> {Number(key.model_count || 0)} 个模型</span></td><td>{key.unlimited_quota ? '不限额' : formatQuota(key.remain_quota)}</td><td><div className="status-control"><Status>{Number(key.status) === 1 ? '正常' : '停用'}</Status><label className="compact-switch" title={Number(key.status) === 1 ? '停用密钥' : '启用密钥'}><input aria-label={`启用${key.name}`} checked={Number(key.status) === 1} onChange={(event) => setKeyStatus(key, event.target.checked)} type="checkbox" /><span /></label></div></td><td><ActionMenu items={[{ label: '编辑', onClick: () => openModal({ type: 'key', key, routingPolicies, onSaved: loadKeys }) }, { label: '配置模型路由', onClick: () => openModal({ type: 'key', key, routesOnly: true, routingPolicies, onSaved: loadKeys }) }, { label: '删除', danger: true, onClick: () => deleteKey(key) }]} /></td></tr>)}
+              {!keyLoading && keys.length === 0 && <tr><td className="table-message" colSpan="7">{keyError || '尚未创建 API 密钥'}</td></tr>}
+              {keyLoading && <tr><td className="table-message" colSpan="7">正在读取 API 密钥</td></tr>}
             </tbody></table></div>
           </Section>}
 

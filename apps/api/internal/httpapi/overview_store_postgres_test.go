@@ -118,18 +118,18 @@ RETURNING id
 	if _, err := database.ExecContext(ctx, `
 INSERT INTO merchant_channel_reviews
 	(merchant_newapi_user_id, application_id, canonical_model_id, channel_test_id, channel_name,
-	 base_url, adapter_type, encrypted_credential, credential_fingerprint, status)
+	 base_url, provider, adapter_type, encrypted_credential, credential_fingerprint, status)
 VALUES (7, $1, $2, $3, '待审渠道', 'https://pending-upstream.example',
-	'openai_compatible', 'encrypted', $4, 'pending')
+	'OpenAI', 'openai_compatible', 'encrypted', $4, 'pending')
 `, pendingApplicationID, modelID, pendingTestID, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.QueryRowContext(ctx, `
 INSERT INTO merchant_channel_reviews
 	(merchant_newapi_user_id, merchant_profile_id, application_id, canonical_model_id, channel_test_id,
-	 channel_name, base_url, adapter_type, credential_fingerprint, status)
+	 channel_name, base_url, provider, adapter_type, credential_fingerprint, status)
 VALUES (8, $1, $2, $3, $4, '已审渠道', 'https://approved-upstream.example',
-	'openai_compatible', $5, 'approved') RETURNING id
+	'OpenAI', 'openai_compatible', $5, 'approved') RETURNING id
 `, merchantID, approvedApplicationID, modelID, approvedTestID,
 		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").Scan(&approvedReviewID); err != nil {
 		t.Fatal(err)
@@ -137,9 +137,9 @@ VALUES (8, $1, $2, $3, $4, '已审渠道', 'https://approved-upstream.example',
 	if err := database.QueryRowContext(ctx, `
 INSERT INTO merchant_channels
 	(merchant_profile_id, review_id, canonical_model_id, newapi_channel_id, channel_name,
-	 base_url, adapter_type, credential_fingerprint)
+	 base_url, provider, adapter_type, credential_fingerprint)
 VALUES ($1, $2, $3, 41, '已审渠道', 'https://approved-upstream.example',
-	'openai_compatible', $4) RETURNING id
+	'OpenAI', 'openai_compatible', $4) RETURNING id
 `, merchantID, approvedReviewID, modelID,
 		"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc").Scan(&channelID); err != nil {
 		t.Fatal(err)
@@ -169,16 +169,24 @@ VALUES ($1, 'cooling', $2, $2)
 	var routingPolicyID int64
 	if err := database.QueryRowContext(ctx, `
 INSERT INTO routing_policies
-	(newapi_user_id, name, priority, minimum_multiplier_bps, maximum_multiplier_bps)
-VALUES (7, '运营测试路由', 'success', 0, 50000)
+	(newapi_user_id, canonical_model_id, name, priority, minimum_multiplier_bps, maximum_multiplier_bps)
+VALUES (7, $1, '运营测试路由', 'success', 0, 50000)
 RETURNING id
-`).Scan(&routingPolicyID); err != nil {
+`, modelID).Scan(&routingPolicyID); err != nil {
+		t.Fatal(err)
+	}
+	var tokenBindingID int64
+	if err := database.QueryRowContext(ctx, `
+INSERT INTO token_bindings (newapi_token_id, newapi_user_id, token_fingerprint, provider)
+VALUES (9, 7, $1, 'OpenAI')
+RETURNING id
+`, "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd").Scan(&tokenBindingID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.ExecContext(ctx, `
-INSERT INTO token_bindings (newapi_token_id, newapi_user_id, token_fingerprint, routing_policy_id)
-VALUES (9, 7, $1, $2)
-`, "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", routingPolicyID); err != nil {
+INSERT INTO token_model_routes (token_binding_id, canonical_model_id, routing_policy_id)
+VALUES ($1, $2, $3)
+`, tokenBindingID, modelID, routingPolicyID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.ExecContext(ctx, `

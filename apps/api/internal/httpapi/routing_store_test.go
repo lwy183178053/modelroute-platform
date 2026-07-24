@@ -20,14 +20,14 @@ func TestCreateRoutingPolicyStoresIndependentSmartRoute(t *testing.T) {
 	defer database.Close()
 	createdAt := time.Date(2026, 7, 23, 9, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO routing_policies")).
-		WithArgs(7, "智能主路由", "balanced", 2_000, 15_000, nil).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "updated_at"}).AddRow(91, createdAt))
+		WithArgs(7, int64(61), "智能主路由", "balanced", 2_000, 15_000, nil).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "public_name", "provider", "updated_at"}).AddRow(91, "gpt-5.6", "OpenAI", createdAt))
 
 	policy, err := NewSQLRoutingStore(database).CreateRoutingPolicy(context.Background(), 7, RoutingPolicyInput{
-		Name: " 智能主路由 ", Priority: "balanced",
+		CanonicalModelID: 61, Name: " 智能主路由 ", Priority: "balanced",
 		MinimumMultiplierBPS: 2_000, MaximumMultiplierBPS: 15_000,
 	})
-	if err != nil || policy.ID != 91 || policy.Name != "智能主路由" || policy.UserID != 7 {
+	if err != nil || policy.ID != 91 || policy.ModelName != "gpt-5.6" || policy.Provider != "OpenAI" || policy.Name != "智能主路由" || policy.UserID != 7 {
 		t.Fatalf("创建路由=%+v err=%v", policy, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -35,7 +35,7 @@ func TestCreateRoutingPolicyStoresIndependentSmartRoute(t *testing.T) {
 	}
 }
 
-func TestBindAndRebindTokenToOwnedRoutingPolicy(t *testing.T) {
+func TestCreateEmptyProviderBindingAndReplaceModelRoutes(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -43,19 +43,32 @@ func TestBindAndRebindTokenToOwnedRoutingPolicy(t *testing.T) {
 	defer database.Close()
 	store := NewSQLRoutingStore(database)
 
+	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO token_bindings")).
-		WithArgs(9, 7, "fingerprint", int64(91)).
-		WillReturnRows(sqlmock.NewRows([]string{"newapi_token_id", "routing_policy_id", "name"}).AddRow(9, 91, "主路由"))
-	binding, err := store.BindTokenToPolicy(context.Background(), 7, 9, "fingerprint", 91)
-	if err != nil || binding.TokenID != 9 || binding.PolicyID != 91 || binding.PolicyName != "主路由" {
+		WithArgs(9, 7, "fingerprint", "OpenAI").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(81))
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM token_model_routes WHERE token_binding_id = $1")).
+		WithArgs(int64(81)).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+	binding, err := store.CreateTokenBinding(context.Background(), 7, 9, "fingerprint", "OpenAI", nil)
+	if err != nil || binding.TokenID != 9 || binding.Provider != "OpenAI" || binding.ModelCount != 0 || len(binding.Routes) != 0 {
 		t.Fatalf("绑定结果=%+v err=%v", binding, err)
 	}
 
-	mock.ExpectQuery(regexp.QuoteMeta("UPDATE token_bindings binding")).
-		WithArgs(7, 9, int64(92)).
-		WillReturnRows(sqlmock.NewRows([]string{"newapi_token_id", "routing_policy_id", "name"}).AddRow(9, 92, "备用路由"))
-	binding, err = store.RebindTokenPolicy(context.Background(), 7, 9, 92)
-	if err != nil || binding.PolicyID != 92 || binding.PolicyName != "备用路由" {
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, provider")).
+		WithArgs(7, 9).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider"}).AddRow(81, "OpenAI"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT policy.id, policy.name, model.id, model.public_name, model.provider, policy.priority")).
+		WithArgs(int64(92), 7).
+		WillReturnRows(sqlmock.NewRows([]string{"policy_id", "policy_name", "model_id", "model_name", "provider", "priority"}).AddRow(92, "备用路由", 61, "gpt-5.6", "OpenAI", "success"))
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM token_model_routes WHERE token_binding_id = $1")).
+		WithArgs(int64(81)).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO token_model_routes")).
+		WithArgs(int64(81), int64(61), int64(92)).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	binding, err = store.ReplaceTokenRoutes(context.Background(), 7, 9, []int64{92})
+	if err != nil || binding.ModelCount != 1 || binding.Routes[0].PolicyID != 92 || binding.Routes[0].ModelName != "gpt-5.6" {
 		t.Fatalf("重新绑定结果=%+v err=%v", binding, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -63,19 +76,100 @@ func TestBindAndRebindTokenToOwnedRoutingPolicy(t *testing.T) {
 	}
 }
 
-func TestDeleteRoutingPolicyRejectsBoundKeys(t *testing.T) {
+func TestReplaceTokenRoutesRejectsCrossProviderAndDuplicateModel(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		routes [][]any
+	}{
+		{name: "跨厂商", routes: [][]any{{int64(91), "Claude 路由", int64(71), "claude-opus-4.8", "Anthropic", "success"}}},
+		{name: "同模型两条规则", routes: [][]any{
+			{int64(91), "低价路由", int64(61), "gpt-5.6", "OpenAI", "price"},
+			{int64(92), "稳定路由", int64(61), "gpt-5.6", "OpenAI", "success"},
+		}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			database, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer database.Close()
+			mock.ExpectBegin()
+			mock.ExpectQuery(regexp.QuoteMeta("SELECT id, provider")).
+				WithArgs(7, 9).WillReturnRows(sqlmock.NewRows([]string{"id", "provider"}).AddRow(81, "OpenAI"))
+			policyIDs := make([]int64, 0, len(testCase.routes))
+			for _, row := range testCase.routes {
+				policyID := row[0].(int64)
+				policyIDs = append(policyIDs, policyID)
+				mock.ExpectQuery(regexp.QuoteMeta("SELECT policy.id, policy.name, model.id, model.public_name, model.provider, policy.priority")).
+					WithArgs(policyID, 7).
+					WillReturnRows(sqlmock.NewRows([]string{"policy_id", "policy_name", "model_id", "model_name", "provider", "priority"}).AddRow(row[0], row[1], row[2], row[3], row[4], row[5]))
+			}
+			mock.ExpectRollback()
+			_, err = NewSQLRoutingStore(database).ReplaceTokenRoutes(context.Background(), 7, 9, policyIDs)
+			if !errors.Is(err, ErrRoutingInvalidState) {
+				t.Fatalf("路由冲突错误=%v", err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestDeleteRoutingPolicyDetachesBoundKeys(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	mock.ExpectQuery(regexp.QuoteMeta("WITH target AS")).
+	mock.ExpectQuery(regexp.QuoteMeta("count(DISTINCT route.token_binding_id) AS bound_key_count")).
 		WithArgs(7, int64(91)).
-		WillReturnRows(sqlmock.NewRows([]string{"bound_key_count", "deleted_id"}).AddRow(2, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"bound_key_count", "deleted_id"}).AddRow(2, 91))
 
-	err = NewSQLRoutingStore(database).DeleteRoutingPolicy(context.Background(), 7, 91)
-	if !errors.Is(err, ErrRoutingInvalidState) {
-		t.Fatalf("删除已绑定路由错误=%v", err)
+	affected, err := NewSQLRoutingStore(database).DeleteRoutingPolicy(context.Background(), 7, 91)
+	if err != nil || affected != 2 {
+		t.Fatalf("删除已绑定路由 affected=%d err=%v", affected, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSetTokenBindingStatusUpdatesPlatformAuthorization(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewSQLRoutingStore(database)
+	for _, testCase := range []struct {
+		enabled bool
+		status  string
+	}{
+		{enabled: false, status: "revoked"},
+		{enabled: true, status: "active"},
+	} {
+		mock.ExpectExec(regexp.QuoteMeta("UPDATE token_bindings SET status = $1, synced_at = now()")).
+			WithArgs(testCase.status, 7, 9).WillReturnResult(sqlmock.NewResult(0, 1))
+		if err := store.SetTokenBindingStatus(context.Background(), 7, 9, testCase.enabled); err != nil {
+			t.Fatalf("同步密钥状态 enabled=%v：%v", testCase.enabled, err)
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRevokeTokenBindingDeletesPlatformBinding(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM token_bindings WHERE newapi_user_id = $1 AND newapi_token_id = $2")).
+		WithArgs(7, 9).WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := NewSQLRoutingStore(database).RevokeTokenBinding(context.Background(), 7, 9); err != nil {
+		t.Fatalf("删除平台密钥绑定：%v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -97,8 +191,8 @@ func TestRoutingPolicyCacheFloorScansNullableValue(t *testing.T) {
 	defer database.Close()
 	mock.ExpectQuery(regexp.QuoteMeta("FROM routing_policies policy")).
 		WithArgs(7, int64(91)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "name", "priority", "minimum_multiplier_bps", "maximum_multiplier_bps", "minimum_cache_hit_ppm", "bound_key_count", "updated_at"}).
-			AddRow(91, 7, "缓存路由", "cache", 0, 50_000, sql.NullInt64{Int64: 650_000, Valid: true}, 1, time.Now()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "name", "model_id", "model_name", "provider", "priority", "minimum_multiplier_bps", "maximum_multiplier_bps", "minimum_cache_hit_ppm", "bound_key_count", "updated_at"}).
+			AddRow(91, 7, "缓存路由", 61, "gpt-5.6", "OpenAI", "cache", 0, 50_000, sql.NullInt64{Int64: 650_000, Valid: true}, 1, time.Now()))
 	policy, err := NewSQLRoutingStore(database).RoutingPolicy(context.Background(), 7, 91)
 	if err != nil || policy.MinimumCacheHitPPM == nil || *policy.MinimumCacheHitPPM != 650_000 {
 		t.Fatalf("缓存阈值路由=%+v err=%v", policy, err)
@@ -115,9 +209,9 @@ func TestListAndUpdateIndependentRoutingPolicies(t *testing.T) {
 	now := time.Now()
 	mock.ExpectQuery(regexp.QuoteMeta("FROM routing_policies policy")).
 		WithArgs(7).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "name", "priority", "minimum_multiplier_bps", "maximum_multiplier_bps", "minimum_cache_hit_ppm", "bound_key_count", "updated_at"}).
-			AddRow(91, 7, "主路由", "price", 0, 50_000, nil, 2, now).
-			AddRow(92, 7, "备用路由", "success", 5_000, 10_000, nil, 0, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "name", "model_id", "model_name", "provider", "priority", "minimum_multiplier_bps", "maximum_multiplier_bps", "minimum_cache_hit_ppm", "bound_key_count", "updated_at"}).
+			AddRow(91, 7, "主路由", 61, "gpt-5.6", "OpenAI", "price", 0, 50_000, nil, 2, now).
+			AddRow(92, 7, "备用路由", 62, "gpt-5.5", "OpenAI", "success", 5_000, 10_000, nil, 0, now))
 	items, err := store.ListRoutingPolicies(context.Background(), 7)
 	if err != nil || len(items) != 2 || items[0].BoundKeyCount != 2 || items[1].Priority != "success" {
 		t.Fatalf("路由列表=%+v err=%v", items, err)
@@ -126,7 +220,7 @@ func TestListAndUpdateIndependentRoutingPolicies(t *testing.T) {
 	cacheFloor := 600_000
 	mock.ExpectQuery(regexp.QuoteMeta("UPDATE routing_policies")).
 		WithArgs("缓存优先", "cache", 0, 50_000, &cacheFloor, 7, int64(91)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "bound_key_count", "updated_at"}).AddRow(91, 2, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "model_id", "model_name", "provider", "bound_key_count", "updated_at"}).AddRow(91, 61, "gpt-5.6", "OpenAI", 2, now))
 	updated, err := store.UpdateRoutingPolicy(context.Background(), 7, 91, RoutingPolicyInput{
 		Name: "缓存优先", Priority: "cache",
 		MinimumMultiplierBPS: 0, MaximumMultiplierBPS: 50_000,
@@ -140,18 +234,90 @@ func TestListAndUpdateIndependentRoutingPolicies(t *testing.T) {
 	}
 }
 
-func TestListTokenRoutingBindingsReturnsPlatformRouteIdentity(t *testing.T) {
+func TestListTokenRoutingBindingsIncludesDisabledPlatformKeys(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	mock.ExpectQuery(regexp.QuoteMeta("FROM token_bindings binding")).
+	mock.ExpectQuery(regexp.QuoteMeta("WHERE binding.newapi_user_id = $1 ORDER BY binding.newapi_token_id DESC, model.public_name, policy.id")).
 		WithArgs(7).
-		WillReturnRows(sqlmock.NewRows([]string{"token_id", "policy_id", "policy_name"}).AddRow(9, 91, "主路由"))
+		WillReturnRows(sqlmock.NewRows([]string{"token_id", "provider", "policy_id", "policy_name", "model_id", "model_name", "model_provider", "priority"}).AddRow(9, "OpenAI", 91, "主路由", 61, "gpt-5.6", "OpenAI", "price"))
 	items, err := NewSQLRoutingStore(database).ListTokenRoutingBindings(context.Background(), 7)
-	if err != nil || len(items) != 1 || items[0].TokenID != 9 || items[0].PolicyName != "主路由" {
+	if err != nil || len(items) != 1 || items[0].TokenID != 9 || items[0].Provider != "OpenAI" || items[0].ModelCount != 1 || items[0].Routes[0].PolicyName != "主路由" {
 		t.Fatalf("密钥路由摘要=%+v err=%v", items, err)
+	}
+}
+
+func TestReplaceTokenRoutesAllowsDisabledPlatformKey(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("WHERE newapi_user_id = $1 AND newapi_token_id = $2 FOR UPDATE")).
+		WithArgs(7, 9).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider"}).AddRow(21, "OpenAI"))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM routing_policies policy")).
+		WithArgs(int64(91), 7).
+		WillReturnRows(sqlmock.NewRows([]string{"policy_id", "policy_name", "model_id", "model_name", "provider", "priority"}).
+			AddRow(91, "低价路由", 61, "gpt-5.6", "OpenAI", "price"))
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM token_model_routes WHERE token_binding_id = $1")).
+		WithArgs(int64(21)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO token_model_routes")).
+		WithArgs(int64(21), int64(61), int64(91)).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	binding, err := NewSQLRoutingStore(database).ReplaceTokenRoutes(context.Background(), 7, 9, []int64{91})
+	if err != nil || binding.ModelCount != 1 || binding.Provider != "OpenAI" {
+		t.Fatalf("停用密钥配置路由=%+v err=%v", binding, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestResolveRouteDistinguishesInvalidKeyAndUnboundModel(t *testing.T) {
+	for _, testCase := range []struct {
+		name        string
+		prepare     func(sqlmock.Sqlmock)
+		expectedErr error
+	}{
+		{
+			name: "无效密钥",
+			prepare: func(mock sqlmock.Sqlmock) {
+				mock.ExpectQuery(regexp.QuoteMeta("SELECT id, provider FROM token_bindings")).
+					WithArgs("missing").WillReturnRows(sqlmock.NewRows([]string{"id", "provider"}))
+			},
+			expectedErr: ErrTokenNotFound,
+		},
+		{
+			name: "未绑定模型",
+			prepare: func(mock sqlmock.Sqlmock) {
+				mock.ExpectQuery(regexp.QuoteMeta("SELECT id, provider FROM token_bindings")).
+					WithArgs("known").WillReturnRows(sqlmock.NewRows([]string{"id", "provider"}).AddRow(81, "OpenAI"))
+				mock.ExpectQuery(regexp.QuoteMeta("JOIN token_model_routes route ON route.token_binding_id = binding.id")).
+					WithArgs(int64(81), "gpt-5.6", "OpenAI").WillReturnRows(sqlmock.NewRows([]string{"policy_id", "model_id", "priority", "price_kind", "minimum_cache_hit_ppm"}))
+			},
+			expectedErr: ErrModelNotAllowed,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			database, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer database.Close()
+			testCase.prepare(mock)
+			_, err = NewSQLRoutingStore(database).ResolveRoute(context.Background(), map[string]string{"无效密钥": "missing", "未绑定模型": "known"}[testCase.name], "gpt-5.6")
+			if !errors.Is(err, testCase.expectedErr) {
+				t.Fatalf("路由错误=%v，期望=%v", err, testCase.expectedErr)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
@@ -162,10 +328,13 @@ func TestResolveRouteFiltersInsufficientCacheSampleAndKnownLowValue(t *testing.T
 	}
 	defer database.Close()
 	fingerprint := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-	mock.ExpectQuery(regexp.QuoteMeta("JOIN routing_policies p ON p.id = b.routing_policy_id")).
-		WithArgs(fingerprint, "gpt-5.6").
-		WillReturnRows(sqlmock.NewRows([]string{"binding_id", "policy_id", "model_id", "priority", "price_kind", "minimum_cache_hit_ppm"}).
-			AddRow(81, 91, 61, "cache", "text", 600_000))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, provider FROM token_bindings")).
+		WithArgs(fingerprint).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider"}).AddRow(81, "OpenAI"))
+	mock.ExpectQuery(regexp.QuoteMeta("JOIN token_model_routes route ON route.token_binding_id = binding.id")).
+		WithArgs(int64(81), "gpt-5.6", "OpenAI").
+		WillReturnRows(sqlmock.NewRows([]string{"policy_id", "model_id", "priority", "price_kind", "minimum_cache_hit_ppm"}).
+			AddRow(91, 61, "cache", "text", 600_000))
 	mock.ExpectQuery(regexp.QuoteMeta("WITH merchant_metrics AS")).
 		WithArgs(int64(91), int64(61)).
 		WillReturnRows(sqlmock.NewRows([]string{

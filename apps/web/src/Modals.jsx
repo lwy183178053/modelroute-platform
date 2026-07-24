@@ -4,6 +4,8 @@ import AuthModal from './AuthModal';
 import { apiRequest, formatPriceMicros, formatQuota, getQuotaPerUnit } from './api';
 import { Button, Field, InlineNotice, Modal, Select, Status, TextInput } from './ui';
 
+const providerOptions = ['OpenAI', 'Anthropic', 'Gemini', 'DeepSeek', 'Qwen', 'Moonshot'];
+
 function Footer({ cancel, submit, submitText, icon = Check }) {
   return <><Button onClick={cancel}>取消</Button><Button icon={icon} variant="primary" onClick={submit}>{submitText}</Button></>;
 }
@@ -21,14 +23,21 @@ function merchantNameUnits(value) {
 function RouteModal({ close, config, notify }) {
   const policy = config.policy || {};
   const editing = Boolean(policy.id);
-  const previewModels = (config.models || []).filter((model) => model.status === 'active');
+  const activeModels = (config.models || []).filter((model) => model.status === 'active');
+  const currentModel = (config.models || []).find((model) => Number(model.id) === Number(policy.model_id));
+  const previewModels = editing && currentModel && !activeModels.some((model) => model.id === currentModel.id)
+    ? [...activeModels, currentModel]
+    : activeModels;
+  const initialProvider = policy.provider || previewModels[0]?.provider || 'OpenAI';
   const [name, setName] = useState(policy.name || '');
+  const [provider, setProvider] = useState(initialProvider);
+  const providerModels = previewModels.filter((model) => model.provider === provider);
+  const [modelID, setModelID] = useState(String(policy.model_id || previewModels.find((model) => model.provider === initialProvider)?.id || ''));
   const [priority, setPriority] = useState(policy.priority || 'balanced');
   const [minimum, setMinimum] = useState(String(Number(policy.minimum_multiplier_bps ?? 0) / 10_000));
   const [maximum, setMaximum] = useState(String(Number(policy.maximum_multiplier_bps ?? 50_000) / 10_000));
   const [cacheFloorEnabled, setCacheFloorEnabled] = useState(policy.minimum_cache_hit_ppm != null);
   const [cacheFloor, setCacheFloor] = useState(String(Number(policy.minimum_cache_hit_ppm ?? 0) / 10_000));
-  const [previewModelID, setPreviewModelID] = useState(String(previewModels[0]?.id || ''));
   const [preview, setPreview] = useState({ state: 'idle', data: null, error: '' });
   const [previewNonce, setPreviewNonce] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -38,7 +47,7 @@ function RouteModal({ close, config, notify }) {
     const minimumBPS = Math.round(Number(minimum) * 10_000);
     const maximumBPS = Math.round(Number(maximum) * 10_000);
     const minimumCacheHitPPM = cacheFloorEnabled ? Math.round(Number(cacheFloor) * 10_000) : null;
-    const valid = Number(previewModelID) > 0
+    const valid = Number(modelID) > 0
       && Number.isInteger(minimumBPS) && Number.isInteger(maximumBPS)
       && minimumBPS >= 0 && maximumBPS <= 50_000 && minimumBPS <= maximumBPS
       && (minimumCacheHitPPM == null || (Number.isInteger(minimumCacheHitPPM) && minimumCacheHitPPM >= 0 && minimumCacheHitPPM <= 1_000_000));
@@ -53,7 +62,7 @@ function RouteModal({ close, config, notify }) {
         const data = await apiRequest('/api/routing-policies/preview', {
           method: 'POST', signal: controller.signal,
           body: {
-            canonical_model_id: Number(previewModelID),
+            canonical_model_id: Number(modelID),
             minimum_multiplier_bps: minimumBPS,
             maximum_multiplier_bps: maximumBPS,
             minimum_cache_hit_ppm: minimumCacheHitPPM,
@@ -68,11 +77,15 @@ function RouteModal({ close, config, notify }) {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [cacheFloor, cacheFloorEnabled, maximum, minimum, previewModelID, previewNonce]);
+  }, [cacheFloor, cacheFloorEnabled, maximum, minimum, modelID, previewNonce]);
 
   const submit = async () => {
     if (!name.trim()) {
       setError('请输入路由名称');
+      return;
+    }
+    if (!editing && Number(modelID) <= 0) {
+      setError('请选择具体模型');
       return;
     }
     const minimumBPS = Math.round(Number(minimum) * 10_000);
@@ -96,6 +109,7 @@ function RouteModal({ close, config, notify }) {
           minimum_multiplier_bps: minimumBPS,
           maximum_multiplier_bps: maximumBPS,
           minimum_cache_hit_ppm: minimumCacheHitPPM,
+          ...(!editing && { canonical_model_id: Number(modelID) }),
         },
       });
       await config.onSaved?.();
@@ -116,6 +130,14 @@ function RouteModal({ close, config, notify }) {
       footer={<><Button onClick={close}>取消</Button><Button disabled={busy} icon={Check} variant="primary" onClick={submit}>{busy ? '保存中' : '保存策略'}</Button></>}
     >
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
+      <div className="form-grid two-column">
+        <Field label="模型厂商"><Select aria-label="模型厂商" disabled={editing} onChange={(event) => {
+          const nextProvider = event.target.value;
+          setProvider(nextProvider);
+          setModelID(String(previewModels.find((model) => model.provider === nextProvider)?.id || ''));
+        }} value={provider}>{providerOptions.map((item) => <option key={item} value={item}>{item}</option>)}</Select></Field>
+        <Field label="具体模型"><Select aria-label="具体模型" disabled={editing} onChange={(event) => setModelID(event.target.value)} value={modelID}><option value="">请选择模型</option>{providerModels.map((model) => <option key={model.id} value={model.id}>{model.public_name}</option>)}</Select></Field>
+      </div>
       <Field label="路由名称"><TextInput maxLength="50" onChange={(event) => setName(event.target.value)} placeholder="例如：稳定主路由" value={name} /></Field>
       <div className="form-grid two-column">
         <Field label="最低成交倍率" hint="低于此倍率的报价不参与路由"><TextInput value={minimum} onChange={(event) => setMinimum(event.target.value)} min="0" max="5" step="0.01" type="number" /></Field>
@@ -136,12 +158,7 @@ function RouteModal({ close, config, notify }) {
       </div>
       <div className="form-section route-preview-section">
         <h3>路由范围预览</h3>
-        <Field label="预览模型" hint="仅用于计算当前条件，不会保存到路由">
-          <Select onChange={(event) => setPreviewModelID(event.target.value)} value={previewModelID}>
-            {previewModels.map((model) => <option key={model.id} value={model.id}>{model.public_name} · {model.provider}</option>)}
-          </Select>
-        </Field>
-        {previewModels.length === 0 && <InlineNotice tone="warning">当前没有可用于预览的模型。</InlineNotice>}
+        {Number(modelID) <= 0 && <InlineNotice tone="warning">请先选择用于该路由的具体模型。</InlineNotice>}
         {preview.data && <div className="route-preview-stats" aria-label="路由范围统计">
           <div><span>可用商户</span><strong>{preview.data.available_merchant_count}</strong></div>
           <div><span>可用渠道</span><strong>{preview.data.available_channel_count}</strong></div>
@@ -528,41 +545,48 @@ function WithdrawalActionModal({ close, config, notify }) {
 
 function KeyModal({ config, close, notify }) {
   const key = config.key;
+  const routesOnly = Boolean(key && config.routesOnly);
   const [name, setName] = useState(key?.name || '');
-  const [routingPolicyID, setRoutingPolicyID] = useState(String(key?.routing_policy_id || config.routingPolicies?.[0]?.id || ''));
+  const [provider, setProvider] = useState(key?.provider || 'OpenAI');
+  const [selectedRoutes, setSelectedRoutes] = useState(() => Object.fromEntries((key?.routing_policies || []).map((route) => [String(route.model_id), String(route.routing_policy_id)])));
   const [unlimitedQuota, setUnlimitedQuota] = useState(key?.unlimited_quota ?? true);
   const [remainQuota, setRemainQuota] = useState(String(key?.remain_quota || 0));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const providerRoutes = (config.routingPolicies || []).filter((route) => route.provider === provider);
+  const modelGroups = [...providerRoutes.reduce((groups, route) => {
+    const modelID = String(route.model_id);
+    if (!groups.has(modelID)) groups.set(modelID, { modelID, modelName: route.model_name, routes: [] });
+    groups.get(modelID).routes.push(route);
+    return groups;
+  }, new Map()).values()];
+  const routingPolicyIDs = Object.values(selectedRoutes).filter(Boolean).map(Number);
 
   const submit = async () => {
-    if (!routingPolicyID) {
-      setError('请选择绑定路由');
-      return;
-    }
     setBusy(true);
     setError('');
     try {
-      await apiRequest(key ? `/api/keys/${key.id}` : '/api/keys', {
-        method: key ? 'PUT' : 'POST',
-        body: {
-          name: name.trim(),
-          expired_time: key?.expired_time ?? -1,
-          remain_quota: Number(remainQuota || 0),
-          unlimited_quota: unlimitedQuota,
-          model_limits_enabled: Boolean(key?.model_limits_enabled),
-          model_limits: key?.model_limits || '',
-          allow_ips: key?.allow_ips || null,
-          group: key?.group || config.group || 'default',
-          cross_group_retry: Boolean(key?.cross_group_retry),
-          ...(!key && { routing_policy_id: Number(routingPolicyID) }),
-        },
-      });
-      if (key && Number(routingPolicyID) !== Number(key.routing_policy_id)) {
-        await apiRequest(`/api/keys/${key.id}/routing-policy`, { method: 'PUT', body: { routing_policy_id: Number(routingPolicyID) } });
+      if (routesOnly) {
+        await apiRequest(`/api/keys/${key.id}/routing-policies`, { method: 'PUT', body: { routing_policy_ids: routingPolicyIDs } });
+      } else {
+        await apiRequest(key ? `/api/keys/${key.id}` : '/api/keys', {
+          method: key ? 'PUT' : 'POST',
+          body: {
+            name: name.trim(),
+            expired_time: key?.expired_time ?? -1,
+            remain_quota: Number(remainQuota || 0),
+            unlimited_quota: unlimitedQuota,
+            model_limits_enabled: false,
+            model_limits: '',
+            allow_ips: key?.allow_ips || null,
+            group: key?.group || config.group || 'default',
+            cross_group_retry: Boolean(key?.cross_group_retry),
+            ...(!key && { provider, routing_policy_ids: routingPolicyIDs }),
+          },
+        });
       }
       await config.onSaved?.();
-      notify(key ? '密钥已更新' : '密钥已创建');
+      notify(routesOnly ? '模型路由已保存' : key ? '密钥已更新' : '密钥已创建');
       close();
     } catch (requestError) {
       setError(requestError.message || '保存密钥失败');
@@ -571,13 +595,25 @@ function KeyModal({ config, close, notify }) {
     }
   };
 
+  const routeFields = <div className="key-route-fields">
+    <div className="key-route-heading"><span>模型路由</span><small>每个模型最多选择一套路由，也可以暂时不启用。</small></div>
+    {modelGroups.map((group) => <Field key={group.modelID} label={`${group.modelName} 路由`}>
+      <Select aria-label={`${group.modelName} 路由`} onChange={(event) => setSelectedRoutes((current) => ({ ...current, [group.modelID]: event.target.value }))} value={selectedRoutes[group.modelID] || ''}>
+        <option value="">不启用</option>
+        {group.routes.map((route) => <option key={route.id} value={route.id}>路由 {route.id}：{route.name} · {({ balanced: '均衡', price: '价格', success: '成功率', latency: '速度', cache: '缓存' }[route.priority] || route.priority)}</option>)}
+      </Select>
+    </Field>)}
+    {modelGroups.length === 0 && <InlineNotice tone="warning">该厂商尚未创建模型路由，可以先保存空密钥。</InlineNotice>}
+  </div>;
+
   return (
-    <Modal title={key ? '编辑 API 密钥' : '创建 API 密钥'} description="每把密钥必须绑定一条路由，路由修改后立即生效。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !name.trim() || !routingPolicyID} icon={KeyRound} onClick={submit} variant="primary">{busy ? '保存中' : '保存密钥'}</Button></>}>
+    <Modal title={routesOnly ? '配置模型路由' : key ? '编辑 API 密钥' : '创建 API 密钥'} description="密钥厂商创建后固定，只能配置同厂商模型的路由。" onClose={close} wide={routesOnly || !key} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || (!routesOnly && !name.trim())} icon={KeyRound} onClick={submit} variant="primary">{busy ? '保存中' : routesOnly ? '保存模型路由' : '保存密钥'}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
-      <Field label="密钥名称"><TextInput maxLength="50" onChange={(event) => setName(event.target.value)} value={name} /></Field>
-      <Field label="绑定路由"><Select aria-label="绑定路由" onChange={(event) => setRoutingPolicyID(event.target.value)} value={routingPolicyID}><option value="">请选择路由</option>{(config.routingPolicies || []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></Field>
-      <label className="toggle-line"><input checked={unlimitedQuota} onChange={(event) => setUnlimitedQuota(event.target.checked)} type="checkbox" /><span><strong>不限额</strong><small>关闭后按下方整数额度限制使用</small></span></label>
-      {!unlimitedQuota && <Field label="可用额度"><TextInput min="0" onChange={(event) => setRemainQuota(event.target.value)} type="number" value={remainQuota} /></Field>}
+      {!routesOnly && <Field label="密钥名称"><TextInput maxLength="50" onChange={(event) => setName(event.target.value)} value={name} /></Field>}
+      <Field label="密钥厂商"><Select aria-label="密钥厂商" disabled={Boolean(key)} onChange={(event) => { setProvider(event.target.value); setSelectedRoutes({}); }} value={provider}>{providerOptions.map((item) => <option key={item} value={item}>{item}</option>)}</Select></Field>
+      {(!key || routesOnly) && routeFields}
+      {!routesOnly && <label className="toggle-line"><input checked={unlimitedQuota} onChange={(event) => setUnlimitedQuota(event.target.checked)} type="checkbox" /><span><strong>不限额</strong><small>关闭后按下方整数额度限制使用</small></span></label>}
+      {!routesOnly && !unlimitedQuota && <Field label="可用额度"><TextInput min="0" onChange={(event) => setRemainQuota(event.target.value)} type="number" value={remainQuota} /></Field>}
     </Modal>
   );
 }

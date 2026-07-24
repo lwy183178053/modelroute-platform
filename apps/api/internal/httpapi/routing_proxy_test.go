@@ -22,6 +22,7 @@ func (s *proxyClientStub) Proxy(context.Context, string, string, http.Header, []
 
 type routeRepositoryStub struct {
 	RoutingRepository
+	resolve       func(string, string) (RouteSelection, error)
 	selection     RouteSelection
 	resolveError  error
 	imagePrices   []ImagePriceItem
@@ -31,7 +32,10 @@ type routeRepositoryStub struct {
 	observations  []RouteObservation
 }
 
-func (s *routeRepositoryStub) ResolveRoute(context.Context, string, string) (RouteSelection, error) {
+func (s *routeRepositoryStub) ResolveRoute(_ context.Context, fingerprint string, model string) (RouteSelection, error) {
+	if s.resolve != nil {
+		return s.resolve(fingerprint, model)
+	}
 	return s.selection, s.resolveError
 }
 
@@ -120,6 +124,62 @@ func TestModelProxyReturnsOpenAI503WithoutUpstreamWhenNoCandidate(t *testing.T) 
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusServiceUnavailable || upstreamCalls != 0 || !strings.Contains(response.Body.String(), `"code":"no_available_channel"`) {
 		t.Fatalf("无候选响应=%d %s，上游调用=%d", response.Code, response.Body.String(), upstreamCalls)
+	}
+}
+
+func TestModelProxyReturnsKeyAndModelAuthorizationErrors(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		err        error
+		statusCode int
+		code       string
+	}{
+		{name: "无效密钥", err: ErrTokenNotFound, statusCode: http.StatusUnauthorized, code: "invalid_api_key"},
+		{name: "模型未绑定", err: ErrModelNotAllowed, statusCode: http.StatusForbidden, code: "model_not_allowed"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Fatal("鉴权失败时不应访问核心服务")
+			}))
+			services.Credentials = testCredentialBox(t)
+			services.Routing = &routeRepositoryStub{resolveError: testCase.err}
+			handler := NewServerWithServices("test", Dependencies{}, services)
+			request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5.6","messages":[]}`))
+			request.Header.Set("Authorization", "Bearer sk-user-route")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != testCase.statusCode || !strings.Contains(response.Body.String(), `"code":"`+testCase.code+`"`) {
+				t.Fatalf("响应=%d %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestModelListIncludesOnlyBoundModelsWithCandidatesAndDeduplicates(t *testing.T) {
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	services.Credentials = testCredentialBox(t)
+	services.Routing = &routeRepositoryStub{resolve: func(_ string, model string) (RouteSelection, error) {
+		switch model {
+		case "gpt-5.6":
+			return RouteSelection{Candidates: []RouteCandidate{{OfferChannelAliasID: 81}}}, nil
+		case "gpt-5.5":
+			return RouteSelection{}, nil
+		default:
+			return RouteSelection{}, ErrModelNotAllowed
+		}
+	}}
+	server := &server{services: services}
+	request := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	value := map[string]any{"data": []any{
+		map[string]any{"id": "gpt-5.6"},
+		map[string]any{"id": "gpt-5.6"},
+		map[string]any{"id": "gpt-5.5"},
+		map[string]any{"id": "claude-opus-4.8"},
+	}}
+	filtered := server.filterRoutableModelList(request, value, "fingerprint").(map[string]any)
+	items := filtered["data"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["id"] != "gpt-5.6" {
+		t.Fatalf("模型列表=%+v", items)
 	}
 }
 

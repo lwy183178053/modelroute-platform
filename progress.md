@@ -3068,3 +3068,59 @@
 - `progress.md`：追加真实 504 复现、异步验证、审批、版本、容器和隔离验收证据。
 - 生产发布目录：`/opt/modelroute-platform/releases/4ad2ea845834`，上一稳定指针为 `/opt/modelroute-platform/releases/e4d271672264`。
 - 代码回滚可把 `current` 切回 `e4d271672264` 后执行其部署脚本；本轮没有数据库迁移。正式渠道 ID 1 是本次验收产生的业务数据，代码回滚不会自动删除，可在管理后台下架或删除。
+
+## 2026-07-24 - Task: 改造单厂商密钥与可复用单模型路由
+
+### What was done
+
+- 路由创建时固定一个标准模型及其厂商，同一模型可创建多套不同优先策略；编辑只允许修改名称、倍率范围、优先方式和最低缓存阈值。
+- API 密钥创建时固定六类厂商之一，可为同厂商多个模型分别选择一条路由，也可保持空绑定；跨厂商、跨用户和同模型重复绑定均由服务端拦截。
+- 请求解析改为“密钥 -> 公开模型 -> 唯一路由 -> 商户与渠道候选”；无效或停用密钥返回 `401`，未绑定或跨厂商模型返回 `403`，已绑定但无候选返回 `503`。
+- 删除路由会自动解除全部密钥绑定并返回受影响密钥数；停用密钥继续显示并允许配置或重新启用，删除密钥则删除平台绑定且保留历史调用记录。
+- `/v1/models` 只返回当前密钥已绑定且存在可用候选的公开模型，去重并隐藏内部别名；控制台完成路由厂商/模型列、密钥厂商/模型数、模型路由配置和删除影响提示。
+- 新增第 11 号迁移清理旧用户密钥、路由和绑定，保留用户、余额、商户、渠道、模型及历史调用；部署脚本只删除核心服务中对应的旧用户 Token，不触碰内部服务令牌。
+
+### Testing
+
+- 先用 `TestListTokenRoutingBindingsIncludesDisabledPlatformKeys`、`TestReplaceTokenRoutesAllowsDisabledPlatformKey` 和 `TestRevokeTokenBindingDeletesPlatformBinding` 稳定复现停用密钥消失、停用后不可配置及删除后残留绑定，修复后目标测试通过。
+- `go test ./... -count=1`：通过，全部 Go 单元与契约测试无失败。
+- `MODELROUTE_TEST_DATABASE_URL=<临时 PostgreSQL> go test ./internal/httpapi -run 'TestSQLRoutingStoreAgainstPostgres|TestSQLAdminOverviewStoreUsesSettledIntegerLedgerData' -count=1`：通过，真实数据库验证单厂商多模型绑定、删除路由自动解绑、停用/删除密钥边界和运营查询。
+- `MODELROUTE_TEST_DATABASE_URL=<临时 PostgreSQL> go test ./internal/migrations -run TestProviderModelRouteMigrationKeepsHistoricalDecisions -count=1`：通过，第 10 号升级到第 11 号后历史调用记录保留且旧外键置空。
+- `go vet ./...`、`go build ./cmd/api ./cmd/worker`：通过。
+- `npm.cmd run test:quota`、`npm.cmd run test:ui`、`npm.cmd run build`、`npm.cmd run capture`：通过；UI 烟雾覆盖单模型路由、单厂商空密钥、多模型路由配置、跨厂商隔离、删除自动解绑及桌面和移动布局。
+- 人工检查 `route-modal-desktop.png`、`route-modal-mobile.png`、`console-keys-desktop.png` 和 `console-keys-mobile.png`：厂商、模型、路由规则、密钥厂商与模型数无文字重叠或横向溢出。
+- `python -m unittest discover -s deploy/tests -p "test_*.py"`：27 项通过；路由发布验收已使用新契约，部署脚本旧用户 Token 清理顺序受测试锁定。
+- `bash -n deploy/scripts/verify-routing.sh`、`docker compose --env-file .env.example --profile tools config --quiet`、`git diff --check`：通过；差异敏感信息扫描未发现上游密钥或支付凭据正文。
+
+### Notes
+
+- `apps/api/internal/httpapi/account_handlers.go`：密钥接口改为固定厂商和完整模型路由列表，并同步启停及删除绑定。
+- `apps/api/internal/httpapi/overview_store_postgres_test.go`：更新真实运营查询夹具以适配模型路由绑定结构。
+- `apps/api/internal/httpapi/routing_handlers.go`：区分创建与编辑字段，增加删除路由影响数量和多路由绑定处理。
+- `apps/api/internal/httpapi/routing_handlers_test.go`：覆盖单模型路由、空密钥、多模型绑定、接口越权和启停同步。
+- `apps/api/internal/httpapi/routing_proxy.go`：按密钥和请求模型解析唯一路由，细分 401、403、503 并过滤模型列表。
+- `apps/api/internal/httpapi/routing_proxy_test.go`：覆盖错误码、可路由模型过滤、去重和协议透传回归。
+- `apps/api/internal/httpapi/routing_store.go`：实现厂商密钥、模型路由关系、自动解绑、停用可管理和删除绑定。
+- `apps/api/internal/httpapi/routing_store_postgres_test.go`：用真实 PostgreSQL 覆盖同厂商多模型、同模型唯一绑定、跨厂商拒绝及历史记录保留。
+- `apps/api/internal/httpapi/routing_store_test.go`：增加仓储 SQL、停用密钥可见性、删除清理和受影响数量测试。
+- `apps/api/internal/httpapi/server.go`：注册完整模型路由替换接口并移除旧单路由接口。
+- `apps/api/internal/migrations/migrate_test.go`：锁定第 11 号迁移结构、厂商约束和历史调用保留。
+- `apps/api/internal/migrations/sql/000011_provider_model_routes.sql`：建立单厂商密钥与单模型路由数据结构并清理旧绑定。
+- `apps/web/artifacts/console-keys-desktop.png`：更新桌面密钥厂商与已配置模型验收图。
+- `apps/web/artifacts/console-keys-mobile.png`：更新移动端密钥页面验收图。
+- `apps/web/artifacts/route-modal-desktop.png`：更新桌面单模型路由编辑验收图。
+- `apps/web/artifacts/route-modal-mobile.png`：更新移动端单模型路由编辑验收图。
+- `apps/web/scripts/capture.mjs`：更新路由和密钥截图夹具为厂商及多模型绑定结构。
+- `apps/web/scripts/ui-smoke.mjs`：覆盖新路由、密钥创建和模型路由配置交互。
+- `apps/web/src/Modals.jsx`：路由弹窗增加厂商/模型选择，密钥弹窗增加厂商和按模型单选路由。
+- `apps/web/src/styles.css`：增加密钥模型路由分组的紧凑样式。
+- `apps/web/src/views/ConsoleView.jsx`：路由和密钥列表增加厂商、模型及配置操作，并允许删除已绑定路由。
+- `deploy/scripts/deploy.sh`：第 11 号迁移前删除核心服务中对应的旧用户 Token。
+- `deploy/scripts/verify-routing.sh`：改为验证单模型路由、单厂商密钥、模型授权、自动解绑和空绑定。
+- `deploy/tests/test_deploy.py`：锁定旧用户 Token 定点清理命令和部署顺序。
+- `deploy/tests/test_release_tools.py`：锁定新路由发布验收契约并排除旧固定路由字段。
+- `docs/模型报价路由与健康.md`：记录单模型路由、厂商密钥、错误码、模型列表和迁移边界。
+- `docs/账号与管理员接口.md`：记录密钥模型路由接口及停用、删除语义。
+- `docs/部署运行手册.md`：更新路由验收说明和第 11 号迁移的用户 Token 清理顺序。
+- `progress.md`：追加本轮实现、验证、文件清单和回滚点。
+- 回滚点：本轮前一提交为 `cc6a365`；执行 `git revert <本轮提交哈希>` 可回退代码、页面、测试和文档。若数据库已执行第 11 号迁移，旧用户密钥和路由已按计划清理，代码回滚不会恢复它们；开发环境需切回 `cc6a365` 后按既有重置流程重建。本轮未发布服务器。

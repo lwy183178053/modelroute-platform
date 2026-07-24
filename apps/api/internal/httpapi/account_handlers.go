@@ -26,7 +26,8 @@ type keyRequest struct {
 
 type createKeyRequest struct {
 	keyRequest
-	RoutingPolicyID int64 `json:"routing_policy_id"`
+	Provider         string  `json:"provider"`
+	RoutingPolicyIDs []int64 `json:"routing_policy_ids"`
 }
 
 func (s *server) keys(w http.ResponseWriter, r *http.Request) {
@@ -105,7 +106,7 @@ func (s *server) createKey(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadGateway, "token_bind_failed", "密钥已创建，但没有返回新增密钥编号")
 		return
 	}
-	if _, err := s.bindTokenToPolicy(r, session.UserID, session.UpstreamCookie, createdTokenID, request.RoutingPolicyID); err != nil {
+	if _, err := s.bindTokenRoutes(r, session.UserID, session.UpstreamCookie, createdTokenID, request.Provider, request.RoutingPolicyIDs); err != nil {
 		_, cleanupErr := s.services.NewAPI.Do(r.Context(), http.MethodDelete, "/api/token/"+strconv.Itoa(createdTokenID), nil, upstreamAuth(session))
 		if cleanupErr != nil {
 			writeAPIError(w, http.StatusBadGateway, "token_bind_cleanup_failed", "路由绑定失败，且新密钥清理失败")
@@ -117,7 +118,7 @@ func (s *server) createKey(w http.ResponseWriter, r *http.Request) {
 	writeRawData(w, data)
 }
 
-func (s *server) rebindKeyRoutingPolicy(w http.ResponseWriter, r *http.Request) {
+func (s *server) replaceKeyRoutingPolicies(w http.ResponseWriter, r *http.Request) {
 	_, session, ok := s.requireSession(w, r, roleCommon)
 	if !ok || !s.requireSameOrigin(w, r) {
 		return
@@ -127,19 +128,23 @@ func (s *server) rebindKeyRoutingPolicy(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var request struct {
-		RoutingPolicyID int64 `json:"routing_policy_id"`
+		RoutingPolicyIDs []int64 `json:"routing_policy_ids"`
 	}
-	if err := decodeJSON(r, &request); err != nil || request.RoutingPolicyID <= 0 {
-		writeAPIError(w, http.StatusBadRequest, "invalid_routing_policy", "请选择有效路由")
+	if err := decodeJSON(r, &request); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_routing_policy", "模型路由参数无效")
 		return
 	}
 	if s.services.Routing == nil {
 		writeAPIError(w, http.StatusServiceUnavailable, "routing_unavailable", "路由服务正在初始化")
 		return
 	}
-	binding, err := s.services.Routing.RebindTokenPolicy(r.Context(), session.UserID, tokenID, request.RoutingPolicyID)
+	binding, err := s.services.Routing.ReplaceTokenRoutes(r.Context(), session.UserID, tokenID, request.RoutingPolicyIDs)
 	if errors.Is(err, ErrRoutingNotFound) {
-		writeAPIError(w, http.StatusNotFound, "routing_binding_not_found", "密钥或路由不存在")
+		writeAPIError(w, http.StatusNotFound, "routing_binding_not_found", "密钥或模型路由不存在")
+		return
+	}
+	if errors.Is(err, ErrRoutingInvalidState) {
+		writeAPIError(w, http.StatusConflict, "routing_binding_conflict", "只能选择当前密钥厂商的路由，且同一模型只能选择一条")
 		return
 	}
 	if err != nil {
@@ -208,6 +213,12 @@ func (s *server) updateKeyStatus(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeUpstreamError(w, err, http.StatusBadRequest)
 		return
+	}
+	if s.services.Routing != nil {
+		if err := s.services.Routing.SetTokenBindingStatus(r.Context(), session.UserID, id, *request.Enabled); err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "token_status_sync_failed", "密钥状态已更新，但路由状态同步失败")
+			return
+		}
 	}
 	writeRawData(w, data)
 }
@@ -358,10 +369,12 @@ func decodeCreateKeyRequest(w http.ResponseWriter, r *http.Request) (createKeyRe
 		writeAPIError(w, http.StatusBadRequest, "invalid_key", "密钥参数无效")
 		return createKeyRequest{}, false
 	}
-	if request.RoutingPolicyID <= 0 {
-		writeAPIError(w, http.StatusBadRequest, "routing_policy_required", "请先创建并选择路由")
+	provider, err := normalizeChannelProvider(request.Provider)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_key_provider", "请选择有效的密钥厂商")
 		return createKeyRequest{}, false
 	}
+	request.Provider = provider
 	request.Name = strings.TrimSpace(request.Name)
 	return request, true
 }
@@ -376,17 +389,24 @@ func joinKeyRoutingBindings(data json.RawMessage, bindings []TokenRoutingBinding
 		byToken[binding.TokenID] = binding
 	}
 	items, _ := payload["items"].([]any)
+	filtered := make([]any, 0, len(items))
 	for _, rawItem := range items {
 		item, ok := rawItem.(map[string]any)
 		if !ok {
 			continue
 		}
 		tokenID, _ := item["id"].(float64)
-		if binding, exists := byToken[int(tokenID)]; exists {
-			item["routing_policy_id"] = binding.PolicyID
-			item["routing_policy_name"] = binding.PolicyName
+		binding, exists := byToken[int(tokenID)]
+		if !exists {
+			continue
 		}
+		item["provider"] = binding.Provider
+		item["routing_policies"] = binding.Routes
+		item["model_count"] = binding.ModelCount
+		filtered = append(filtered, item)
 	}
+	payload["items"] = filtered
+	payload["total"] = len(bindings)
 	return json.Marshal(payload)
 }
 

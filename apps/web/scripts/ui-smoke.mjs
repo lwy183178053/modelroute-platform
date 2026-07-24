@@ -81,7 +81,10 @@ async function mockAdminAPI(targetPage, state, account = null) {
       return json({ success: true, data: { id: 10, status: 'draft', ...state.announcementCreateBody } }, 201);
     }
     if (url.pathname === '/api/models') {
-      return json({ success: true, data: [{ id: 101, public_name: 'gpt-4o-mini', provider: 'OpenAI', status: 'active', price: { id: 501, version: 2, price_kind: 'text', tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 150000, output_price_micros: 600000, cache_read_price_micros: 75000, cache_write_price_micros: 200000 }] } }] });
+      return json({ success: true, data: [
+        { id: 101, public_name: 'gpt-4o-mini', provider: 'OpenAI', status: 'active', price: { id: 501, version: 2, price_kind: 'text', tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 150000, output_price_micros: 600000, cache_read_price_micros: 75000, cache_write_price_micros: 200000 }] } },
+        { id: 102, public_name: 'gpt-4o-legacy', provider: 'OpenAI', status: 'archived', price: { id: 502, version: 1, price_kind: 'text', tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 300000, output_price_micros: 1200000 }] } },
+      ] });
     }
     if (url.pathname === '/api/offers') {
       return json({ success: true, data: [
@@ -90,10 +93,13 @@ async function mockAdminAPI(targetPage, state, account = null) {
       ] });
     }
     if (url.pathname === '/api/keys' && request.method() === 'GET') {
-      return json({ success: true, data: { page: 1, page_size: 20, total: 1, items: [{ id: 9, name: '真实主密钥', key: 'full-secret-key', status: 1, created_time: 1784690000, accessed_time: 1784692000, expired_time: -1, unlimited_quota: true, routing_policy_id: 71, routing_policy_name: '主路由' }] } });
+      return json({ success: true, data: { page: 1, page_size: 20, total: 1, items: [{ id: 9, name: '真实主密钥', key: 'full-secret-key', status: 1, created_time: 1784690000, accessed_time: 1784692000, expired_time: -1, unlimited_quota: true, provider: 'OpenAI', model_count: 1, routing_policies: [{ routing_policy_id: 71, routing_policy_name: '主路由', model_id: 101, model_name: 'gpt-4o-mini', provider: 'OpenAI', priority: 'cache' }] }] } });
     }
     if (url.pathname === '/api/routing-policies' && request.method() === 'GET') {
-      return json({ success: true, data: [{ id: 71, name: '主路由', priority: 'cache', minimum_multiplier_bps: 4000, maximum_multiplier_bps: 8000, minimum_cache_hit_ppm: null, bound_key_count: 1, updated_at: '2026-07-23T12:00:00Z' }] });
+      return json({ success: true, data: [
+        { id: 71, name: '主路由', model_id: 101, model_name: 'gpt-4o-mini', provider: 'OpenAI', priority: 'cache', minimum_multiplier_bps: 4000, maximum_multiplier_bps: 8000, minimum_cache_hit_ppm: null, bound_key_count: 1, updated_at: '2026-07-23T12:00:00Z' },
+        { id: 72, name: '归档模型路由', model_id: 102, model_name: 'gpt-4o-legacy', provider: 'OpenAI', priority: 'balanced', minimum_multiplier_bps: 0, maximum_multiplier_bps: 50000, minimum_cache_hit_ppm: null, bound_key_count: 0, updated_at: '2026-07-23T11:00:00Z' },
+      ] });
     }
     if (url.pathname === '/api/routing-policies/preview' && request.method() === 'POST') {
       state.routingPreviewCalls += 1;
@@ -104,6 +110,11 @@ async function mockAdminAPI(targetPage, state, account = null) {
       state.routeSaveCalls += 1;
       state.routeSaveBody = request.postDataJSON();
       return json({ success: true, data: { id: 71, bound_key_count: 1, ...state.routeSaveBody } });
+    }
+    if (url.pathname === '/api/keys/9/routing-policies' && request.method() === 'PUT') {
+      state.keyRouteSaveCalls += 1;
+      state.keyRouteSaveBody = request.postDataJSON();
+      return json({ success: true, data: { token_id: 9, provider: 'OpenAI', model_count: 0, routes: [] } });
     }
     if (url.pathname === '/api/usage' && request.method() === 'GET') {
       state.userUsageQuery = Object.fromEntries(url.searchParams);
@@ -384,7 +395,7 @@ async function mockAdminAPI(targetPage, state, account = null) {
 try {
   const adminMockState = {
     merchantApproveCalls: 0, channelVerifyCalls: 0, modelTestCalls: 0, channelReviewStatus: 'pending', modelTestStatus: 'untested',
-    routeSaveCalls: 0, routeSaveBody: null, routingPreviewCalls: 0, routingPreviewBody: null,
+    routeSaveCalls: 0, routeSaveBody: null, routingPreviewCalls: 0, routingPreviewBody: null, keyRouteSaveCalls: 0, keyRouteSaveBody: null,
     offerCreateCalls: 0, offerCreateBody: null,
     offerStatusCalls: 0, offerStatusBody: null, offerDeleteCalls: 0, offerEnabled: true,
     reviewDeleteCalls: 0, reviewDeleteIDs: [], userUsageQuery: null, merchantUsageQuery: null, adminUsageQuery: null,
@@ -479,7 +490,8 @@ try {
   await page.getByText('主路由').first().waitFor();
   await clickActionInRow(page, '主路由', '编辑');
   await page.getByRole('dialog', { name: '编辑路由策略' }).waitFor();
-  await page.getByLabel('预览模型').waitFor();
+  assert(await page.getByLabel('模型厂商').isDisabled(), '编辑路由时厂商仍可修改');
+  assert(await page.getByLabel('具体模型').isDisabled(), '编辑路由时模型仍可修改');
   await page.getByText('可用商户', { exact: true }).waitFor();
   await page.getByText('可用渠道', { exact: true }).waitFor();
   await page.waitForTimeout(450);
@@ -494,10 +506,20 @@ try {
   assert(adminMockState.routeSaveCalls === 1, '保存路由策略没有调用真实接口');
   assert(adminMockState.routeSaveBody.minimum_cache_hit_ppm === 600000, '最低缓存命中率没有转换为整数 PPM');
   assert(!('mode' in adminMockState.routeSaveBody) && !('merchant_ids' in adminMockState.routeSaveBody), '路由仍提交已删除的固定路由字段');
+  await clickActionInRow(page, '归档模型路由', '编辑');
+  const archivedRouteDialog = page.getByRole('dialog', { name: '编辑路由策略' });
+  assert(await archivedRouteDialog.getByLabel('具体模型').inputValue() === '102', '归档模型路由编辑时丢失了只读模型');
+  await archivedRouteDialog.getByRole('button', { name: '关闭' }).click();
   await consoleSidebar.getByRole('button', { name: 'API 密钥', exact: true }).click();
   await page.getByText('真实主密钥').first().waitFor();
-  await page.getByText('主路由').waitFor();
+  await page.getByText('OpenAI', { exact: true }).waitFor();
+  await page.getByText('1 个模型', { exact: true }).waitFor();
   assert(await page.getByRole('checkbox', { name: '启用真实主密钥' }).isChecked(), '有效密钥的启用开关未选中');
+  await clickActionInRow(page, '真实主密钥', '配置模型路由');
+  const keyRoutesDialog = page.getByRole('dialog', { name: '配置模型路由' });
+  await keyRoutesDialog.getByLabel('gpt-4o-mini 路由').selectOption('');
+  await keyRoutesDialog.getByRole('button', { name: '保存模型路由' }).click();
+  assert(adminMockState.keyRouteSaveCalls === 1 && Array.isArray(adminMockState.keyRouteSaveBody.routing_policy_ids) && adminMockState.keyRouteSaveBody.routing_policy_ids.length === 0, '空模型路由配置没有正确保存');
 
   await page.getByRole('button', { name: '商户中心', exact: true }).click();
   const merchantSidebar = page.getByRole('complementary', { name: '商户功能' });
@@ -817,7 +839,7 @@ try {
   await mobileConsoleSidebar.getByRole('button', { name: '路由管理', exact: true }).click();
   await clickActionInRow(merchantPage, '主路由', '编辑');
   const mobileRouteDialog = merchantPage.getByRole('dialog', { name: '编辑路由策略' });
-  await mobileRouteDialog.getByLabel('预览模型').waitFor();
+  await mobileRouteDialog.getByLabel('具体模型').waitFor();
   await mobileRouteDialog.getByText('可用商户', { exact: true }).waitFor();
   assert(await merchantPage.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), '移动端路由弹窗出现页面级横向溢出');
   await merchantPage.close();

@@ -28,7 +28,7 @@ func TestSQLRoutingStoreAgainstPostgres(t *testing.T) {
 	if _, err := database.ExecContext(ctx, `
 TRUNCATE route_metric_snapshots, route_metric_buckets, merchant_name_reservations,
          channel_health_events, performance_rollups, routing_decisions,
-         routing_policies, token_bindings,
+		 token_model_routes, routing_policies, token_bindings,
          channel_health, offer_channel_aliases, offer_versions,
          merchant_channels, merchant_channel_reviews, merchant_channel_tests,
          merchant_profiles, merchant_applications, text_price_tiers,
@@ -84,9 +84,9 @@ RETURNING id
 	if err := database.QueryRowContext(ctx, `
 INSERT INTO merchant_channel_reviews
     (merchant_newapi_user_id, merchant_profile_id, application_id, canonical_model_id,
-     channel_test_id, channel_name, base_url, adapter_type, credential_fingerprint, status)
+     channel_test_id, channel_name, base_url, provider, adapter_type, credential_fingerprint, status)
 VALUES (7, $1, $2, $3, $4, '集成测试渠道', 'https://upstream.test/v1',
-        'openai_compatible', $5, 'approved')
+        'OpenAI', 'openai_compatible', $5, 'approved')
 RETURNING id
 `, merchantID, applicationID, model.ID, testID,
 		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").Scan(&reviewID); err != nil {
@@ -95,9 +95,9 @@ RETURNING id
 	if err := database.QueryRowContext(ctx, `
 INSERT INTO merchant_channels
     (merchant_profile_id, review_id, canonical_model_id, newapi_channel_id,
-     channel_name, base_url, adapter_type, credential_fingerprint)
+     channel_name, base_url, provider, adapter_type, credential_fingerprint)
 VALUES ($1, $2, $3, 41, '集成测试渠道', 'https://upstream.test/v1',
-        'openai_compatible', $4)
+        'OpenAI', 'openai_compatible', $4)
 RETURNING id
 `, merchantID, reviewID, model.ID,
 		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").Scan(&channelID); err != nil {
@@ -167,12 +167,12 @@ VALUES (9001, 21, $1, 2, $2, 41, 9, 'req-merchant-stats', 1000,
 	}
 
 	policy, err := store.CreateRoutingPolicy(ctx, 7, RoutingPolicyInput{
-		Name: "主路由", Priority: "price", MinimumMultiplierBPS: 7300, MaximumMultiplierBPS: 8000,
+		CanonicalModelID: model.ID, Name: "主路由", Priority: "price", MinimumMultiplierBPS: 7300, MaximumMultiplierBPS: 8000,
 	})
 	if err != nil {
 		t.Fatalf("创建路由：%v", err)
 	}
-	if _, err := store.BindTokenToPolicy(ctx, 7, 9, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", policy.ID); err != nil {
+	if _, err := store.CreateTokenBinding(ctx, 7, 9, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "OpenAI", []int64{policy.ID}); err != nil {
 		t.Fatalf("绑定密钥路由：%v", err)
 	}
 	if _, err := store.UpdateRoutingPolicy(ctx, 7, policy.ID, RoutingPolicyInput{
@@ -197,7 +197,7 @@ VALUES (9001, 21, $1, 2, $2, 41, 9, 'req-merchant-stats', 1000,
 		RequestID: "postgres-routing-decision", TokenBindingID: selection.TokenBindingID,
 		PolicyID: selection.PolicyID, CanonicalModelID: selection.CanonicalModelID,
 		OfferChannelAliasID: selection.Candidates[0].OfferChannelAliasID,
-		Priority: selection.Priority, AlgorithmVersion: routeAlgorithmVersion,
+		Priority:            selection.Priority, AlgorithmVersion: routeAlgorithmVersion,
 		CandidateCount: len(selection.Candidates), SelectedMetrics: routeDecisionMetrics(selection.Candidates[0]),
 	}); err != nil {
 		t.Fatalf("写入新版路由决策：%v", err)
@@ -247,5 +247,20 @@ SELECT state, next_probe_at FROM channel_health WHERE merchant_channel_id = $1
 	merchantOffers, err = store.ListMerchantOffers(ctx, 7)
 	if err != nil || len(merchantOffers) != 1 || merchantOffers[0].OfferID != repricedOffer.ID || merchantOffers[0].MultiplierBPS != 8500 || merchantOffers[0].CallCount != 1 || merchantOffers[0].TokenUsage != 2_600_000_000 || merchantOffers[0].LastCalledAt == nil || !merchantOffers[0].LastCalledAt.Equal(lastCalledAt) {
 		t.Fatalf("调价后商户调用统计丢失：报价=%+v，错误=%v", merchantOffers, err)
+	}
+	affectedKeys, err := store.DeleteRoutingPolicy(ctx, 7, policy.ID)
+	if err != nil || affectedKeys != 1 {
+		t.Fatalf("删除已使用路由：受影响密钥=%d，错误=%v", affectedKeys, err)
+	}
+	var historicalTokenBindingID, historicalPolicyID sql.NullInt64
+	if err := database.QueryRowContext(ctx, `
+SELECT token_binding_id, routing_policy_id
+FROM routing_decisions
+WHERE request_id = 'postgres-routing-decision'
+`).Scan(&historicalTokenBindingID, &historicalPolicyID); err != nil {
+		t.Fatalf("删除路由后读取历史调用记录：%v", err)
+	}
+	if !historicalTokenBindingID.Valid || historicalPolicyID.Valid {
+		t.Fatalf("删除路由后的历史关联不正确：密钥=%v 路由=%v", historicalTokenBindingID, historicalPolicyID)
 	}
 }

@@ -304,7 +304,7 @@ func (s *server) createRoutingPolicy(w http.ResponseWriter, r *http.Request) {
 	if !ok || !s.requireSameOrigin(w, r) || !s.routingReady(w, false) {
 		return
 	}
-	input, ok := decodeRoutingPolicyInput(w, r)
+	input, ok := decodeCreateRoutingPolicyInput(w, r)
 	if !ok {
 		return
 	}
@@ -400,21 +400,48 @@ func (s *server) deleteRoutingPolicy(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := s.services.Routing.DeleteRoutingPolicy(r.Context(), session.UserID, policyID); err != nil {
+	affectedKeyCount, err := s.services.Routing.DeleteRoutingPolicy(r.Context(), session.UserID, policyID)
+	if err != nil {
 		writeRoutingPolicyError(w, err, "删除路由失败")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": nil})
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]int{"affected_key_count": affectedKeyCount}})
 }
 
 func decodeRoutingPolicyInput(w http.ResponseWriter, r *http.Request) (RoutingPolicyInput, bool) {
+	var request struct {
+		Name                 string `json:"name"`
+		Priority             string `json:"priority"`
+		MinimumMultiplierBPS int    `json:"minimum_multiplier_bps"`
+		MaximumMultiplierBPS int    `json:"maximum_multiplier_bps"`
+		MinimumCacheHitPPM   *int   `json:"minimum_cache_hit_ppm"`
+	}
+	if err := decodeJSON(r, &request); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_routing_policy", "路由参数格式无效")
+		return RoutingPolicyInput{}, false
+	}
+	input := RoutingPolicyInput{
+		Name: request.Name, Priority: request.Priority,
+		MinimumMultiplierBPS: request.MinimumMultiplierBPS,
+		MaximumMultiplierBPS: request.MaximumMultiplierBPS,
+		MinimumCacheHitPPM:   request.MinimumCacheHitPPM,
+	}
+	input.Name = strings.TrimSpace(input.Name)
+	if err := validateRoutingPolicy(input); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_routing_policy", err.Error())
+		return RoutingPolicyInput{}, false
+	}
+	return input, true
+}
+
+func decodeCreateRoutingPolicyInput(w http.ResponseWriter, r *http.Request) (RoutingPolicyInput, bool) {
 	var input RoutingPolicyInput
 	if err := decodeJSON(r, &input); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_routing_policy", "路由参数格式无效")
 		return RoutingPolicyInput{}, false
 	}
 	input.Name = strings.TrimSpace(input.Name)
-	if err := validateRoutingPolicy(input); err != nil {
+	if err := validateCreateRoutingPolicy(input); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_routing_policy", err.Error())
 		return RoutingPolicyInput{}, false
 	}
@@ -426,7 +453,7 @@ func writeRoutingPolicyError(w http.ResponseWriter, err error, fallback string) 
 	case errors.Is(err, ErrRoutingNotFound):
 		writeAPIError(w, http.StatusNotFound, "routing_policy_not_found", "路由不存在")
 	case errors.Is(err, ErrRoutingInvalidState):
-		writeAPIError(w, http.StatusConflict, "routing_policy_conflict", "路由已绑定密钥或当前状态不允许操作")
+		writeAPIError(w, http.StatusConflict, "routing_policy_conflict", "路由当前状态不允许操作")
 	default:
 		writeAPIError(w, http.StatusInternalServerError, "routing_policy_store_error", fallback)
 	}
@@ -483,7 +510,7 @@ func (s *server) adminResetChannelHealth(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"channel_id": channelID, "health_state": "pending"}})
 }
 
-func (s *server) bindTokenToPolicy(r *http.Request, userID int, cookie string, tokenID int, policyID int64) (TokenRoutingBinding, error) {
+func (s *server) bindTokenRoutes(r *http.Request, userID int, cookie string, tokenID int, provider string, policyIDs []int64) (TokenRoutingBinding, error) {
 	if s.services.Credentials == nil {
 		return TokenRoutingBinding{}, errors.New("密钥指纹服务尚未就绪")
 	}
@@ -497,9 +524,9 @@ func (s *server) bindTokenToPolicy(r *http.Request, userID int, cookie string, t
 	if err := json.Unmarshal(data, &revealed); err != nil || strings.TrimSpace(revealed.Key) == "" {
 		return TokenRoutingBinding{}, errors.New("核心服务未返回有效密钥")
 	}
-	return s.services.Routing.BindTokenToPolicy(
+	return s.services.Routing.CreateTokenBinding(
 		r.Context(), userID, tokenID,
-		s.services.Credentials.Fingerprint([]byte(strings.TrimSpace(revealed.Key))), policyID,
+		s.services.Credentials.Fingerprint([]byte(strings.TrimSpace(revealed.Key))), provider, policyIDs,
 	)
 }
 
@@ -519,6 +546,13 @@ func validateRoutingPolicy(input RoutingPolicyInput) error {
 		}
 	}
 	return nil
+}
+
+func validateCreateRoutingPolicy(input RoutingPolicyInput) error {
+	if input.CanonicalModelID <= 0 {
+		return errors.New("请选择有效模型")
+	}
+	return validateRoutingPolicy(input)
 }
 
 func validateCanonicalModel(command CreateCanonicalModelCommand) error {

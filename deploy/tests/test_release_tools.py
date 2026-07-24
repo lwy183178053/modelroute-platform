@@ -61,16 +61,26 @@ class ReleaseToolContractTest(unittest.TestCase):
                 name,
             )
 
-    def test_routing_verifier_uses_the_v2_zero_to_five_range(self):
+    def test_routing_verifier_uses_provider_model_routes(self):
         verifier = read_script("verify-routing.sh")
         for marker in (
+            '"canonical_model_id": int(sys.argv[1])',
+            '"provider": sys.argv[1]',
+            '"routing_policy_ids": [int(sys.argv[2])]',
+            'assert int(policy["model_id"]) == int(sys.argv[2])',
+            'assert int(data["data"]["affected_key_count"]) >= 1',
+            'assert data["error"]["code"] == "model_not_allowed"',
             'assert int(policy["minimum_multiplier_bps"]) == 0',
             'assert int(policy["maximum_multiplier_bps"]) == 50000',
-            '"minimum_multiplier_bps":0',
-            '"maximum_multiplier_bps":50000',
+            '"minimum_multiplier_bps": 0',
+            '"maximum_multiplier_bps": 50000',
         ):
             self.assertIn(marker, verifier)
         for old_marker in (
+            '"mode":"fixed"',
+            '"merchant_ids"',
+            '/api/routing-policies/$KEY_ID',
+            '"routing_policy_not_found"',
             'assert int(policy["minimum_multiplier_bps"]) == 1',
             'assert int(policy["maximum_multiplier_bps"]) == 10000',
             '"minimum_multiplier_bps":1',

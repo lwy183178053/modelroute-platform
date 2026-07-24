@@ -73,6 +73,7 @@ func (s *server) modelListProxy(w http.ResponseWriter, r *http.Request) {
 func (s *server) filterRoutableModelList(r *http.Request, value any, fingerprint string) any {
 	filter := func(items []any) []any {
 		result := make([]any, 0, len(items))
+		seen := make(map[string]struct{}, len(items))
 		for _, item := range items {
 			object, ok := item.(map[string]any)
 			if !ok {
@@ -82,7 +83,12 @@ func (s *server) filterRoutableModelList(r *http.Request, value any, fingerprint
 			if !ok || strings.TrimSpace(name) == "" {
 				continue
 			}
-			if _, err := s.services.Routing.ResolveRoute(r.Context(), fingerprint, name); err == nil {
+			if _, exists := seen[name]; exists {
+				continue
+			}
+			selection, err := s.services.Routing.ResolveRoute(r.Context(), fingerprint, name)
+			if err == nil && len(selection.Candidates) > 0 {
+				seen[name] = struct{}{}
 				result = append(result, item)
 			}
 		}
@@ -121,11 +127,14 @@ func (s *server) modelProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	selection, err := s.services.Routing.ResolveRoute(r.Context(), s.services.Credentials.Fingerprint([]byte(token)), publicModel)
 	if err != nil {
-		code := "routing_policy_not_found"
-		if !errors.Is(err, ErrRoutingNotFound) {
-			code = "routing_store_error"
+		switch {
+		case errors.Is(err, ErrTokenNotFound):
+			writeOpenAIError(w, http.StatusUnauthorized, "invalid_api_key", "密钥不存在或已停用")
+		case errors.Is(err, ErrModelNotAllowed), errors.Is(err, ErrRoutingNotFound):
+			writeOpenAIError(w, http.StatusForbidden, "model_not_allowed", "当前密钥未配置该模型")
+		default:
+			writeOpenAIError(w, http.StatusServiceUnavailable, "routing_store_error", "读取模型路由失败")
 		}
-		writeOpenAIError(w, http.StatusServiceUnavailable, code, "当前密钥没有可用路由策略")
 		return
 	}
 	if len(selection.Candidates) == 0 {

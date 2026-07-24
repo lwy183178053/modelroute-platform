@@ -20,10 +20,11 @@ type routingRepositoryStub struct {
 	listRoutes         func(context.Context, int) ([]RoutingPolicy, error)
 	getRoute           func(context.Context, int, int64) (RoutingPolicy, error)
 	updateRoute        func(context.Context, int, int64, RoutingPolicyInput) (RoutingPolicy, error)
-	deleteRoute        func(context.Context, int, int64) error
-	bindToken          func(context.Context, int, int, string, int64) (TokenRoutingBinding, error)
-	rebindToken        func(context.Context, int, int, int64) (TokenRoutingBinding, error)
+	deleteRoute        func(context.Context, int, int64) (int, error)
+	createTokenBinding func(context.Context, int, int, string, string, []int64) (TokenRoutingBinding, error)
+	replaceTokenRoutes func(context.Context, int, int, []int64) (TokenRoutingBinding, error)
 	listBindings       func(context.Context, int) ([]TokenRoutingBinding, error)
+	setTokenStatus     func(context.Context, int, int, bool) error
 	revokeToken        func(context.Context, int, int) error
 	listOffers         func(context.Context, int, string) ([]MarketOffer, error)
 	listMerchantOffers func(context.Context, int) ([]MerchantOfferView, error)
@@ -74,16 +75,16 @@ func (s *routingRepositoryStub) UpdateRoutingPolicy(ctx context.Context, userID 
 	return s.updateRoute(ctx, userID, policyID, input)
 }
 
-func (s *routingRepositoryStub) DeleteRoutingPolicy(ctx context.Context, userID int, policyID int64) error {
+func (s *routingRepositoryStub) DeleteRoutingPolicy(ctx context.Context, userID int, policyID int64) (int, error) {
 	return s.deleteRoute(ctx, userID, policyID)
 }
 
-func (s *routingRepositoryStub) BindTokenToPolicy(ctx context.Context, userID int, tokenID int, fingerprint string, policyID int64) (TokenRoutingBinding, error) {
-	return s.bindToken(ctx, userID, tokenID, fingerprint, policyID)
+func (s *routingRepositoryStub) CreateTokenBinding(ctx context.Context, userID int, tokenID int, fingerprint string, provider string, policyIDs []int64) (TokenRoutingBinding, error) {
+	return s.createTokenBinding(ctx, userID, tokenID, fingerprint, provider, policyIDs)
 }
 
-func (s *routingRepositoryStub) RebindTokenPolicy(ctx context.Context, userID int, tokenID int, policyID int64) (TokenRoutingBinding, error) {
-	return s.rebindToken(ctx, userID, tokenID, policyID)
+func (s *routingRepositoryStub) ReplaceTokenRoutes(ctx context.Context, userID int, tokenID int, policyIDs []int64) (TokenRoutingBinding, error) {
+	return s.replaceTokenRoutes(ctx, userID, tokenID, policyIDs)
 }
 
 func (s *routingRepositoryStub) ListTokenRoutingBindings(ctx context.Context, userID int) ([]TokenRoutingBinding, error) {
@@ -118,6 +119,13 @@ func (s *routingRepositoryStub) RevokeTokenBinding(ctx context.Context, userID i
 		return nil
 	}
 	return s.revokeToken(ctx, userID, tokenID)
+}
+
+func (s *routingRepositoryStub) SetTokenBindingStatus(ctx context.Context, userID int, tokenID int, enabled bool) error {
+	if s.setTokenStatus == nil {
+		return nil
+	}
+	return s.setTokenStatus(ctx, userID, tokenID, enabled)
 }
 
 func (s *routingRepositoryStub) CreateCanonicalModel(ctx context.Context, command CreateCanonicalModelCommand) (CanonicalModel, error) {
@@ -379,20 +387,20 @@ func TestCreateIndependentRoutingPolicyWithCacheFloor(t *testing.T) {
 	}))
 	repository := &routingRepositoryStub{}
 	repository.createRoute = func(_ context.Context, userID int, input RoutingPolicyInput) (RoutingPolicy, error) {
-		if userID != 7 || input.Name != "缓存主路由" || input.MinimumCacheHitPPM == nil || *input.MinimumCacheHitPPM != 650_000 {
+		if userID != 7 || input.CanonicalModelID != 61 || input.Name != "缓存主路由" || input.MinimumCacheHitPPM == nil || *input.MinimumCacheHitPPM != 650_000 {
 			t.Fatalf("创建路由参数 user=%d input=%+v", userID, input)
 		}
-		return RoutingPolicy{ID: 91, UserID: userID, Name: input.Name, Priority: input.Priority, MinimumCacheHitPPM: input.MinimumCacheHitPPM}, nil
+		return RoutingPolicy{ID: 91, UserID: userID, CanonicalModelID: 61, ModelName: "gpt-5.6", Provider: "OpenAI", Name: input.Name, Priority: input.Priority, MinimumCacheHitPPM: input.MinimumCacheHitPPM}, nil
 	}
 	services.Routing = repository
 	token := createPlatformSession(t, services, 7, 1)
 	handler := NewServerWithServices("test", Dependencies{}, services)
-	request := httptest.NewRequest(http.MethodPost, "/api/routing-policies", strings.NewReader(`{"name":"缓存主路由","priority":"cache","minimum_multiplier_bps":0,"maximum_multiplier_bps":50000,"minimum_cache_hit_ppm":650000}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/routing-policies", strings.NewReader(`{"canonical_model_id":61,"name":"缓存主路由","priority":"cache","minimum_multiplier_bps":0,"maximum_multiplier_bps":50000,"minimum_cache_hit_ppm":650000}`))
 	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"id":91`) || !strings.Contains(response.Body.String(), `"minimum_cache_hit_ppm":650000`) {
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"id":91`) || !strings.Contains(response.Body.String(), `"provider":"OpenAI"`) || !strings.Contains(response.Body.String(), `"model_name":"gpt-5.6"`) || !strings.Contains(response.Body.String(), `"minimum_cache_hit_ppm":650000`) {
 		t.Fatalf("创建路由响应=%d %s", response.Code, response.Body.String())
 	}
 }
@@ -456,7 +464,7 @@ func TestRoutingPolicyValidationRejectsInvalidCacheFloor(t *testing.T) {
 	}
 }
 
-func TestCreateKeyBindsOnlyNewTokenToSelectedPolicy(t *testing.T) {
+func TestCreateKeyBindsOnlyNewTokenToSelectedModelRoutes(t *testing.T) {
 	listCount := 0
 	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -478,18 +486,18 @@ func TestCreateKeyBindsOnlyNewTokenToSelectedPolicy(t *testing.T) {
 	box := testCredentialBox(t)
 	repository := &routingRepositoryStub{}
 	boundToken := 0
-	repository.bindToken = func(_ context.Context, userID int, tokenID int, fingerprint string, policyID int64) (TokenRoutingBinding, error) {
-		if userID != 7 || policyID != 91 || fingerprint != box.Fingerprint([]byte("sk-new-key")) {
-			t.Fatalf("绑定参数=%d %d %q %d", userID, tokenID, fingerprint, policyID)
+	repository.createTokenBinding = func(_ context.Context, userID int, tokenID int, fingerprint string, provider string, policyIDs []int64) (TokenRoutingBinding, error) {
+		if userID != 7 || provider != "OpenAI" || fmt.Sprint(policyIDs) != "[91 92]" || fingerprint != box.Fingerprint([]byte("sk-new-key")) {
+			t.Fatalf("绑定参数=%d %d %q %s %v", userID, tokenID, fingerprint, provider, policyIDs)
 		}
 		boundToken = tokenID
-		return TokenRoutingBinding{TokenID: tokenID, PolicyID: policyID, PolicyName: "主路由"}, nil
+		return TokenRoutingBinding{TokenID: tokenID, Provider: provider, ModelCount: 2}, nil
 	}
 	services.Routing = repository
 	services.Credentials = box
 	token := createPlatformSession(t, services, 7, 1)
 	handler := NewServerWithServices("test", Dependencies{}, services)
-	request := httptest.NewRequest(http.MethodPost, "/api/keys", strings.NewReader(`{"name":"新密钥","expired_time":-1,"unlimited_quota":true,"routing_policy_id":91}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/keys", strings.NewReader(`{"name":"新密钥","expired_time":-1,"unlimited_quota":true,"provider":"OpenAI","routing_policy_ids":[91,92]}`))
 	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()
@@ -533,9 +541,9 @@ func TestListAndUpdateRoutingPoliciesByPolicyID(t *testing.T) {
 	}
 }
 
-func TestCreateKeyRequiresRoutingPolicy(t *testing.T) {
+func TestCreateKeyRequiresProvider(t *testing.T) {
 	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		t.Fatal("缺少路由时不应访问核心服务")
+		t.Fatal("缺少厂商时不应访问核心服务")
 	}))
 	services.Routing = &routingRepositoryStub{}
 	services.Credentials = testCredentialBox(t)
@@ -547,7 +555,47 @@ func TestCreateKeyRequiresRoutingPolicy(t *testing.T) {
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
-		t.Fatalf("缺少路由响应=%d %s", response.Code, response.Body.String())
+		t.Fatalf("缺少厂商响应=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestCreateProviderKeyAllowsEmptyRoutes(t *testing.T) {
+	listCount := 0
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/token/":
+			listCount++
+			items := `[{"id":8,"name":"旧密钥"}]`
+			if listCount == 2 {
+				items = `[{"id":9,"name":"OpenAI 密钥"},{"id":8,"name":"旧密钥"}]`
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":` + items + `,"total":1}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/token/":
+			_, _ = w.Write([]byte(`{"success":true,"data":null}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/token/9/key":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"key":"sk-provider-key"}}`))
+		default:
+			t.Fatalf("未知核心调用=%s %s", r.Method, r.URL.RequestURI())
+		}
+	}))
+	repository := &routingRepositoryStub{}
+	repository.createTokenBinding = func(_ context.Context, userID int, tokenID int, fingerprint string, provider string, policyIDs []int64) (TokenRoutingBinding, error) {
+		if userID != 7 || tokenID != 9 || fingerprint == "" || provider != "OpenAI" || len(policyIDs) != 0 {
+			t.Fatalf("密钥绑定参数 user=%d token=%d provider=%s routes=%v fingerprint=%q", userID, tokenID, provider, policyIDs, fingerprint)
+		}
+		return TokenRoutingBinding{TokenID: tokenID, Provider: provider, Routes: []TokenModelRoute{}}, nil
+	}
+	services.Routing = repository
+	services.Credentials = testCredentialBox(t)
+	token := createPlatformSession(t, services, 7, 1)
+	handler := NewServerWithServices("test", Dependencies{}, services)
+	request := httptest.NewRequest(http.MethodPost, "/api/keys", strings.NewReader(`{"name":"OpenAI 密钥","expired_time":-1,"unlimited_quota":true,"provider":"OpenAI","routing_policy_ids":[]}`))
+	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
+	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("空路由密钥响应=%d %s", response.Code, response.Body.String())
 	}
 }
 
@@ -575,14 +623,14 @@ func TestCreateKeyDeletesNewTokenWhenRouteBindingFails(t *testing.T) {
 		}
 	}))
 	repository := &routingRepositoryStub{}
-	repository.bindToken = func(context.Context, int, int, string, int64) (TokenRoutingBinding, error) {
+	repository.createTokenBinding = func(context.Context, int, int, string, string, []int64) (TokenRoutingBinding, error) {
 		return TokenRoutingBinding{}, ErrRoutingNotFound
 	}
 	services.Routing = repository
 	services.Credentials = testCredentialBox(t)
 	token := createPlatformSession(t, services, 7, 1)
 	handler := NewServerWithServices("test", Dependencies{}, services)
-	request := httptest.NewRequest(http.MethodPost, "/api/keys", strings.NewReader(`{"name":"新密钥","expired_time":-1,"unlimited_quota":true,"routing_policy_id":91}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/keys", strings.NewReader(`{"name":"新密钥","expired_time":-1,"unlimited_quota":true,"provider":"OpenAI","routing_policy_ids":[91]}`))
 	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()
@@ -592,7 +640,7 @@ func TestCreateKeyDeletesNewTokenWhenRouteBindingFails(t *testing.T) {
 	}
 }
 
-func TestKeyListIncludesRoutingPolicyAndSupportsRebind(t *testing.T) {
+func TestKeyListIncludesProviderRoutesAndSupportsReplace(t *testing.T) {
 	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/token/" {
 			t.Fatalf("密钥列表核心请求=%s %s", r.Method, r.URL.RequestURI())
@@ -601,13 +649,13 @@ func TestKeyListIncludesRoutingPolicyAndSupportsRebind(t *testing.T) {
 	}))
 	repository := &routingRepositoryStub{}
 	repository.listBindings = func(_ context.Context, userID int) ([]TokenRoutingBinding, error) {
-		return []TokenRoutingBinding{{TokenID: 9, PolicyID: 91, PolicyName: "主路由"}}, nil
+		return []TokenRoutingBinding{{TokenID: 9, Provider: "OpenAI", ModelCount: 1, Routes: []TokenModelRoute{{PolicyID: 91, PolicyName: "主路由", ModelID: 61, ModelName: "gpt-5.6", Provider: "OpenAI", Priority: "price"}}}}, nil
 	}
-	repository.rebindToken = func(_ context.Context, userID int, tokenID int, policyID int64) (TokenRoutingBinding, error) {
-		if userID != 7 || tokenID != 9 || policyID != 92 {
-			t.Fatalf("重新绑定参数=%d %d %d", userID, tokenID, policyID)
+	repository.replaceTokenRoutes = func(_ context.Context, userID int, tokenID int, policyIDs []int64) (TokenRoutingBinding, error) {
+		if userID != 7 || tokenID != 9 || fmt.Sprint(policyIDs) != "[92]" {
+			t.Fatalf("替换绑定参数=%d %d %v", userID, tokenID, policyIDs)
 		}
-		return TokenRoutingBinding{TokenID: tokenID, PolicyID: policyID, PolicyName: "备用路由"}, nil
+		return TokenRoutingBinding{TokenID: tokenID, Provider: "OpenAI", ModelCount: 1, Routes: []TokenModelRoute{{PolicyID: 92, PolicyName: "备用路由", ModelID: 61, ModelName: "gpt-5.6", Provider: "OpenAI", Priority: "success"}}}, nil
 	}
 	services.Routing = repository
 	token := createPlatformSession(t, services, 7, 1)
@@ -617,17 +665,30 @@ func TestKeyListIncludesRoutingPolicyAndSupportsRebind(t *testing.T) {
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"routing_policy_id":91`) || !strings.Contains(response.Body.String(), `"routing_policy_name":"主路由"`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"provider":"OpenAI"`) || !strings.Contains(response.Body.String(), `"model_count":1`) || !strings.Contains(response.Body.String(), `"routing_policy_name":"主路由"`) {
 		t.Fatalf("密钥路由列表=%d %s", response.Code, response.Body.String())
 	}
 
-	request = httptest.NewRequest(http.MethodPut, "/api/keys/9/routing-policy", strings.NewReader(`{"routing_policy_id":92}`))
+	request = httptest.NewRequest(http.MethodPut, "/api/keys/9/routing-policies", strings.NewReader(`{"routing_policy_ids":[92]}`))
 	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"routing_policy_name":"备用路由"`) {
 		t.Fatalf("重新绑定响应=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestJoinKeyRoutingBindingsHidesUnmanagedCoreTokens(t *testing.T) {
+	joined, err := joinKeyRoutingBindings([]byte(`{"page":1,"page_size":20,"total":2,"items":[{"id":9,"name":"用户密钥"},{"id":77,"name":"内部探活"}]}`), []TokenRoutingBinding{
+		{TokenID: 9, Provider: "OpenAI", Routes: []TokenModelRoute{}, ModelCount: 0},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(joined)
+	if !strings.Contains(body, `"name":"用户密钥"`) || strings.Contains(body, "内部探活") || !strings.Contains(body, `"total":1`) {
+		t.Fatalf("密钥列表=%s", body)
 	}
 }
 
@@ -654,6 +715,38 @@ func TestDeleteKeyRevokesRoutingBindingAfterNewAPIDelete(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !revoked {
 		t.Fatalf("删除响应=%d %s，撤销=%v", response.Code, response.Body.String(), revoked)
+	}
+}
+
+func TestKeyStatusSynchronizesRoutingBinding(t *testing.T) {
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/api/token/" || r.URL.Query().Get("status_only") != "true" {
+			t.Fatalf("核心密钥状态请求=%s %s", r.Method, r.URL.RequestURI())
+		}
+		_, _ = w.Write([]byte(`{"success":true,"data":null}`))
+	}))
+	statuses := make([]bool, 0, 2)
+	services.Routing = &routingRepositoryStub{setTokenStatus: func(_ context.Context, userID int, tokenID int, enabled bool) error {
+		if userID != 7 || tokenID != 9 {
+			t.Fatalf("平台密钥状态参数=%d/%d", userID, tokenID)
+		}
+		statuses = append(statuses, enabled)
+		return nil
+	}}
+	token := createPlatformSession(t, services, 7, 1)
+	handler := NewServerWithServices("test", Dependencies{}, services)
+	for _, enabled := range []bool{false, true} {
+		request := httptest.NewRequest(http.MethodPost, "/api/keys/9/status", strings.NewReader(fmt.Sprintf(`{"enabled":%t}`, enabled)))
+		request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
+		request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("密钥状态响应=%d %s", response.Code, response.Body.String())
+		}
+	}
+	if fmt.Sprint(statuses) != "[false true]" {
+		t.Fatalf("平台密钥状态同步=%v", statuses)
 	}
 }
 

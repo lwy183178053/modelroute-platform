@@ -32,7 +32,7 @@ class DeployScriptTest(unittest.TestCase):
             (release / ".env").write_text("APP_VERSION=stale\n", encoding="ascii")
             docker = fake_bin / "docker"
             docker.write_bytes(
-                b'#!/bin/sh\nprintf "%s|%s\\n" "$APP_VERSION" "$*" >> "$DEPLOY_TEST_LOG"\n'
+                b'#!/bin/sh\nprintf "%s|%s\\n" "$APP_VERSION" "$*" >> "$DEPLOY_TEST_LOG"\ncase "$*" in *to_regclass*) printf "1\\n";; *string_agg*) printf "9,12\\n";; esac\n'
             )
             docker.chmod(0o755)
 
@@ -48,13 +48,16 @@ class DeployScriptTest(unittest.TestCase):
             subprocess.run(["bash", "-lc", command], check=True)
 
             calls = (release / "docker.log").read_text(encoding="ascii").splitlines()
-            self.assertEqual([line.split("|", 1)[0] for line in calls], [release.name] * 6)
+            self.assertEqual([line.split("|", 1)[0] for line in calls], [release.name] * 9)
             self.assertEqual(
                 [line.split("|", 1)[1] for line in calls],
                 [
                     "compose --env-file .env --profile tools config --quiet",
                     "compose --env-file .env --profile tools build",
                     "compose --env-file .env up -d postgres redis new-api",
+                    "compose --env-file .env exec -T postgres sh -c psql -At -U \"$POSTGRES_USER\" -d \"$PLATFORM_DB_NAME\" -c \"SELECT CASE WHEN to_regclass('public.platform_schema_migrations') IS NULL THEN 0 ELSE 1 END\"",
+                    "compose --env-file .env exec -T postgres sh -c psql -At -U \"$POSTGRES_USER\" -d \"$PLATFORM_DB_NAME\" -c \"SELECT CASE WHEN EXISTS (SELECT 1 FROM platform_schema_migrations WHERE version = 11) THEN '__MIGRATED__' ELSE COALESCE((SELECT string_agg(newapi_token_id::text, ',') FROM token_bindings), '') END\"",
+                    "compose --env-file .env exec -T postgres sh -c psql -v ON_ERROR_STOP=1 -U \"$POSTGRES_USER\" -d \"$NEWAPI_DB_NAME\" -c \"DELETE FROM tokens WHERE id IN (9,12)\"",
                     "compose --env-file .env run --rm model-seed",
                     "compose --env-file .env up -d --remove-orphans",
                     "compose --env-file .env ps",

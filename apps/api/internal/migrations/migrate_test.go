@@ -1,8 +1,16 @@
 package migrations
 
 import (
+	"context"
+	"database/sql"
+	"fmt"
+	"net/url"
+	"os"
 	"strings"
 	"testing"
+	"time"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
@@ -10,8 +18,8 @@ func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Files() 返回错误：%v", err)
 	}
-	if len(files) != 10 {
-		t.Fatalf("V2 必须包含十份连续迁移，实际 = %d", len(files))
+	if len(files) != 11 {
+		t.Fatalf("V2 必须包含十一份连续迁移，实际 = %d", len(files))
 	}
 	file := files[0]
 	if file.Version != 1 || file.Name != "000001_v2_baseline.sql" {
@@ -151,5 +159,136 @@ func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
 	}
 	if !strings.Contains(files[9].SQL, "TRUNCATE TABLE merchant_channel_reviews, merchant_channels") {
 		t.Fatal("渠道厂商迁移未按开发约定清理旧渠道数据")
+	}
+	for _, fragment := range []string{
+		"canonical_model_id bigint NOT NULL REFERENCES canonical_models(id)",
+		"provider varchar(32) NOT NULL",
+		"CREATE TABLE token_model_routes",
+		"UNIQUE (token_binding_id, canonical_model_id)",
+		"FOREIGN KEY (routing_policy_id, canonical_model_id)",
+		"ALTER COLUMN token_binding_id DROP NOT NULL",
+		"ALTER COLUMN routing_policy_id DROP NOT NULL",
+		"ON DELETE SET NULL",
+		"DELETE FROM token_bindings",
+		"DELETE FROM routing_policies",
+	} {
+		if !strings.Contains(files[10].SQL, fragment) {
+			t.Fatalf("单厂商密钥迁移缺少 %q", fragment)
+		}
+	}
+	for _, provider := range []string{"OpenAI", "Anthropic", "Gemini", "DeepSeek", "Qwen", "Moonshot"} {
+		if !strings.Contains(files[10].SQL, provider) {
+			t.Fatalf("单厂商密钥迁移缺少厂商 %q", provider)
+		}
+	}
+	if strings.Contains(files[10].SQL, "DELETE FROM routing_decisions") {
+		t.Fatal("单厂商密钥迁移不得删除历史调用路由记录")
+	}
+}
+
+func TestProviderModelRouteMigrationKeepsHistoricalDecisions(t *testing.T) {
+	databaseURL := os.Getenv("MODELROUTE_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("未设置 PostgreSQL 集成测试地址")
+	}
+	admin, err := sql.Open("pgx", databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	schema := fmt.Sprintf("modelroute_migration_%d", time.Now().UnixNano())
+	if _, err := admin.Exec(`CREATE SCHEMA ` + schema); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Exec(`DROP SCHEMA ` + schema + ` CASCADE`)
+
+	parsedURL, err := url.Parse(databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := parsedURL.Query()
+	query.Set("search_path", schema)
+	parsedURL.RawQuery = query.Encode()
+	database, err := sql.Open("pgx", parsedURL.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	if _, err := database.ExecContext(ctx, `
+CREATE TABLE platform_schema_migrations (
+    version integer PRIMARY KEY,
+    name text NOT NULL,
+    checksum text NOT NULL,
+    applied_at timestamptz NOT NULL DEFAULT now()
+)
+`); err != nil {
+		t.Fatal(err)
+	}
+	files, err := Files()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files[:10] {
+		if _, err := database.ExecContext(ctx, file.SQL); err != nil {
+			t.Fatalf("执行旧迁移 %s：%v", file.Name, err)
+		}
+		if _, err := database.ExecContext(ctx, `
+INSERT INTO platform_schema_migrations (version, name, checksum) VALUES ($1, $2, $3)
+`, file.Version, file.Name, file.Checksum); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var modelID, policyID, bindingID int64
+	if err := database.QueryRowContext(ctx, `
+INSERT INTO canonical_models (public_name, provider, status)
+VALUES ('migration-history-model', 'OpenAI', 'active') RETURNING id
+`).Scan(&modelID); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRowContext(ctx, `
+INSERT INTO routing_policies
+    (newapi_user_id, name, priority, minimum_multiplier_bps, maximum_multiplier_bps)
+VALUES (7, '旧路由', 'balanced', 0, 50000) RETURNING id
+`).Scan(&policyID); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRowContext(ctx, `
+INSERT INTO token_bindings
+    (newapi_token_id, newapi_user_id, token_fingerprint, routing_policy_id)
+VALUES (9, 7, $1, $2) RETURNING id
+`, strings.Repeat("a", 64), policyID).Scan(&bindingID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `
+INSERT INTO routing_decisions
+    (request_id, token_binding_id, routing_policy_id, canonical_model_id,
+     priority, algorithm_version, candidate_count, result)
+VALUES ('migration-history-request', $1, $2, $3, 'balanced', 'weighted-v2', 1, 'completed')
+`, bindingID, policyID, modelID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Up(ctx, database); err != nil {
+		t.Fatalf("执行第 11 号迁移：%v", err)
+	}
+	var historicalBindingID, historicalPolicyID sql.NullInt64
+	if err := database.QueryRowContext(ctx, `
+SELECT token_binding_id, routing_policy_id
+FROM routing_decisions
+WHERE request_id = 'migration-history-request'
+`).Scan(&historicalBindingID, &historicalPolicyID); err != nil {
+		t.Fatalf("读取保留的调用记录：%v", err)
+	}
+	if historicalBindingID.Valid || historicalPolicyID.Valid {
+		t.Fatalf("旧密钥或路由引用未解除：密钥=%v 路由=%v", historicalBindingID, historicalPolicyID)
+	}
+	var tokenCount, policyCount int
+	if err := database.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM token_bindings), (SELECT count(*) FROM routing_policies)`).Scan(&tokenCount, &policyCount); err != nil {
+		t.Fatal(err)
+	}
+	if tokenCount != 0 || policyCount != 0 {
+		t.Fatalf("旧密钥或路由未清空：密钥=%d 路由=%d", tokenCount, policyCount)
 	}
 }

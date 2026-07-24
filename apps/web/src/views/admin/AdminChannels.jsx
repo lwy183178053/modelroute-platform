@@ -27,6 +27,8 @@ function lifecycleRows(reviews, channels) {
     .sort((left, right) => new Date(right.created_at || 0) - new Date(left.created_at || 0));
 }
 
+const wait = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+
 export default function AdminChannels({ notify }) {
   const [reviews, setReviews] = useState([]);
   const [channels, setChannels] = useState([]);
@@ -52,6 +54,23 @@ export default function AdminChannels({ notify }) {
 
   useEffect(() => { load(); }, [load]);
 
+  const waitForVerification = async (reviewID) => {
+    for (let attempt = 0; attempt < 450; attempt += 1) {
+      await wait(2000);
+      const reviewData = await apiRequest('/api/admin/channel-reviews?p=1&page_size=100');
+      const items = reviewData?.items || [];
+      setReviews(items);
+      const current = items.find((item) => item.id === reviewID);
+      if (!current || current.status === 'verifying') continue;
+      const matched = (current.models || []).filter((model) => model.match_status === 'matched');
+      const passed = matched.filter((model) => model.test_status === 'passed').length;
+      const failed = matched.length - passed;
+      if (current.status === 'verified') return { passed, failed };
+      throw new Error(current.verification_error || '渠道验证失败');
+    }
+    return null;
+  };
+
   const operate = async (review, action) => {
     let body;
     if (action === 'reject') {
@@ -62,7 +81,13 @@ export default function AdminChannels({ notify }) {
     setBusyID(`review-${review.id}-${action}`);
     try {
       const result = await apiRequest(`/api/admin/channel-reviews/${review.id}/${action}`, { method: 'POST', body });
-      notify(action === 'verify' ? `渠道验证完成：成功 ${result?.passed || 0} 个，失败 ${result?.failed || 0} 个` : action === 'approve' ? '渠道已审核通过' : '渠道审核不通过');
+      if (action === 'verify' && result?.status === 'verifying') {
+        notify('渠道验证已开始');
+        const summary = await waitForVerification(review.id);
+        notify(summary ? `渠道验证完成：成功 ${summary.passed} 个，失败 ${summary.failed} 个` : '渠道仍在后台验证，请稍后刷新');
+      } else {
+        notify(action === 'approve' ? '渠道已审核通过' : '渠道审核不通过');
+      }
       await load();
     } catch (requestError) {
       notify(requestError.message || '渠道审核操作失败');

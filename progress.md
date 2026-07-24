@@ -3019,3 +3019,30 @@
 - `docs/商户与渠道审核接口.md`：同步批量验证、成功型号审批、弹窗和管理员内部测试设置。
 - `progress.md`：追加本轮实现、验证、文件清单和回滚点。
 - 回滚点：执行 `git revert <本轮提交哈希>` 可回退本轮代码、界面、测试、文档和验收图；本轮没有数据库迁移，不需要恢复或重置现有渠道数据。
+
+## 2026-07-24 - Task: 修复批量渠道验证的网关超时
+
+### What was done
+
+- 生产候选版本实际验证 20 个模型时复现 Nginx 60 秒 `504`；确认旧同步请求会随浏览器连接取消并把审核记录遗留在 `verifying`。
+- 批量验证改为立即返回 `202`，由平台后台在 15 分钟时限内继续顺序检查；完成后统一写回“已验证”或“待审核”，不再依赖浏览器和网关连接存活。
+- 管理后台在收到“验证已开始”后轮询审核记录，完成时根据逐模型结果提示成功和失败数量；失败时展示已脱敏的实际原因。
+
+### Testing
+
+- `go test ./internal/httpapi -run 'TestAdminVerifiesEveryMatchedModelAndAllowsPartialSuccess|TestAdminVerificationRestoresPendingWhenEveryMatchedModelFails' -count=1`：通过；阻塞首个模型时 HTTP 请求仍立即返回，后台释放后按顺序完成，全部失败时恢复待审核。
+- `go test ./...`、`go vet ./...`、`go build ./cmd/api ./cmd/worker`：通过。
+- `npm.cmd run test:quota`、`npm.cmd run test:ui`、`npm.cmd run capture`：通过；覆盖验证开始提示、状态轮询、成功与失败数量提示及“已验证”文案，桌面和移动端页面无横向溢出。
+- `python -m unittest discover -s deploy/tests -p "test_*.py"`：27 项通过。
+- `docker compose --env-file .env.example --profile tools config --quiet`、`git diff --check`：通过。
+- 生产发布与 ID 1 重新验证证据将在本补丁发布后追加，不提前声明线上问题已消除。
+
+### Notes
+
+- `apps/api/internal/httpapi/merchant_handlers.go`：将批量模型验证改为有时限的后台任务，并使用独立短上下文写回最终状态。
+- `apps/api/internal/httpapi/merchant_handlers_test.go`：增加浏览器请求不等待长模型检测的回归用例并同步全部失败断言。
+- `apps/web/src/views/admin/AdminChannels.jsx`：增加审核状态轮询和完成数量提示。
+- `apps/web/scripts/ui-smoke.mjs`：模拟异步验证响应并验证轮询后的界面结果。
+- `docs/商户与渠道审核接口.md`：记录批量验证的异步接口和状态边界。
+- `progress.md`：追加生产 504 根因、修复、验证和回滚说明。
+- 回滚点：前一提交为 `3cdf835dab83`；执行 `git revert <本轮补丁提交>` 可恢复同步验证行为。本轮不改数据库结构，生产中卡住的 ID 1 只需恢复到待审核后重新触发。

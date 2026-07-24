@@ -367,7 +367,7 @@ async function mockAdminAPI(targetPage, state, account = null) {
       state.channelVerifyCalls += 1;
       state.channelReviewStatus = 'verified';
       state.modelTestStatus = 'passed';
-      return json({ success: true, data: { review_id: 22, adapter_type: 'anthropic', passed: 1, failed: 0 } });
+      return json({ success: true, data: { review_id: 22, status: 'verifying' } });
     }
     if (url.pathname === '/api/admin/channel-reviews/22/model-tests' && request.method() === 'POST') {
       state.modelTestCalls += 1;
@@ -709,6 +709,7 @@ try {
   await page.getByText('渠道已进入恢复检测').waitFor();
   assert(adminMockState.healthResetCalls === 1, '恢复渠道没有调用真实健康接口');
   await clickRowAction(page, '验证');
+  await page.getByText('渠道验证已开始').waitFor();
   await page.getByText('渠道验证完成：成功 1 个，失败 0 个').waitFor();
   assert(adminMockState.channelVerifyCalls === 1, '管理员渠道页验证没有调用真实渠道审核接口');
   await page.getByText('已验证', { exact: true }).waitFor();

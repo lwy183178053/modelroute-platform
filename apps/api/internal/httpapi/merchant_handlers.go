@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -344,39 +345,41 @@ func (s *server) adminVerifyReviewID(w http.ResponseWriter, r *http.Request, rev
 	if !ok || !s.requireSameOrigin(w, r) || !s.merchantReady(w) {
 		return
 	}
+	repository, supported := s.services.Merchants.(MultiModelMerchantRepository)
+	if !supported || s.services.Routing == nil || s.services.ChannelTests == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "multimodel_unavailable", "多模型审核服务尚未就绪")
+		return
+	}
 	review, err := s.services.Merchants.ClaimReview(r.Context(), reviewID, "verifying")
 	if err != nil {
 		s.writeMerchantStoreError(w, err)
 		return
 	}
-	repository, supported := s.services.Merchants.(MultiModelMerchantRepository)
-	if !supported || s.services.Routing == nil {
-		_ = s.services.Merchants.FinishVerification(r.Context(), reviewID, session.UserID, "", "多模型审核服务尚未就绪")
-		writeAPIError(w, http.StatusServiceUnavailable, "multimodel_unavailable", "多模型审核服务尚未就绪")
-		return
-	}
-	bindings, err := repository.ReviewModels(r.Context(), reviewID)
+	verificationContext, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	go func() {
+		defer cancel()
+		s.runAdminReviewVerification(verificationContext, repository, review, session.UserID)
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]any{"success": true, "data": map[string]any{
+		"review_id": reviewID, "status": "verifying",
+	}})
+}
+
+func (s *server) runAdminReviewVerification(ctx context.Context, repository MultiModelMerchantRepository, review MerchantChannelReview, adminID int) {
+	bindings, err := repository.ReviewModels(ctx, review.ID)
 	if err != nil {
-		_ = s.services.Merchants.FinishVerification(r.Context(), reviewID, session.UserID, "", "读取审核模型失败")
-		writeAPIError(w, http.StatusInternalServerError, "merchant_store_error", "读取审核模型失败")
+		s.finishAdminReviewVerification(review.ID, adminID, "", "读取审核模型失败")
 		return
 	}
 	credential, err := s.services.Credentials.Decrypt(review.EncryptedCredential)
 	if err != nil {
-		_ = s.services.Merchants.FinishVerification(r.Context(), reviewID, session.UserID, "", "凭据解密失败")
-		writeAPIError(w, http.StatusInternalServerError, "credential_error", "读取待审核凭据失败")
+		s.finishAdminReviewVerification(review.ID, adminID, "", "凭据解密失败")
 		return
 	}
 	defer zeroBytes(credential)
-	if s.services.ChannelTests == nil {
-		_ = s.services.Merchants.FinishVerification(r.Context(), reviewID, session.UserID, "", "渠道检测服务尚未就绪")
-		writeAPIError(w, http.StatusServiceUnavailable, "channel_test_unavailable", "渠道检测服务尚未就绪")
-		return
-	}
-	models, err := s.services.Routing.ListCanonicalModels(r.Context())
+	models, err := s.services.Routing.ListCanonicalModels(ctx)
 	if err != nil {
-		_ = s.services.Merchants.FinishVerification(r.Context(), reviewID, session.UserID, "", "读取标准模型失败")
-		writeAPIError(w, http.StatusInternalServerError, "model_store_error", "读取标准模型失败")
+		s.finishAdminReviewVerification(review.ID, adminID, "", "读取标准模型失败")
 		return
 	}
 	modelsByID := make(map[int64]CanonicalModel, len(models))
@@ -393,7 +396,7 @@ func (s *server) adminVerifyReviewID(w http.ResponseWriter, r *http.Request, rev
 		model, exists := modelsByID[binding.CanonicalModelID]
 		status, testError, latency := "failed", "标准模型不存在", 0
 		if exists {
-			outcome, testErr := s.services.ChannelTests.Test(r.Context(), ChannelTestRequest{Model: model, BaseURL: review.BaseURL, APIKey: string(credential)})
+			outcome, testErr := s.services.ChannelTests.Test(ctx, ChannelTestRequest{Model: model, BaseURL: review.BaseURL, APIKey: string(credential)})
 			latency = outcome.LatencyMS
 			if testErr == nil && (review.AdapterType == "" || outcome.AdapterType == review.AdapterType) {
 				status, testError = "passed", ""
@@ -404,9 +407,8 @@ func (s *server) adminVerifyReviewID(w http.ResponseWriter, r *http.Request, rev
 				testError = "管理员复检得到的内部适配器与商户自测不一致"
 			}
 		}
-		if err := repository.SetReviewModelTest(r.Context(), reviewID, binding.ID, session.UserID, status, latency, testError); err != nil {
-			_ = s.services.Merchants.FinishVerification(r.Context(), reviewID, session.UserID, "", "保存模型检测结果失败")
-			writeAPIError(w, http.StatusInternalServerError, "merchant_store_error", "保存模型检测结果失败")
+		if err := repository.SetReviewModelTest(ctx, review.ID, binding.ID, adminID, status, latency, testError); err != nil {
+			s.finishAdminReviewVerification(review.ID, adminID, "", "保存模型检测结果失败")
 			return
 		}
 		bindings[index].TestStatus = status
@@ -426,17 +428,16 @@ func (s *server) adminVerifyReviewID(w http.ResponseWriter, r *http.Request, rev
 		if firstFailure != "" {
 			failure += "：" + firstFailure
 		}
-		_ = s.services.Merchants.FinishVerification(r.Context(), reviewID, session.UserID, "", failure)
-		writeAPIError(w, http.StatusUnprocessableEntity, "channel_verification_failed", failure)
+		s.finishAdminReviewVerification(review.ID, adminID, "", failure)
 		return
 	}
-	if err := s.services.Merchants.FinishVerification(r.Context(), reviewID, session.UserID, adapterType, ""); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "merchant_store_error", "保存验证结果失败")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{
-		"review_id": reviewID, "adapter_type": adapterType, "passed": passed, "failed": failed, "models": bindings,
-	}})
+	s.finishAdminReviewVerification(review.ID, adminID, adapterType, "")
+}
+
+func (s *server) finishAdminReviewVerification(reviewID int64, adminID int, adapterType string, failure string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = s.services.Merchants.FinishVerification(ctx, reviewID, adminID, adapterType, failure)
 }
 
 func (s *server) adminApproveApplication(w http.ResponseWriter, r *http.Request) {

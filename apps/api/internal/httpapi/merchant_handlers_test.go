@@ -404,8 +404,10 @@ func TestAdminVerifiesEveryMatchedModelAndAllowsPartialSuccess(t *testing.T) {
 	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("管理员复检应使用隔离检测器")
 	}))
+	releaseCheck := make(chan struct{})
 	testedModels := make([]string, 0, 2)
 	services.ChannelTests = channelTesterStub{test: func(_ context.Context, request ChannelTestRequest) (ChannelTestOutcome, error) {
+		<-releaseCheck
 		if request.APIKey != "sk-upstream-secret" {
 			t.Fatalf("管理员复检密钥=%q", request.APIKey)
 		}
@@ -422,10 +424,12 @@ func TestAdminVerifiesEveryMatchedModelAndAllowsPartialSuccess(t *testing.T) {
 		}
 		return MerchantChannelReview{ID: 21, UserID: 7, Provider: "OpenAI", AdapterType: "openai_compatible", BaseURL: "https://api.merchant.example", EncryptedCredential: encrypted}, nil
 	}
+	verificationFinished := make(chan struct{})
 	baseRepository.finishVerify = func(_ context.Context, reviewID int64, adminID int, adapterType string, failure string) error {
 		if reviewID != 21 || adminID != 1 || failure != "" || adapterType != "openai_compatible" {
 			t.Fatalf("验证结果=%d %d %s %q", reviewID, adminID, adapterType, failure)
 		}
+		close(verificationFinished)
 		return nil
 	}
 	modelResults := map[int64]string{}
@@ -467,9 +471,24 @@ func TestAdminVerifiesEveryMatchedModelAndAllowsPartialSuccess(t *testing.T) {
 	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"passed":1`) || !strings.Contains(response.Body.String(), `"failed":1`) {
+	requestFinished := make(chan struct{})
+	go func() {
+		defer close(requestFinished)
+		handler.ServeHTTP(response, request)
+	}()
+	select {
+	case <-requestFinished:
+	case <-time.After(time.Second):
+		t.Fatal("批量模型检查不应占用浏览器请求连接")
+	}
+	if response.Code != http.StatusAccepted || !strings.Contains(response.Body.String(), `"status":"verifying"`) {
 		t.Fatalf("验证响应=%d %s", response.Code, response.Body.String())
+	}
+	close(releaseCheck)
+	select {
+	case <-verificationFinished:
+	case <-time.After(3 * time.Second):
+		t.Fatal("后台模型验证未完成")
 	}
 	if strings.Join(testedModels, ",") != "gpt-5.6,gpt-5.5" || modelResults[101] != "passed" || modelResults[102] != "failed" {
 		t.Fatalf("检测顺序=%v，结果=%v", testedModels, modelResults)
@@ -488,8 +507,10 @@ func TestAdminVerificationRestoresPendingWhenEveryMatchedModelFails(t *testing.T
 		return MerchantChannelReview{ID: 21, UserID: 7, Provider: "OpenAI", AdapterType: "openai_compatible", BaseURL: "https://api.merchant.example", EncryptedCredential: encrypted}, nil
 	}
 	failure := ""
+	verificationFinished := make(chan struct{})
 	baseRepository.finishVerify = func(_ context.Context, _ int64, _ int, _ string, value string) error {
 		failure = value
+		close(verificationFinished)
 		return nil
 	}
 	repository := &multiModelMerchantRepositoryStub{merchantRepositoryStub: baseRepository}
@@ -513,7 +534,15 @@ func TestAdminVerificationRestoresPendingWhenEveryMatchedModelFails(t *testing.T
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()
 	NewServerWithServices("test", Dependencies{}, services).ServeHTTP(response, request)
-	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "所有已匹配模型验证失败") || !strings.Contains(failure, "上游拒绝") {
+	if response.Code != http.StatusAccepted || !strings.Contains(response.Body.String(), `"status":"verifying"`) {
+		t.Fatalf("全部失败异步响应=%d %s", response.Code, response.Body.String())
+	}
+	select {
+	case <-verificationFinished:
+	case <-time.After(3 * time.Second):
+		t.Fatal("全部失败的后台验证未结束")
+	}
+	if !strings.Contains(failure, "上游拒绝") {
 		t.Fatalf("全部失败响应=%d %s，恢复原因=%q", response.Code, response.Body.String(), failure)
 	}
 }

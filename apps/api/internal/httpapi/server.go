@@ -37,10 +37,6 @@ type readinessCache struct {
 	failedDependency string
 }
 
-func NewServer(version string, dependencies Dependencies) http.Handler {
-	return NewServerWithServices(version, dependencies, Services{})
-}
-
 func NewServerWithServices(version string, dependencies Dependencies, services Services) http.Handler {
 	s := &server{version: version, dependencies: dependencies, services: services}
 	mux := http.NewServeMux()

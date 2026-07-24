@@ -72,11 +72,16 @@ class ReleaseToolContractTest(unittest.TestCase):
 
     def test_account_verifier_creates_provider_key_without_routes(self):
         verifier = read_script("verify-accounts.sh")
-        self.assertIn('"provider":"OpenAI"', verifier)
-        self.assertIn('"routing_policy_ids":[]', verifier)
-        self.assertIn('assert match["provider"] == "OpenAI"', verifier)
-        self.assertIn('assert match.get("routing_policies") == []', verifier)
-        self.assertIn('assert "*" in str(match.get("key", ""))', verifier)
+        for marker in (
+            '"provider":"OpenAI"',
+            '"routing_policy_ids":[]',
+            'assert match["provider"] == "OpenAI"',
+            'assert match.get("routing_policies") == []',
+            'assert "*" in str(match.get("key", ""))',
+            "DELETE FROM token_bindings WHERE newapi_token_id = $KEY_ID",
+            "DELETE FROM tokens WHERE id = $KEY_ID AND name = '$KEY_NAME'",
+        ):
+            self.assertIn(marker, verifier)
         self.assertNotIn('"routing_policy_id"', verifier)
 
     def test_routing_verifier_uses_provider_model_routes(self):

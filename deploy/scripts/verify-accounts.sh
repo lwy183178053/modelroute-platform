@@ -1,23 +1,47 @@
 #!/bin/sh
 set -eu
+umask 077
 
 BASE_URL="${1:-https://aggregate.lwylink.xyz}"
 BASE_URL="${BASE_URL%/}"
 ADMIN_USERNAME="${ADMIN_USERNAME:-3180615598@qq.com}"
 ADMIN_PASSWORD_FILE="${ADMIN_PASSWORD_FILE:-/opt/modelroute-platform/shared/bootstrap-admin.txt}"
+ROOT_DIR=$(CDPATH= cd -P -- "$(dirname -- "$0")/../.." && pwd -P)
+cd "$ROOT_DIR"
 
-if [ ! -r "$ADMIN_PASSWORD_FILE" ]; then
-  echo "管理员密码文件不可读" >&2
+if [ ! -r "$ADMIN_PASSWORD_FILE" ] || [ ! -r .env ]; then
+  echo "管理员密码文件或生产环境文件不可读" >&2
   exit 1
 fi
+set -a
+. ./.env
+set +a
 
 WORK_DIR="$(mktemp -d)"
 COOKIE_JAR="$WORK_DIR/cookies.txt"
 KEY_ID=""
+KEY_NAME=""
+
+purge_test_key() {
+  case "$KEY_ID" in
+    ''|*[!0-9]*) return ;;
+  esac
+  case "$KEY_NAME" in
+    contract-*) ;;
+    *) return ;;
+  esac
+  docker compose --env-file .env exec -T postgres psql -v ON_ERROR_STOP=1 \
+    -U "$POSTGRES_SUPERUSER" -d "$PLATFORM_DB_NAME" \
+    -c "DELETE FROM token_bindings WHERE newapi_token_id = $KEY_ID" </dev/null >/dev/null 2>&1 || true
+  docker compose --env-file .env exec -T postgres psql -v ON_ERROR_STOP=1 \
+    -U "$POSTGRES_SUPERUSER" -d "$NEWAPI_DB_NAME" \
+    -c "DELETE FROM tokens WHERE id = $KEY_ID AND name = '$KEY_NAME'" </dev/null >/dev/null 2>&1 || true
+}
 
 cleanup() {
   if [ -n "$KEY_ID" ]; then
     curl -sS -b "$COOKIE_JAR" -H "Origin: $BASE_URL" -X DELETE "$BASE_URL/api/keys/$KEY_ID" >/dev/null 2>&1 || true
+    purge_test_key
   fi
   curl -sS -b "$COOKIE_JAR" -H "Origin: $BASE_URL" -X POST "$BASE_URL/api/auth/logout" >/dev/null 2>&1 || true
   rm -rf "$WORK_DIR"
@@ -101,6 +125,8 @@ printf '{"enabled":false}' |
 curl -fsS -b "$COOKIE_JAR" -H "Origin: $BASE_URL" -H 'Content-Type: application/json' --data-binary @- -X POST "$BASE_URL/api/keys/$KEY_ID/status" >"$WORK_DIR/key-status.json"
 
 curl -fsS -b "$COOKIE_JAR" -H "Origin: $BASE_URL" -X DELETE "$BASE_URL/api/keys/$KEY_ID" >"$WORK_DIR/delete-key.json"
+purge_test_key
 KEY_ID=""
+KEY_NAME=""
 
 echo "账号契约验证通过"

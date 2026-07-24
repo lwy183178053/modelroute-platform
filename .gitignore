@@ -9,6 +9,7 @@
 **/.vite/
 **/__pycache__/
 /apps/api/*.exe
+/apps/web/artifacts/
 
 data/
 !apps/api/internal/modelseed/data/

@@ -3250,3 +3250,37 @@
 - `progress.md`：追加最终发布哈希、专项验收、残留清理、容器与隔离证据。
 - 生产发布目录：`/opt/modelroute-platform/releases/5774c931c8ef`。
 - 回滚点：上一稳定指针为 `/opt/modelroute-platform/releases/4ad2ea845834`；可使用固定目标临时软链接后 `mv -Tf` 原子切回，并执行旧目录的基础验收。本轮数据库迁移已在此前候选执行且不会因代码指针回滚自动恢复旧密钥和路由。
+
+## 2026-07-24 - Task: 整理项目代码与验收生成物
+
+### What was done
+
+- 使用 Go deadcode、staticcheck 和前端引用分析复核真实调用关系，删除两个生产不可达的服务构造/商户申请辅助函数，并将两个仅在文件内部使用的前端符号收回为私有。
+- 将生产 UI 验收登记为明确的 npm 命令；删除 50 张可再生成的历史验收截图并忽略截图目录，同时清理本地 Go 二进制、Vite 构建目录、Python 缓存和旧 57723 预览夹具。
+- 修复账号验收仅软删除测试 Token 的残留：脚本现在只针对自身生成的 `contract-*` 数字编号记录，清理平台绑定与核心 Token；异常退出与正常结束使用同一保护条件。
+- 保留仍被真实业务使用的密钥复制、失败冲正、商户余额和提现内部链路；未因文件较大而拆分路由或商户存储，避免无行为依据的数据库重构。
+
+### Testing
+
+- 先为账号验收补物理清理契约，目标测试因脚本缺少两条定点删除语句而失败；完成脚本修改后目标测试通过。
+- `go test ./...`、`go vet ./...`、`go test -race ./...`、Go deadcode 和 staticcheck 全部通过，未再报告不可达函数或静态问题。
+- 前端动态额度测试、UI 冒烟测试、生产构建和 knip 引用分析通过；`npm audit --audit-level=high` 返回 0 个漏洞，直接依赖树检查通过。
+- 部署工具 28 项 Python 测试全部通过；`docker compose --env-file .env.example --profile tools config --quiet` 与 `git diff --check` 通过。
+- `npm ls --all` 仍报告 `@lobehub/icons` 深层 UI 依赖中的两个 React 16-18 peer 声明与 React 19 不一致；当前直接依赖、Vite 构建、UI 冒烟和安全审计均通过，本轮未混入厂商图标库大版本升级。
+
+### Notes
+
+- `.gitignore`：忽略可再生成的前端验收截图目录。
+- `apps/api/internal/httpapi/server.go`：删除仅供旧测试调用的服务构造包装。
+- `apps/api/internal/httpapi/server_test.go`：测试改为直接使用生产服务构造入口。
+- `apps/api/internal/httpapi/merchant_handlers.go`：删除未注册、未引用的管理员申请辅助函数。
+- `apps/web/package.json`：登记生产 UI 验收命令。
+- `apps/web/src/api.js`：将仅供请求封装内部使用的错误类型改为文件私有。
+- `apps/web/src/ChannelModelsModal.jsx`：将仅供模型弹窗内部使用的列表转换函数改为文件私有。
+- `apps/web/artifacts/*.png`：删除 50 张历史 UI 验收截图，后续按需生成且不进入 Git。
+- `deploy/scripts/verify-accounts.sh`：增加受名称和编号保护的测试 Token 物理清理。
+- `deploy/tests/test_release_tools.py`：锁定账号验收必须清理平台绑定和核心 Token。
+- `docs/运营管理与升级验收.md`：补充账号验收的数据清理边界。
+- `docs/部署运行手册.md`：更新生产 UI 验收命令与截图生成物规则。
+- `progress.md`：追加代码整理范围、验证证据、残余依赖风险和回滚点。
+- 回滚点：本轮前一提交为 `b5c35ba`；执行 `git revert <本轮提交哈希>` 可恢复代码、脚本和历史截图。本轮没有数据库迁移，物理清理仅匹配验收脚本生成的 `contract-*` 测试 Token。

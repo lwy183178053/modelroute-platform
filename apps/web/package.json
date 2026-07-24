@@ -8,6 +8,7 @@
     "build": "vite build",
     "test:quota": "node scripts/quota-unit-test.mjs",
     "test:ui": "vite build && node scripts/ui-smoke.mjs",
+    "test:production": "node scripts/production-smoke.mjs",
     "capture": "vite build && node scripts/capture.mjs"
   },
   "dependencies": {

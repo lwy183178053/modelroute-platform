@@ -4,7 +4,7 @@ import { Button, Modal, Status } from './ui';
 const matchNames = { matched: '已匹配', unmatched: '平台未收录' };
 const testNames = { passed: '检查通过', failed: '检查失败', untested: '未检查', pending: '未检查' };
 
-export function channelModelItems(item) {
+function channelModelItems(item) {
   if (item?.kind === 'review') return item.models || [];
   const names = item?.matched_models?.length ? item.matched_models : (item?.model ? [item.model] : []);
   return names.map((name, index) => ({ id: `${item.id}-${index}`, upstream_model_name: name, match_status: 'imported' }));

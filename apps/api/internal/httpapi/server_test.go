@@ -39,11 +39,11 @@ func (s *countingDependency) Ping(context.Context) error {
 }
 
 func TestLiveDoesNotRequireDependencies(t *testing.T) {
-	handler := NewServer("test-version", Dependencies{
+	handler := NewServerWithServices("test-version", Dependencies{
 		Database: stubDependency{err: errors.New("database down")},
 		Redis:    stubDependency{err: errors.New("redis down")},
 		NewAPI:   stubDependency{err: errors.New("new api down")},
-	})
+	}, Services{})
 
 	request := httptest.NewRequest(http.MethodGet, "/api/health/live", nil)
 	response := httptest.NewRecorder()
@@ -65,11 +65,11 @@ func TestVersionPublishesRuntimeCoreQuotaUnit(t *testing.T) {
 }
 
 func TestReadyReportsFailedDependency(t *testing.T) {
-	handler := NewServer("test-version", Dependencies{
+	handler := NewServerWithServices("test-version", Dependencies{
 		Database: stubDependency{},
 		Redis:    stubDependency{err: errors.New("redis down")},
 		NewAPI:   stubDependency{},
-	})
+	}, Services{})
 
 	request := httptest.NewRequest(http.MethodGet, "/api/health/ready", nil)
 	response := httptest.NewRecorder()
@@ -96,11 +96,11 @@ func TestReadyCoalescesConcurrentDependencyChecks(t *testing.T) {
 	database := &countingDependency{}
 	redis := &countingDependency{}
 	newAPI := &countingDependency{}
-	handler := NewServer("test-version", Dependencies{
+	handler := NewServerWithServices("test-version", Dependencies{
 		Database: database,
 		Redis:    redis,
 		NewAPI:   newAPI,
-	})
+	}, Services{})
 
 	const requests = 50
 	start := make(chan struct{})
@@ -127,7 +127,7 @@ func TestReadyCoalescesConcurrentDependencyChecks(t *testing.T) {
 }
 
 func TestModelRouteIsClosedDuringFoundationPhase(t *testing.T) {
-	handler := NewServer("test-version", Dependencies{})
+	handler := NewServerWithServices("test-version", Dependencies{}, Services{})
 	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)

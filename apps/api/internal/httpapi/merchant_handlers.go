@@ -783,23 +783,6 @@ func (s *server) buildMultiModelSubmission(r *http.Request, session platformauth
 	return ChannelSubmission{ChannelName: name, Provider: provider, ChannelType: numericType, AdapterType: adapterForChannelType(numericType), BaseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"), UpstreamModels: models, EncryptedCredential: ciphertext, CredentialFingerprint: fingerprint}, nil
 }
 
-func (s *server) requireAdminApplication(w http.ResponseWriter, r *http.Request) (MerchantApplication, bool) {
-	_, _, ok := s.requireSession(w, r, roleAdmin)
-	if !ok || !s.requireSameOrigin(w, r) || !s.merchantReady(w) {
-		return MerchantApplication{}, false
-	}
-	id, ok := pathInt64(w, r, "id", "申请编号无效")
-	if !ok {
-		return MerchantApplication{}, false
-	}
-	application, err := s.services.Merchants.Application(r.Context(), id)
-	if err != nil {
-		s.writeMerchantStoreError(w, err)
-		return MerchantApplication{}, false
-	}
-	return application, true
-}
-
 func (s *server) requireMerchant(w http.ResponseWriter, r *http.Request) (string, platformauth.Session, MerchantIdentity, bool) {
 	token, session, ok := s.requireSession(w, r, roleCommon)
 	if !ok || !s.merchantReady(w) {

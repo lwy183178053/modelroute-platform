@@ -316,6 +316,43 @@ func (s *server) createRoutingPolicy(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"success": true, "data": policy})
 }
 
+func (s *server) previewRoutingPolicy(w http.ResponseWriter, r *http.Request) {
+	_, _, ok := s.requireSession(w, r, roleCommon)
+	if !ok || !s.requireSameOrigin(w, r) || !s.routingReady(w, false) {
+		return
+	}
+	repository, ok := s.services.Routing.(RoutingPreviewRepository)
+	if !ok {
+		writeAPIError(w, http.StatusServiceUnavailable, "routing_preview_unavailable", "路由范围预览服务尚未就绪")
+		return
+	}
+	var input RoutingPreviewInput
+	if err := decodeJSON(r, &input); err != nil || validateRoutingPreviewInput(input) != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_routing_preview", "路由预览参数无效")
+		return
+	}
+	preview, err := repository.PreviewRoute(r.Context(), input)
+	if errors.Is(err, ErrRoutingNotFound) {
+		writeAPIError(w, http.StatusNotFound, "model_not_found", "预览模型不存在或未启用")
+		return
+	}
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "routing_preview_failed", "统计路由范围失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": preview})
+}
+
+func validateRoutingPreviewInput(input RoutingPreviewInput) error {
+	if input.CanonicalModelID <= 0 || input.MinimumMultiplierBPS < 0 || input.MaximumMultiplierBPS > 50_000 || input.MinimumMultiplierBPS > input.MaximumMultiplierBPS {
+		return ErrRoutingInvalidState
+	}
+	if input.MinimumCacheHitPPM != nil && (*input.MinimumCacheHitPPM < 0 || *input.MinimumCacheHitPPM > 1_000_000) {
+		return ErrRoutingInvalidState
+	}
+	return nil
+}
+
 func (s *server) routingPolicy(w http.ResponseWriter, r *http.Request) {
 	_, session, ok := s.requireSession(w, r, roleCommon)
 	if !ok || !s.routingReady(w, false) {

@@ -2,8 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"regexp"
 	"testing"
@@ -20,7 +18,7 @@ func TestMerchantStoreMapsReservedNameConflict(t *testing.T) {
 	}
 }
 
-func TestSQLMerchantStoreCreatesApplicationAndInitialReviewAtomically(t *testing.T) {
+func TestSQLMerchantStoreCreatesApplicationWithoutChannelReview(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -30,33 +28,56 @@ func TestSQLMerchantStoreCreatesApplicationAndInitialReviewAtomically(t *testing
 	createdAt := time.Date(2026, 7, 22, 14, 0, 0, 0, time.UTC)
 	command := CreateMerchantApplication{
 		UserID: 7, DisplayName: "北辰云智", DisplayNameKey: "北辰云智", WebsiteURL: "https://merchant.example", BusinessDescription: "企业模型 API 服务",
-		Channel: ChannelSubmission{ChannelName: "主线路", CanonicalModelID: 61, TestReceipt: "test-receipt-1234567890", BaseURL: "https://api.merchant.example", EncryptedCredential: []byte("ciphertext"), CredentialFingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 	}
-	receiptDigest := sha256.Sum256([]byte(command.Channel.TestReceipt))
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT t.id, t.adapter_type")).
-		WithArgs(hex.EncodeToString(receiptDigest[:]), 7, int64(61), "https://api.merchant.example", command.Channel.CredentialFingerprint).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "adapter_type", "public_name", "provider", "price_kind"}).
-			AddRow(81, "openai_compatible", "gpt-5.6", "OpenAI", "text"))
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE merchant_channel_tests SET consumed_at = now() WHERE id = $1")).
-		WithArgs(int64(81)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO merchant_applications")).
 		WithArgs(7, "北辰云智", "北辰云智", "https://merchant.example", "企业模型 API 服务").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(11, createdAt))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO merchant_name_reservations")).
 		WithArgs("北辰云智", "北辰云智", 7, int64(11)).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO merchant_channel_reviews")).
-		WithArgs(7, int64(11), int64(61), int64(81), "主线路", "https://api.merchant.example", "openai_compatible", []byte("ciphertext"), command.Channel.CredentialFingerprint).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(21, createdAt))
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE merchant_applications SET initial_channel_review_id = $1 WHERE id = $2")).
-		WithArgs(int64(21), int64(11)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	application, err := store.CreateApplication(context.Background(), command)
 	if err != nil {
 		t.Fatalf("创建申请失败：%v", err)
 	}
-	if application.ID != 11 || application.InitialReview.ID != 21 || !application.InitialReview.CredentialConfigured || application.Status != "pending" {
+	if application.ID != 11 || application.Status != "pending" || application.DisplayName != "北辰云智" {
 		t.Fatalf("申请结果=%+v", application)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSQLMerchantStoreApprovesApplicationWithoutCreatingChannel(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewSQLMerchantStore(database)
+	approvedAt := time.Date(2026, 7, 22, 15, 0, 0, 0, time.UTC)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, newapi_user_id, display_name, website_url, business_description")).
+		WithArgs(int64(11)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "display_name", "website_url", "business_description"}).
+			AddRow(11, 7, "北辰云智", "https://merchant.example", "企业模型 API 服务"))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO merchant_profiles")).
+		WithArgs(7, int64(11), "北辰云智", "https://merchant.example", "企业模型 API 服务", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "display_name", "website_url", "business_description", "status", "status_reason", "approved_at", "is_platform_owned"}).
+			AddRow(31, 7, "北辰云智", "https://merchant.example", "企业模型 API 服务", "active", "", approvedAt, false))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE merchant_applications")).
+		WithArgs(1, int64(11)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE merchant_name_reservations")).
+		WithArgs(int64(31), int64(11)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	profile, err := store.ApproveApplication(context.Background(), 11, 1)
+	if err != nil {
+		t.Fatalf("通过商户申请失败：%v", err)
+	}
+	if profile.ID != 31 || profile.UserID != 7 || profile.BusinessDescription != "企业模型 API 服务" || profile.IsPlatformOwned {
+		t.Fatalf("商户资料=%+v", profile)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -246,11 +267,11 @@ func TestSQLMerchantStoreFinalApprovalClearsCredentialAndCreatesOwnership(t *tes
 	store := NewSQLMerchantStore(database)
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT r.id, r.merchant_newapi_user_id")).WithArgs(int64(21)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "application_id", "canonical_model_id", "channel_name", "base_url", "adapter_type", "fingerprint", "display_name", "website_url"}).
-			AddRow(21, 7, 11, 61, "主线路", "https://api.merchant.example", "openai_compatible", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "北辰云智", "https://merchant.example"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "application_id", "canonical_model_id", "channel_name", "provider", "base_url", "adapter_type", "fingerprint", "display_name", "website_url"}).
+			AddRow(21, 7, 11, 61, "主线路", "OpenAI", "https://api.merchant.example", "openai_compatible", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "北辰云智", "https://merchant.example"))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO merchant_profiles")).WithArgs(7, int64(11), "北辰云智", "https://merchant.example", 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(31))
-	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO merchant_channels")).WithArgs(int64(31), int64(21), int64(61), 41, "主线路", "https://api.merchant.example", "openai_compatible", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO merchant_channels")).WithArgs(int64(31), int64(21), int64(61), 41, "OpenAI", "主线路", "https://api.merchant.example", "openai_compatible", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(51))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO channel_health")).WithArgs(int64(51)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE merchant_channel_reviews")).WithArgs(1, int64(21), int64(31)).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -278,9 +299,6 @@ func TestSQLMerchantStoreRejectsApplicationAndReleasesReservedName(t *testing.T)
 	store := NewSQLMerchantStore(database)
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta("UPDATE merchant_channel_reviews")).
-		WithArgs("资料不完整", 1, int64(21)).
-		WillReturnRows(sqlmock.NewRows([]string{"application_id"}).AddRow(int64(11)))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE merchant_applications")).
 		WithArgs("资料不完整", 1, int64(11)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -289,7 +307,7 @@ func TestSQLMerchantStoreRejectsApplicationAndReleasesReservedName(t *testing.T)
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	if err := store.RejectReview(context.Background(), 21, 1, "资料不完整"); err != nil {
+	if err := store.RejectApplication(context.Background(), 11, 1, "资料不完整"); err != nil {
 		t.Fatalf("驳回商户申请失败：%v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

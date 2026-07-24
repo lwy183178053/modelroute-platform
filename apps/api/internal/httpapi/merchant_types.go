@@ -39,7 +39,7 @@ type MerchantChannelReview struct {
 	Model                 string               `json:"model"`
 	Provider              string               `json:"provider"`
 	PriceKind             string               `json:"-"`
-	AdapterType           string               `json:"adapter_type"`
+	AdapterType           string               `json:"-"`
 	ChannelTestID         int64                `json:"channel_test_id"`
 	BaseURL               string               `json:"base_url"`
 	RequestedModels       []string             `json:"-"`
@@ -80,27 +80,28 @@ type ChannelModelBinding struct {
 }
 
 type MerchantApplication struct {
-	ID                  int64                 `json:"id"`
-	UserID              int                   `json:"user_id"`
-	DisplayName         string                `json:"display_name"`
-	WebsiteURL          string                `json:"website_url"`
-	BusinessDescription string                `json:"business_description"`
-	Status              string                `json:"status"`
-	ReviewReason        string                `json:"review_reason,omitempty"`
-	InitialReview       MerchantChannelReview `json:"initial_channel"`
-	ReviewedAt          *time.Time            `json:"reviewed_at,omitempty"`
-	CreatedAt           time.Time             `json:"created_at"`
+	ID                  int64      `json:"id"`
+	UserID              int        `json:"user_id"`
+	DisplayName         string     `json:"display_name"`
+	WebsiteURL          string     `json:"website_url"`
+	BusinessDescription string     `json:"business_description"`
+	Status              string     `json:"status"`
+	ReviewReason        string     `json:"review_reason,omitempty"`
+	ReviewedAt          *time.Time `json:"reviewed_at,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
 }
 
 type MerchantProfile struct {
-	ID               int64     `json:"id"`
-	UserID           int       `json:"user_id"`
-	DisplayName      string    `json:"display_name"`
-	WebsiteURL       string    `json:"website_url"`
-	Status           string    `json:"status"`
-	StatusReason     string    `json:"status_reason,omitempty"`
-	ApprovedAt       time.Time `json:"approved_at"`
-	NewAPIChannelIDs []int     `json:"-"`
+	ID                  int64     `json:"id"`
+	UserID              int       `json:"user_id"`
+	DisplayName         string    `json:"display_name"`
+	WebsiteURL          string    `json:"website_url"`
+	BusinessDescription string    `json:"business_description"`
+	Status              string    `json:"status"`
+	StatusReason        string    `json:"status_reason,omitempty"`
+	ApprovedAt          time.Time `json:"approved_at"`
+	IsPlatformOwned     bool      `json:"is_platform_merchant"`
+	NewAPIChannelIDs    []int     `json:"-"`
 }
 
 type MerchantChannel struct {
@@ -115,7 +116,7 @@ type MerchantChannel struct {
 	CanonicalModelID      int64      `json:"canonical_model_id"`
 	Model                 string     `json:"model"`
 	Provider              string     `json:"provider"`
-	AdapterType           string     `json:"adapter_type"`
+	AdapterType           string     `json:"-"`
 	BaseURL               string     `json:"base_url"`
 	Models                []string   `json:"matched_models,omitempty"`
 	CredentialFingerprint string     `json:"credential_fingerprint"`
@@ -167,6 +168,7 @@ type ChannelTester interface {
 
 type ChannelSubmission struct {
 	ChannelName           string
+	Provider              string
 	ChannelType           int
 	AdapterType           string
 	CanonicalModelID      int64
@@ -184,7 +186,6 @@ type CreateMerchantApplication struct {
 	DisplayNameKey      string
 	WebsiteURL          string
 	BusinessDescription string
-	Channel             ChannelSubmission
 }
 
 type CreateMerchantChannel struct {
@@ -211,6 +212,8 @@ type MerchantRepository interface {
 	SaveChannelTest(context.Context, CreateChannelTest) (ChannelTest, error)
 	CreateApplication(context.Context, CreateMerchantApplication) (MerchantApplication, error)
 	ApplicationForUser(context.Context, int) (MerchantApplication, error)
+	ApproveApplication(context.Context, int64, int) (MerchantProfile, error)
+	RejectApplication(context.Context, int64, int, string) error
 	CreateChannelReview(context.Context, CreateMerchantChannel) (MerchantChannelReview, error)
 	ChannelsForUser(context.Context, int) ([]MerchantChannel, error)
 	ChannelReviewsForUser(context.Context, int) ([]MerchantChannelReview, error)
@@ -224,6 +227,7 @@ type MerchantRepository interface {
 	CancelApproval(context.Context, int64, string) error
 	RejectReview(context.Context, int64, int, string) error
 	Merchant(context.Context, int64) (MerchantProfile, error)
+	UpdateMerchantDescription(context.Context, int64, string) (MerchantProfile, error)
 	SetMerchantStatus(context.Context, int64, bool, int, string) (MerchantStatusChange, error)
 }
 

@@ -185,6 +185,35 @@ func TestResolveRouteFiltersInsufficientCacheSampleAndKnownLowValue(t *testing.T
 	}
 }
 
+func TestPreviewRouteUsesCandidateFiltersAndDistinctCounts(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	cacheFloor := 650_000
+	mock.ExpectQuery(regexp.QuoteMeta("FROM canonical_models model")).
+		WithArgs(int64(61)).
+		WillReturnRows(sqlmock.NewRows([]string{"price_kind"}).AddRow("text"))
+	mock.ExpectQuery(regexp.QuoteMeta("WITH merchant_metrics AS")).
+		WithArgs(int64(61), 5_000, 12_000).
+		WillReturnRows(sqlmock.NewRows([]string{"merchant_id", "channel_id", "merchant_cache_hit_ppm", "merchant_cache_weight_ready"}).
+			AddRow(31, 51, 700_000, true).
+			AddRow(31, 52, 700_000, true).
+			AddRow(32, 53, 500_000, true))
+
+	preview, err := NewSQLRoutingStore(database).PreviewRoute(context.Background(), RoutingPreviewInput{
+		CanonicalModelID: 61, MinimumMultiplierBPS: 5_000, MaximumMultiplierBPS: 12_000,
+		MinimumCacheHitPPM: &cacheFloor,
+	})
+	if err != nil || preview.AvailableMerchantCount != 1 || preview.AvailableChannelCount != 2 {
+		t.Fatalf("路由预览=%+v err=%v", preview, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestStartRouteDecisionPersistsWeightedRoutingContext(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {

@@ -11,30 +11,55 @@ import (
 
 type routingRepositoryStub struct {
 	RoutingRepository
-	createModel          func(context.Context, CreateCanonicalModelCommand) (CanonicalModel, error)
-	createOffer          func(context.Context, CreateOfferCommand) (OfferVersion, error)
-	retireOffer          func(context.Context, int, int64) error
-	offerState           func(context.Context, int, int64) (MerchantOfferState, error)
-	deleteOffer          func(context.Context, int, int64) error
-	createRoute          func(context.Context, int, RoutingPolicyInput) (RoutingPolicy, error)
-	listRoutes           func(context.Context, int) ([]RoutingPolicy, error)
-	getRoute             func(context.Context, int, int64) (RoutingPolicy, error)
-	updateRoute          func(context.Context, int, int64, RoutingPolicyInput) (RoutingPolicy, error)
-	deleteRoute          func(context.Context, int, int64) error
-	bindToken            func(context.Context, int, int, string, int64) (TokenRoutingBinding, error)
-	rebindToken          func(context.Context, int, int, int64) (TokenRoutingBinding, error)
-	listBindings         func(context.Context, int) ([]TokenRoutingBinding, error)
-	revokeToken          func(context.Context, int, int) error
-	listOffers           func(context.Context, int, string) ([]MarketOffer, error)
-	listMerchantOffers   func(context.Context, int) ([]MerchantOfferView, error)
-	prepareHealth        func(context.Context, int64) (int, error)
-	resetHealth          func(context.Context, int64) error
-	listModels           func(context.Context) ([]CanonicalModel, error)
-	deleteModel          func(context.Context, int64) (string, error)
+	createModel        func(context.Context, CreateCanonicalModelCommand) (CanonicalModel, error)
+	createOffer        func(context.Context, CreateOfferCommand) (OfferVersion, error)
+	retireOffer        func(context.Context, int, int64) error
+	offerState         func(context.Context, int, int64) (MerchantOfferState, error)
+	deleteOffer        func(context.Context, int, int64) error
+	createRoute        func(context.Context, int, RoutingPolicyInput) (RoutingPolicy, error)
+	listRoutes         func(context.Context, int) ([]RoutingPolicy, error)
+	getRoute           func(context.Context, int, int64) (RoutingPolicy, error)
+	updateRoute        func(context.Context, int, int64, RoutingPolicyInput) (RoutingPolicy, error)
+	deleteRoute        func(context.Context, int, int64) error
+	bindToken          func(context.Context, int, int, string, int64) (TokenRoutingBinding, error)
+	rebindToken        func(context.Context, int, int, int64) (TokenRoutingBinding, error)
+	listBindings       func(context.Context, int) ([]TokenRoutingBinding, error)
+	revokeToken        func(context.Context, int, int) error
+	listOffers         func(context.Context, int, string) ([]MarketOffer, error)
+	listMerchantOffers func(context.Context, int) ([]MerchantOfferView, error)
+	prepareHealth      func(context.Context, int64) (int, error)
+	resetHealth        func(context.Context, int64) error
+	listModels         func(context.Context) ([]CanonicalModel, error)
+	deleteModel        func(context.Context, int64) (string, error)
+	previewRoute       func(context.Context, RoutingPreviewInput) (RoutingPreview, error)
+}
+
+func (s *routingRepositoryStub) PreviewRoute(ctx context.Context, input RoutingPreviewInput) (RoutingPreview, error) {
+	return s.previewRoute(ctx, input)
 }
 
 func (s *routingRepositoryStub) CreateRoutingPolicy(ctx context.Context, userID int, input RoutingPolicyInput) (RoutingPolicy, error) {
 	return s.createRoute(ctx, userID, input)
+}
+
+func TestRoutingPreviewReturnsCountsForCurrentFilters(t *testing.T) {
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	cacheFloor := 650_000
+	services.Routing = &routingRepositoryStub{previewRoute: func(_ context.Context, input RoutingPreviewInput) (RoutingPreview, error) {
+		if input.CanonicalModelID != 61 || input.MinimumMultiplierBPS != 5_000 || input.MaximumMultiplierBPS != 12_000 || input.MinimumCacheHitPPM == nil || *input.MinimumCacheHitPPM != cacheFloor {
+			t.Fatalf("预览参数=%+v", input)
+		}
+		return RoutingPreview{CanonicalModelID: 61, AvailableMerchantCount: 3, AvailableChannelCount: 7}, nil
+	}}
+	token := createPlatformSession(t, services, 7, 1)
+	request := httptest.NewRequest(http.MethodPost, "/api/routing-policies/preview", strings.NewReader(`{"canonical_model_id":61,"minimum_multiplier_bps":5000,"maximum_multiplier_bps":12000,"minimum_cache_hit_ppm":650000}`))
+	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
+	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
+	response := httptest.NewRecorder()
+	NewServerWithServices("test", Dependencies{}, services).ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"available_merchant_count":3`) || !strings.Contains(response.Body.String(), `"available_channel_count":7`) {
+		t.Fatalf("路由预览响应=%d %s", response.Code, response.Body.String())
+	}
 }
 
 func (s *routingRepositoryStub) ListRoutingPolicies(ctx context.Context, userID int) ([]RoutingPolicy, error) {

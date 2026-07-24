@@ -129,11 +129,6 @@ func (s *SQLMerchantStore) CreateApplication(ctx context.Context, command Create
 		return MerchantApplication{}, fmt.Errorf("开始商户申请事务：%w", err)
 	}
 	defer tx.Rollback()
-	test, err := claimChannelTest(ctx, tx, command.UserID, command.Channel)
-	if err != nil {
-		return MerchantApplication{}, err
-	}
-
 	application := MerchantApplication{
 		UserID: command.UserID, DisplayName: command.DisplayName, WebsiteURL: command.WebsiteURL,
 		BusinessDescription: command.BusinessDescription, Status: "pending",
@@ -154,33 +149,9 @@ VALUES ($1, $2, $3, $4, 'pending')
 `, command.DisplayNameKey, command.DisplayName, command.UserID, application.ID); err != nil {
 		return MerchantApplication{}, merchantStoreError(err)
 	}
-
-	review := MerchantChannelReview{
-		UserID: command.UserID, ApplicationID: application.ID, ChannelName: command.Channel.ChannelName,
-		CanonicalModelID: command.Channel.CanonicalModelID, Model: test.Model, Provider: test.Provider,
-		PriceKind: test.PriceKind, AdapterType: test.AdapterType, ChannelTestID: test.ID,
-		BaseURL: command.Channel.BaseURL, Status: "pending", CredentialConfigured: true,
-	}
-	err = tx.QueryRowContext(ctx, `
-INSERT INTO merchant_channel_reviews
-    (merchant_newapi_user_id, application_id, canonical_model_id, channel_test_id,
-     channel_name, base_url, adapter_type, encrypted_credential, credential_fingerprint)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, created_at
-`, command.UserID, application.ID, command.Channel.CanonicalModelID, test.ID,
-		command.Channel.ChannelName, command.Channel.BaseURL, test.AdapterType,
-		command.Channel.EncryptedCredential, command.Channel.CredentialFingerprint,
-	).Scan(&review.ID, &review.CreatedAt)
-	if err != nil {
-		return MerchantApplication{}, merchantStoreError(err)
-	}
-	if _, err := tx.ExecContext(ctx, "UPDATE merchant_applications SET initial_channel_review_id = $1 WHERE id = $2", review.ID, application.ID); err != nil {
-		return MerchantApplication{}, fmt.Errorf("关联初始渠道审核：%w", err)
-	}
 	if err := tx.Commit(); err != nil {
 		return MerchantApplication{}, fmt.Errorf("提交商户申请事务：%w", err)
 	}
-	application.InitialReview = review
 	return application, nil
 }
 
@@ -196,6 +167,113 @@ func (s *SQLMerchantStore) Application(ctx context.Context, id int64) (MerchantA
 	return scanMerchantApplication(s.database.QueryRowContext(ctx, applicationSelect+`
 WHERE a.id = $1
 `, id))
+}
+
+func (s *SQLMerchantStore) ApproveApplication(ctx context.Context, applicationID int64, adminID int) (MerchantProfile, error) {
+	tx, err := s.database.BeginTx(ctx, nil)
+	if err != nil {
+		return MerchantProfile{}, fmt.Errorf("开始商户申请审批事务：%w", err)
+	}
+	defer tx.Rollback()
+	var application MerchantApplication
+	err = tx.QueryRowContext(ctx, `
+SELECT id, newapi_user_id, display_name, website_url, business_description
+FROM merchant_applications
+WHERE id = $1 AND status = 'pending'
+FOR UPDATE
+`, applicationID).Scan(&application.ID, &application.UserID, &application.DisplayName, &application.WebsiteURL, &application.BusinessDescription)
+	if errors.Is(err, sql.ErrNoRows) {
+		return MerchantProfile{}, ErrMerchantInvalidState
+	}
+	if err != nil {
+		return MerchantProfile{}, fmt.Errorf("锁定商户申请：%w", err)
+	}
+	var profile MerchantProfile
+	err = tx.QueryRowContext(ctx, `
+INSERT INTO merchant_profiles
+    (newapi_user_id, approved_application_id, display_name, website_url, business_description,
+     status, approved_by_newapi_user_id, is_platform_owned)
+VALUES ($1, $2, $3, $4, $5, 'active', $6, false)
+ON CONFLICT (newapi_user_id) DO UPDATE
+SET approved_application_id = EXCLUDED.approved_application_id,
+    display_name = EXCLUDED.display_name,
+    website_url = EXCLUDED.website_url,
+    business_description = EXCLUDED.business_description,
+    status = 'active', status_reason = NULL,
+    approved_by_newapi_user_id = EXCLUDED.approved_by_newapi_user_id,
+    approved_at = now(), is_platform_owned = false, updated_at = now()
+RETURNING id, newapi_user_id, display_name, website_url, business_description, status,
+          COALESCE(status_reason, ''), approved_at, is_platform_owned
+`, application.UserID, application.ID, application.DisplayName, application.WebsiteURL,
+		application.BusinessDescription, adminID).Scan(
+		&profile.ID, &profile.UserID, &profile.DisplayName, &profile.WebsiteURL,
+		&profile.BusinessDescription, &profile.Status, &profile.StatusReason,
+		&profile.ApprovedAt, &profile.IsPlatformOwned,
+	)
+	if err != nil {
+		return MerchantProfile{}, merchantStoreError(err)
+	}
+	result, err := tx.ExecContext(ctx, `
+UPDATE merchant_applications
+SET status = 'approved', review_reason = NULL, reviewed_by_newapi_user_id = $1,
+    reviewed_at = now(), updated_at = now()
+WHERE id = $2 AND status = 'pending'
+`, adminID, application.ID)
+	if err != nil {
+		return MerchantProfile{}, fmt.Errorf("完成商户申请审批：%w", err)
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return MerchantProfile{}, ErrMerchantInvalidState
+	}
+	result, err = tx.ExecContext(ctx, `
+UPDATE merchant_name_reservations
+SET merchant_profile_id = $1, status = 'active', updated_at = now()
+WHERE application_id = $2 AND status = 'pending'
+`, profile.ID, application.ID)
+	if err != nil {
+		return MerchantProfile{}, fmt.Errorf("激活商户名称：%w", err)
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return MerchantProfile{}, ErrMerchantInvalidState
+	}
+	if err := tx.Commit(); err != nil {
+		return MerchantProfile{}, fmt.Errorf("提交商户申请审批事务：%w", err)
+	}
+	return profile, nil
+}
+
+func (s *SQLMerchantStore) RejectApplication(ctx context.Context, applicationID int64, adminID int, reason string) error {
+	tx, err := s.database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("开始商户申请驳回事务：%w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `
+UPDATE merchant_applications
+SET status = 'rejected', review_reason = $1, reviewed_by_newapi_user_id = $2,
+    reviewed_at = now(), updated_at = now()
+WHERE id = $3 AND status = 'pending'
+`, reason, adminID, applicationID)
+	if err != nil {
+		return fmt.Errorf("驳回商户申请：%w", err)
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return ErrMerchantInvalidState
+	}
+	result, err = tx.ExecContext(ctx, `
+DELETE FROM merchant_name_reservations
+WHERE application_id = $1 AND status = 'pending'
+`, applicationID)
+	if err != nil {
+		return fmt.Errorf("释放商户名称：%w", err)
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return ErrMerchantInvalidState
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("提交商户申请驳回事务：%w", err)
+	}
+	return nil
 }
 
 func (s *SQLMerchantStore) CreateChannelReview(ctx context.Context, command CreateMerchantChannel) (MerchantChannelReview, error) {
@@ -217,12 +295,12 @@ func (s *SQLMerchantStore) CreateChannelReview(ctx context.Context, command Crea
 	err = tx.QueryRowContext(ctx, `
 INSERT INTO merchant_channel_reviews
     (merchant_profile_id, merchant_newapi_user_id, canonical_model_id, channel_test_id,
-     channel_name, base_url, adapter_type, encrypted_credential, credential_fingerprint)
-SELECT id, $1, $2, $3, $4, $5, $6, $7, $8
+     provider, channel_name, base_url, adapter_type, encrypted_credential, credential_fingerprint)
+SELECT id, $1, $2, $3, $4, $5, $6, $7, $8, $9
 FROM merchant_profiles
 WHERE newapi_user_id = $1 AND status = 'active'
 RETURNING id, created_at
-`, command.UserID, command.Channel.CanonicalModelID, test.ID, command.Channel.ChannelName,
+`, command.UserID, command.Channel.CanonicalModelID, test.ID, test.Provider, command.Channel.ChannelName,
 		command.Channel.BaseURL, test.AdapterType, command.Channel.EncryptedCredential,
 		command.Channel.CredentialFingerprint,
 	).Scan(&review.ID, &review.CreatedAt)
@@ -245,9 +323,17 @@ func (s *SQLMerchantStore) CreateMultiModelChannelReview(ctx context.Context, co
 	if len(command.Channel.UpstreamModels) == 0 {
 		return MerchantChannelReview{}, ErrMerchantInvalidState
 	}
+	provider, err := normalizeChannelProvider(command.Channel.Provider)
+	if err != nil {
+		return MerchantChannelReview{}, ErrMerchantInvalidState
+	}
+	command.Channel.Provider = provider
 	var primary SyncedChannelModel
 	for _, model := range command.Channel.UpstreamModels {
 		if model.MatchStatus == "matched" && model.CanonicalModelID > 0 {
+			if !strings.EqualFold(model.Provider, provider) {
+				return MerchantChannelReview{}, ErrMerchantInvalidState
+			}
 			primary = model
 			break
 		}
@@ -267,19 +353,19 @@ func (s *SQLMerchantStore) CreateMultiModelChannelReview(ctx context.Context, co
 	review := MerchantChannelReview{
 		UserID: command.UserID, ChannelName: command.Channel.ChannelName,
 		CanonicalModelID: primary.CanonicalModelID, Model: primary.Model,
-		Provider: primary.Provider, AdapterType: adapter,
+		Provider: command.Channel.Provider, AdapterType: adapter,
 		BaseURL: command.Channel.BaseURL, Status: "pending", CredentialConfigured: true,
 	}
 	err = tx.QueryRowContext(ctx, `
 INSERT INTO merchant_channel_reviews
     (merchant_profile_id, merchant_newapi_user_id, canonical_model_id, channel_test_id,
-     channel_type, channel_name, base_url, adapter_type, encrypted_credential, credential_fingerprint,
+     channel_type, provider, channel_name, base_url, adapter_type, encrypted_credential, credential_fingerprint,
      last_synced_at)
-SELECT id, $1, $2, NULL, $3, $4, $5, $6, $7, $8, now()
+SELECT id, $1, $2, NULL, $3, $4, $5, $6, $7, $8, $9, now()
 FROM merchant_profiles
 WHERE newapi_user_id = $1 AND status = 'active'
 RETURNING id, created_at
-`, command.UserID, primary.CanonicalModelID, command.Channel.ChannelType, command.Channel.ChannelName,
+`, command.UserID, primary.CanonicalModelID, command.Channel.ChannelType, command.Channel.Provider, command.Channel.ChannelName,
 		command.Channel.BaseURL, adapter, command.Channel.EncryptedCredential, command.Channel.CredentialFingerprint,
 	).Scan(&review.ID, &review.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -719,20 +805,21 @@ func (s *SQLMerchantStore) FinishApproval(ctx context.Context, reviewID int64, a
 	var review struct {
 		ID, ApplicationID, CanonicalModelID int64
 		UserID                              int
-		ChannelName, BaseURL, AdapterType   string
+		ChannelName, Provider               string
+		BaseURL, AdapterType                string
 		Fingerprint                         string
 		DisplayName, WebsiteURL             string
 	}
 	err = tx.QueryRowContext(ctx, `
 SELECT r.id, r.merchant_newapi_user_id, COALESCE(r.application_id, 0),
-	   r.canonical_model_id, r.channel_name, r.base_url, r.adapter_type,
+	   r.canonical_model_id, r.channel_name, r.provider, r.base_url, r.adapter_type,
        r.credential_fingerprint, COALESCE(a.display_name, ''), COALESCE(a.website_url, '')
 FROM merchant_channel_reviews r
 LEFT JOIN merchant_applications a ON a.id = r.application_id
 WHERE r.id = $1 AND r.status = 'approving' AND r.encrypted_credential IS NOT NULL
 FOR UPDATE OF r
-`, reviewID).Scan(&review.ID, &review.UserID, &review.ApplicationID, &review.CanonicalModelID,
-		&review.ChannelName, &review.BaseURL, &review.AdapterType, &review.Fingerprint,
+	`, reviewID).Scan(&review.ID, &review.UserID, &review.ApplicationID, &review.CanonicalModelID,
+		&review.ChannelName, &review.Provider, &review.BaseURL, &review.AdapterType, &review.Fingerprint,
 		&review.DisplayName, &review.WebsiteURL)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -765,10 +852,10 @@ RETURNING id
 	err = tx.QueryRowContext(ctx, `
 INSERT INTO merchant_channels
 	(merchant_profile_id, review_id, canonical_model_id, newapi_channel_id,
-	 channel_name, base_url, adapter_type, credential_fingerprint)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	 provider, channel_name, base_url, adapter_type, credential_fingerprint)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING id
-`, merchantID, review.ID, review.CanonicalModelID, newAPIChannelID, review.ChannelName,
+`, merchantID, review.ID, review.CanonicalModelID, newAPIChannelID, review.Provider, review.ChannelName,
 		review.BaseURL, review.AdapterType, review.Fingerprint).Scan(&channelID)
 	if err != nil {
 		return MerchantApproval{}, merchantStoreError(err)
@@ -897,11 +984,12 @@ WHERE application_id = $1 AND status = 'pending'
 func (s *SQLMerchantStore) Merchant(ctx context.Context, merchantID int64) (MerchantProfile, error) {
 	var profile MerchantProfile
 	err := s.database.QueryRowContext(ctx, `
-SELECT id, newapi_user_id, display_name, website_url, status,
-       COALESCE(status_reason, ''), approved_at
+SELECT id, newapi_user_id, display_name, website_url, business_description, status,
+       COALESCE(status_reason, ''), approved_at, is_platform_owned
 FROM merchant_profiles
 WHERE id = $1
-`, merchantID).Scan(&profile.ID, &profile.UserID, &profile.DisplayName, &profile.WebsiteURL, &profile.Status, &profile.StatusReason, &profile.ApprovedAt)
+`, merchantID).Scan(&profile.ID, &profile.UserID, &profile.DisplayName, &profile.WebsiteURL,
+		&profile.BusinessDescription, &profile.Status, &profile.StatusReason, &profile.ApprovedAt, &profile.IsPlatformOwned)
 	if err != nil {
 		return MerchantProfile{}, merchantStoreError(err)
 	}
@@ -919,6 +1007,22 @@ WHERE id = $1
 	}
 	if err := rows.Err(); err != nil {
 		return MerchantProfile{}, fmt.Errorf("遍历商户渠道编号：%w", err)
+	}
+	return profile, nil
+}
+
+func (s *SQLMerchantStore) UpdateMerchantDescription(ctx context.Context, merchantID int64, description string) (MerchantProfile, error) {
+	var profile MerchantProfile
+	err := s.database.QueryRowContext(ctx, `
+UPDATE merchant_profiles
+SET business_description = $2, updated_at = now()
+WHERE id = $1 AND status = 'active'
+RETURNING id, newapi_user_id, display_name, website_url, business_description, status,
+          COALESCE(status_reason, ''), approved_at, is_platform_owned
+`, merchantID, description).Scan(&profile.ID, &profile.UserID, &profile.DisplayName, &profile.WebsiteURL,
+		&profile.BusinessDescription, &profile.Status, &profile.StatusReason, &profile.ApprovedAt, &profile.IsPlatformOwned)
+	if err != nil {
+		return MerchantProfile{}, merchantStoreError(err)
 	}
 	return profile, nil
 }
@@ -1048,21 +1152,13 @@ WHERE test.id = $1
 
 const applicationSelect = `
 SELECT a.id, a.newapi_user_id, a.display_name, a.website_url, a.business_description,
-       a.status, COALESCE(a.review_reason, ''), a.reviewed_at, a.created_at,
-       r.id, r.merchant_newapi_user_id, COALESCE(r.application_id, 0), COALESCE(r.replaces_channel_id, 0),
-	   r.channel_name, r.canonical_model_id, cm.public_name, cm.provider, price.price_kind,
-	   COALESCE(r.channel_test_id, 0), r.adapter_type, r.base_url, r.encrypted_credential,
-	   r.credential_fingerprint, r.status, COALESCE(r.verification_error, ''),
-	   COALESCE(r.review_reason, ''), r.verified_at, r.reviewed_at, r.created_at
+       a.status, COALESCE(a.review_reason, ''), a.reviewed_at, a.created_at
 FROM merchant_applications a
-JOIN merchant_channel_reviews r ON r.id = a.initial_channel_review_id
-JOIN canonical_models cm ON cm.id = r.canonical_model_id
-JOIN official_price_versions price ON price.id = cm.current_official_price_version_id
 `
 
 const reviewSelect = `
 SELECT r.id, r.merchant_newapi_user_id, COALESCE(r.application_id, 0), COALESCE(r.replaces_channel_id, 0),
-	   r.channel_name, r.canonical_model_id, cm.public_name, cm.provider, price.price_kind,
+	   r.channel_name, r.canonical_model_id, cm.public_name, r.provider, price.price_kind,
 	   COALESCE(r.channel_test_id, 0), r.adapter_type, r.base_url, r.encrypted_credential,
 	   r.credential_fingerprint, r.status, COALESCE(r.verification_error, ''),
 	   COALESCE(r.review_reason, ''), r.verified_at, r.reviewed_at, r.created_at
@@ -1073,7 +1169,7 @@ JOIN official_price_versions price ON price.id = cm.current_official_price_versi
 
 const channelSelect = `
 SELECT c.id, c.merchant_profile_id, p.newapi_user_id, p.display_name, c.review_id, c.newapi_channel_id,
-	   c.channel_name, c.canonical_model_id, cm.public_name, cm.provider,
+	   c.channel_name, c.canonical_model_id, cm.public_name, c.provider,
 	   c.adapter_type, c.base_url,
 	   c.credential_fingerprint, c.status, c.created_at,
 	   COALESCE(h.state, 'healthy'), COALESCE(h.availability_ppm, 0),
@@ -1090,29 +1186,17 @@ type rowScanner interface {
 
 func scanMerchantApplication(scanner rowScanner) (MerchantApplication, error) {
 	var application MerchantApplication
-	var review MerchantChannelReview
-	var applicationReviewedAt, reviewVerifiedAt, reviewReviewedAt sql.NullTime
-	var applicationReason, verificationError, reviewReason string
+	var applicationReviewedAt sql.NullTime
+	var applicationReason string
 	err := scanner.Scan(
 		&application.ID, &application.UserID, &application.DisplayName, &application.WebsiteURL,
 		&application.BusinessDescription, &application.Status, &applicationReason, &applicationReviewedAt, &application.CreatedAt,
-		&review.ID, &review.UserID, &review.ApplicationID, &review.ReplacesChannelID,
-		&review.ChannelName, &review.CanonicalModelID, &review.Model, &review.Provider, &review.PriceKind,
-		&review.ChannelTestID, &review.AdapterType, &review.BaseURL, &review.EncryptedCredential,
-		&review.CredentialFingerprint, &review.Status, &verificationError, &reviewReason,
-		&reviewVerifiedAt, &reviewReviewedAt, &review.CreatedAt,
 	)
 	if err != nil {
 		return MerchantApplication{}, merchantStoreError(err)
 	}
 	application.ReviewReason = applicationReason
 	application.ReviewedAt = nullableTime(applicationReviewedAt)
-	review.VerificationError = verificationError
-	review.ReviewReason = reviewReason
-	review.VerifiedAt = nullableTime(reviewVerifiedAt)
-	review.ReviewedAt = nullableTime(reviewReviewedAt)
-	review.CredentialConfigured = len(review.EncryptedCredential) > 0
-	application.InitialReview = review
 	return application, nil
 }
 

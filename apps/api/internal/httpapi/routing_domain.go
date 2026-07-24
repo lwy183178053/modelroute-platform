@@ -104,32 +104,6 @@ func rewritePublicModel(body []byte, internalAlias string) ([]byte, string, erro
 	return rewritten, publicModel, nil
 }
 
-func validateImageGenerationRequest(body []byte, prices []ImagePriceItem) error {
-	var request map[string]json.RawMessage
-	if err := json.Unmarshal(body, &request); err != nil {
-		return errors.New("图片请求正文不是有效 JSON")
-	}
-	var quality, size string
-	if err := json.Unmarshal(request["quality"], &quality); err != nil || strings.TrimSpace(quality) == "" {
-		return errors.New("quality 必须是已定价的非空字符串")
-	}
-	if err := json.Unmarshal(request["size"], &size); err != nil || strings.TrimSpace(size) == "" {
-		return errors.New("size 必须是已定价的非空字符串")
-	}
-	n, err := strconv.ParseInt(strings.TrimSpace(string(request["n"])), 10, 64)
-	if err != nil || n <= 0 {
-		return errors.New("n 必须是正整数")
-	}
-	quality = strings.TrimSpace(quality)
-	size = strings.TrimSpace(size)
-	for _, item := range prices {
-		if item.Quality == quality && item.Size == size {
-			return nil
-		}
-	}
-	return errors.New("quality 与 size 组合未配置价格")
-}
-
 func classifyProbeStatus(status int) healthFailureClass {
 	switch {
 	case status >= 200 && status < 300:

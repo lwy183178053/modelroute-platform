@@ -209,12 +209,12 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
             <UsageTrend data={usage.data} error={usage.error} loading={usage.loading} />
           </>}
 
-          {section === 'routes' && <Section title="路由管理" description="路由可复用，并从全部合格商户中按价格、成功率、速度或缓存指标加权选择" actions={<Button icon={Plus} variant="primary" onClick={() => openModal({ type: 'route', onSaved: loadKeys })}>创建路由</Button>}>
+          {section === 'routes' && <Section title="路由管理" description="路由可复用，并从全部合格商户中按价格、成功率、速度或缓存指标加权选择" actions={<Button icon={Plus} variant="primary" onClick={() => openModal({ type: 'route', models: models.filter((model) => model.status === 'active'), onSaved: loadKeys })}>创建路由</Button>}>
             <div className="table-wrap">
               <table className="data-table">
                 <thead><tr><th>ID</th><th>名称</th><th>优先方式</th><th>倍率区间</th><th>最低缓存</th><th>绑定密钥</th><th>操作</th></tr></thead>
                 <tbody>{routingPolicies.map((policy) => <tr key={policy.id}>
-                  <td><code>{policy.id}</code></td><td><strong>{policy.name}</strong></td><td>{priorityName(policy.priority)}</td><td>{formatMultiplier(policy.minimum_multiplier_bps)} - {formatMultiplier(policy.maximum_multiplier_bps)}</td><td>{cacheFloorName(policy.minimum_cache_hit_ppm)}</td><td>{policy.bound_key_count || 0} 把</td><td><ActionMenu items={[{ label: '编辑', onClick: () => openModal({ type: 'route', policy, onSaved: loadKeys }) }, { label: '删除', danger: true, disabled: Number(policy.bound_key_count || 0) > 0, onClick: () => deleteRoute(policy) }]} /></td>
+                  <td><code>{policy.id}</code></td><td><strong>{policy.name}</strong></td><td>{priorityName(policy.priority)}</td><td>{formatMultiplier(policy.minimum_multiplier_bps)} - {formatMultiplier(policy.maximum_multiplier_bps)}</td><td>{cacheFloorName(policy.minimum_cache_hit_ppm)}</td><td>{policy.bound_key_count || 0} 把</td><td><ActionMenu items={[{ label: '编辑', onClick: () => openModal({ type: 'route', policy, models: models.filter((model) => model.status === 'active'), onSaved: loadKeys }) }, { label: '删除', danger: true, disabled: Number(policy.bound_key_count || 0) > 0, onClick: () => deleteRoute(policy) }]} /></td>
                 </tr>)}
                 {!keyLoading && routingPolicies.length === 0 && <tr><td className="table-message" colSpan="7">{keyError || '尚未创建路由'}</td></tr>}
                 {keyLoading && <tr><td className="table-message" colSpan="7">正在读取路由</td></tr>}</tbody>
@@ -274,13 +274,13 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
                 <div className="account-workspace"><span>当前工作区</span><strong>{account.is_merchant || Number(account.role) >= 10 ? '商户工作区' : '用户工作台'}</strong><small>{accountTypeName} · 可用功能按账号身份显示</small></div>
                 <div className="account-actions">
                   {(account.is_merchant || Number(account.role) >= 10) && <Button icon={ArrowUpRight} onClick={() => navigate('merchant')} variant="primary">进入商户中心</Button>}
-                  {!account.is_merchant && Number(account.role) < 10 && (!merchantApplication || merchantApplication.status === 'rejected') && <Button icon={ArrowUpRight} onClick={() => openModal({ type: 'merchantApply', models: models.filter((model) => model.status === 'active'), onSaved: loadMerchantApplication })}>{merchantApplication?.status === 'rejected' ? '重新提交商户申请' : '申请成为商户'}</Button>}
+                  {!account.is_merchant && Number(account.role) < 10 && (!merchantApplication || merchantApplication.status === 'rejected') && <Button icon={ArrowUpRight} onClick={() => openModal({ type: 'merchantApply', onSaved: loadMerchantApplication })}>{merchantApplication?.status === 'rejected' ? '重新提交商户申请' : '申请成为商户'}</Button>}
                 </div>
               </div>
               <div className="account-details">
                 <div className="account-details-heading"><h3>账号信息</h3><span>登录凭据和账号身份</span></div>
                 <div className="account-rows"><div><span>登录账号</span><strong>{account.username}</strong></div><div><span>邮箱</span><strong>{account.email || '-'}</strong></div><div><span>用户类型</span><strong>{accountTypeName}</strong></div></div>
-                {!account.is_merchant && Number(account.role) < 10 && merchantApplication && ['pending', 'verifying', 'verified', 'approving'].includes(merchantApplication.status) && <InlineNotice tone="warning">等待管理员审核 · 申请 ID {merchantApplication.id}</InlineNotice>}
+                {!account.is_merchant && Number(account.role) < 10 && merchantApplication?.status === 'pending' && <InlineNotice tone="warning">等待管理员审核 · 申请 ID {merchantApplication.id}</InlineNotice>}
                 {merchantApplication?.status === 'rejected' && <InlineNotice tone="warning">上次申请未通过：{merchantApplication.review_reason || '请核对资料后重新提交'}</InlineNotice>}
               </div>
             </div>

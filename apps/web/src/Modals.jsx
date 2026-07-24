@@ -8,10 +8,6 @@ function Footer({ cancel, submit, submitText, icon = Check }) {
   return <><Button onClick={cancel}>取消</Button><Button icon={icon} variant="primary" onClick={submit}>{submitText}</Button></>;
 }
 
-function StatusLine({ result }) {
-  return <InlineNotice>检测通过 · {result.latency_ms} ms</InlineNotice>;
-}
-
 function merchantNameUnits(value) {
   let units = 0;
   for (const character of value) {
@@ -25,14 +21,54 @@ function merchantNameUnits(value) {
 function RouteModal({ close, config, notify }) {
   const policy = config.policy || {};
   const editing = Boolean(policy.id);
+  const previewModels = (config.models || []).filter((model) => model.status === 'active');
   const [name, setName] = useState(policy.name || '');
   const [priority, setPriority] = useState(policy.priority || 'balanced');
   const [minimum, setMinimum] = useState(String(Number(policy.minimum_multiplier_bps ?? 0) / 10_000));
   const [maximum, setMaximum] = useState(String(Number(policy.maximum_multiplier_bps ?? 50_000) / 10_000));
   const [cacheFloorEnabled, setCacheFloorEnabled] = useState(policy.minimum_cache_hit_ppm != null);
   const [cacheFloor, setCacheFloor] = useState(String(Number(policy.minimum_cache_hit_ppm ?? 0) / 10_000));
+  const [previewModelID, setPreviewModelID] = useState(String(previewModels[0]?.id || ''));
+  const [preview, setPreview] = useState({ state: 'idle', data: null, error: '' });
+  const [previewNonce, setPreviewNonce] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    const minimumBPS = Math.round(Number(minimum) * 10_000);
+    const maximumBPS = Math.round(Number(maximum) * 10_000);
+    const minimumCacheHitPPM = cacheFloorEnabled ? Math.round(Number(cacheFloor) * 10_000) : null;
+    const valid = Number(previewModelID) > 0
+      && Number.isInteger(minimumBPS) && Number.isInteger(maximumBPS)
+      && minimumBPS >= 0 && maximumBPS <= 50_000 && minimumBPS <= maximumBPS
+      && (minimumCacheHitPPM == null || (Number.isInteger(minimumCacheHitPPM) && minimumCacheHitPPM >= 0 && minimumCacheHitPPM <= 1_000_000));
+    if (!valid) {
+      setPreview({ state: 'idle', data: null, error: '' });
+      return undefined;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setPreview((current) => ({ state: 'loading', data: current.data, error: '' }));
+      try {
+        const data = await apiRequest('/api/routing-policies/preview', {
+          method: 'POST', signal: controller.signal,
+          body: {
+            canonical_model_id: Number(previewModelID),
+            minimum_multiplier_bps: minimumBPS,
+            maximum_multiplier_bps: maximumBPS,
+            minimum_cache_hit_ppm: minimumCacheHitPPM,
+          },
+        });
+        setPreview({ state: 'success', data, error: '' });
+      } catch (requestError) {
+        if (requestError.name !== 'AbortError') setPreview({ state: 'error', data: null, error: requestError.message || '读取路由范围失败' });
+      }
+    }, 350);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [cacheFloor, cacheFloorEnabled, maximum, minimum, previewModelID, previewNonce]);
 
   const submit = async () => {
     if (!name.trim()) {
@@ -97,6 +133,22 @@ function RouteModal({ close, config, notify }) {
       <div className="form-section cache-floor-setting"><h3>缓存筛选</h3>
         <label className="toggle-line"><input aria-label="启用最低缓存命中率" checked={cacheFloorEnabled} onChange={(event) => setCacheFloorEnabled(event.target.checked)} type="checkbox" /><span><strong>启用最低缓存命中率</strong><small>只保留样本充足且达到阈值的文本商户，图片模型不受影响</small></span></label>
         {cacheFloorEnabled && <Field label="最低缓存命中率" hint="按最近 7 天商户与模型汇总数据判断"><div className="suffix-input"><TextInput max="100" min="0" onChange={(event) => setCacheFloor(event.target.value)} step="0.01" type="number" value={cacheFloor} /><span>%</span></div></Field>}
+      </div>
+      <div className="form-section route-preview-section">
+        <h3>路由范围预览</h3>
+        <Field label="预览模型" hint="仅用于计算当前条件，不会保存到路由">
+          <Select onChange={(event) => setPreviewModelID(event.target.value)} value={previewModelID}>
+            {previewModels.map((model) => <option key={model.id} value={model.id}>{model.public_name} · {model.provider}</option>)}
+          </Select>
+        </Field>
+        {previewModels.length === 0 && <InlineNotice tone="warning">当前没有可用于预览的模型。</InlineNotice>}
+        {preview.data && <div className="route-preview-stats" aria-label="路由范围统计">
+          <div><span>可用商户</span><strong>{preview.data.available_merchant_count}</strong></div>
+          <div><span>可用渠道</span><strong>{preview.data.available_channel_count}</strong></div>
+        </div>}
+        {preview.state === 'loading' && <div className="route-preview-loading">正在计算当前路由范围...</div>}
+        {preview.state === 'error' && <InlineNotice tone="warning"><span>{preview.error}</span><Button icon={RotateCcw} onClick={() => setPreviewNonce((value) => value + 1)}>重试</Button></InlineNotice>}
+        {preview.state === 'success' && preview.data?.available_channel_count === 0 && <InlineNotice tone="danger">该模型在当前条件下没有可用渠道。</InlineNotice>}
       </div>
       <InlineNotice tone="warning">没有符合策略条件的候选时返回无可用渠道错误，本次请求不扣费。</InlineNotice>
     </Modal>
@@ -281,35 +333,10 @@ function CreditResolveModal({ close, config, notify }) {
 function MerchantApplyModal({ close, config, notify }) {
   const [displayName, setDisplayName] = useState('');
   const [websiteURL, setWebsiteURL] = useState('');
-  const [channelName, setChannelName] = useState('主线路');
-  const [modelID, setModelID] = useState(String(config.models?.[0]?.id || ''));
-  const [baseURL, setBaseURL] = useState('');
-  const [apiKey, setAPIKey] = useState('');
-  const [testReceipt, setTestReceipt] = useState('');
-  const [testResult, setTestResult] = useState(null);
   const [description, setDescription] = useState('');
   const [busy, setBusy] = useState(false);
-  const [testing, setTesting] = useState(false);
   const [error, setError] = useState('');
   const displayNameUnits = merchantNameUnits(displayName);
-
-  const testChannel = async () => {
-    setTesting(true);
-    setError('');
-    setTestReceipt('');
-    setTestResult(null);
-    try {
-      const result = await apiRequest('/api/merchant/channel-tests', { method: 'POST', body: {
-        canonical_model_id: Number(modelID), base_url: baseURL.trim(), api_key: apiKey,
-      } });
-      setTestReceipt(result.test_receipt);
-      setTestResult(result);
-    } catch (requestError) {
-      setError(requestError.message || '渠道检测失败');
-    } finally {
-      setTesting(false);
-    }
-  };
 
   const submit = async () => {
     if (displayNameUnits < 2 || displayNameUnits > 16) {
@@ -323,8 +350,6 @@ function MerchantApplyModal({ close, config, notify }) {
         method: 'POST',
         body: {
           display_name: displayName.trim(), website_url: websiteURL.trim(), business_description: description.trim(),
-          channel_name: channelName.trim(), canonical_model_id: Number(modelID), test_receipt: testReceipt,
-          base_url: baseURL.trim(), api_key: apiKey,
         },
       });
       await config.onSaved?.(application);
@@ -337,25 +362,20 @@ function MerchantApplyModal({ close, config, notify }) {
     }
   };
   return (
-    <Modal title="申请成为商户" description="选择一个标准模型并通过 hi 检测后提交。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !testReceipt} icon={Send} onClick={submit} variant="primary">{busy ? '提交中' : '提交申请'}</Button></>} wide>
+    <Modal title="申请成为商户" description="先提交商户资料，审核通过后再进入商户中心添加渠道。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || displayNameUnits < 2 || displayNameUnits > 16 || !websiteURL.trim() || description.trim().length < 10} icon={Send} onClick={submit} variant="primary">{busy ? '提交中' : '提交申请'}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
       <div className="form-grid two-column">
         <Field label="商户名称" hint={displayNameUnits < 0 ? '仅支持汉字、英文字母和数字' : `${displayNameUnits}/16 单位，汉字计 2，英文数字计 1`}><TextInput maxLength="16" onChange={(event) => setDisplayName(event.target.value)} placeholder="用于市场展示" value={displayName} /></Field>
         <Field label="网站地址"><TextInput onChange={(event) => setWebsiteURL(event.target.value)} placeholder="https://example.com" value={websiteURL} /></Field>
-        <Field label="渠道名称"><TextInput maxLength="100" onChange={(event) => setChannelName(event.target.value)} value={channelName} /></Field>
-        <Field label="标准模型"><Select onChange={(event) => { setModelID(event.target.value); setTestReceipt(''); }} value={modelID}>{(config.models || []).map((model) => <option key={model.id} value={model.id}>{model.public_name} · {model.provider}</option>)}</Select></Field>
-        <Field label="上游基础地址"><TextInput onChange={(event) => { setBaseURL(event.target.value); setTestReceipt(''); }} placeholder="https://api.example.com/v1" value={baseURL} /></Field>
-        <Field label="上游 API 密钥" hint="提交后加密保存且不再回显"><TextInput onChange={(event) => { setAPIKey(event.target.value); setTestReceipt(''); }} placeholder="输入渠道密钥" type="password" value={apiKey} /></Field>
       </div>
-      <div className="config-actions"><Button disabled={testing || !modelID || !baseURL.trim() || apiKey.trim().length < 8} icon={ShieldCheck} onClick={testChannel} variant="primary">{testing ? '检测中' : '发送 hi 检测'}</Button>{testResult && <StatusLine result={testResult} />}</div>
-      <Field label="业务说明"><textarea className="textarea" onChange={(event) => setDescription(event.target.value)} placeholder="说明渠道来源、可售模型和服务能力" rows="4" value={description} /></Field>
+      <Field label="商户介绍" hint="10 至 2000 字"><textarea className="textarea" maxLength="2000" onChange={(event) => setDescription(event.target.value)} placeholder="介绍商户服务能力和业务范围" rows="5" value={description} /></Field>
     </Modal>
   );
 }
 
 function ChannelModal({ close, config, notify }) {
   const [channelName, setChannelName] = useState('');
-  const [channelType, setChannelType] = useState('openai_compatible');
+  const [provider, setProvider] = useState('OpenAI');
   const [baseURL, setBaseURL] = useState('');
   const [apiKey, setAPIKey] = useState('');
   const [syncedModels, setSyncedModels] = useState([]);
@@ -369,7 +389,7 @@ function ChannelModal({ close, config, notify }) {
     setError('');
     try {
       const result = await apiRequest('/api/merchant/channel-models/sync', { method: 'POST', body: {
-        channel_type: channelType, base_url: baseURL.trim(), api_key: apiKey,
+        provider, base_url: baseURL.trim(), api_key: apiKey,
       } });
       setSyncedModels(result.items || []);
       setSyncedAt(result.synced_at || new Date().toISOString());
@@ -384,7 +404,7 @@ function ChannelModal({ close, config, notify }) {
     setError('');
     try {
       await apiRequest('/api/merchant/channels', { method: 'POST', body: {
-        channel_name: channelName.trim(), channel_type: channelType, base_url: baseURL.trim(), api_key: apiKey,
+        channel_name: channelName.trim(), provider, base_url: baseURL.trim(), api_key: apiKey,
       } });
       await config.onSaved?.();
       notify('渠道已提交审核');
@@ -396,10 +416,10 @@ function ChannelModal({ close, config, notify }) {
     }
   };
   return (
-    <Modal title="提交新渠道" description="一份上游地址和密钥可以承载多个模型，平台会自动匹配已收录模型。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !syncedModels.some((model) => model.match_status === 'matched')} icon={Plus} onClick={submitChannel} variant="primary">{busy ? '提交中' : '提交渠道审核'}</Button></>}>
+    <Modal title="提交新渠道" description="一个渠道只承载所选厂商的模型，平台会自动匹配已收录型号。" onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !syncedModels.some((model) => model.match_status === 'matched')} icon={Plus} onClick={submitChannel} variant="primary">{busy ? '提交中' : '提交渠道审核'}</Button></>}>
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
       <Field label="渠道名称"><TextInput onChange={(event) => setChannelName(event.target.value)} placeholder="例如 OpenAI 企业线路" value={channelName} /></Field>
-      <Field label="上游类型"><Select value={channelType} onChange={(event) => { setChannelType(event.target.value); setSyncedModels([]); }}><option value="openai_compatible">OpenAI 兼容</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option></Select></Field>
+      <Field label="模型厂商"><Select value={provider} onChange={(event) => { setProvider(event.target.value); setSyncedModels([]); }}><option value="OpenAI">OpenAI</option><option value="Anthropic">Anthropic</option><option value="Gemini">Gemini</option><option value="DeepSeek">DeepSeek</option><option value="Qwen">Qwen</option><option value="Moonshot">Moonshot</option></Select></Field>
       <Field label="上游基础地址"><TextInput onChange={(event) => { setBaseURL(event.target.value); setSyncedModels([]); }} placeholder="https://api.example.com/v1" value={baseURL} /></Field>
       <Field label="上游 API 密钥"><TextInput onChange={(event) => { setAPIKey(event.target.value); setSyncedModels([]); }} placeholder="保存后不再回显" type="password" value={apiKey} /></Field>
       <div className="config-actions"><Button disabled={syncing || !baseURL.trim() || apiKey.trim().length < 8} icon={ShieldCheck} onClick={syncModels} variant="primary">{syncing ? '获取中' : '一键获取模型'}</Button>{syncedAt && <InlineNotice>同步于 {new Date(syncedAt).toLocaleString('zh-CN')}</InlineNotice>}</div>

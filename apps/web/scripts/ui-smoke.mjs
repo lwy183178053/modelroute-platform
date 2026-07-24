@@ -95,6 +95,11 @@ async function mockAdminAPI(targetPage, state, account = null) {
     if (url.pathname === '/api/routing-policies' && request.method() === 'GET') {
       return json({ success: true, data: [{ id: 71, name: '主路由', priority: 'cache', minimum_multiplier_bps: 4000, maximum_multiplier_bps: 8000, minimum_cache_hit_ppm: null, bound_key_count: 1, updated_at: '2026-07-23T12:00:00Z' }] });
     }
+    if (url.pathname === '/api/routing-policies/preview' && request.method() === 'POST') {
+      state.routingPreviewCalls += 1;
+      state.routingPreviewBody = request.postDataJSON();
+      return json({ success: true, data: { canonical_model_id: state.routingPreviewBody.canonical_model_id, available_merchant_count: 2, available_channel_count: 3 } });
+    }
     if (url.pathname === '/api/routing-policies/71' && request.method() === 'PUT') {
       state.routeSaveCalls += 1;
       state.routeSaveBody = request.postDataJSON();
@@ -285,10 +290,19 @@ async function mockAdminAPI(targetPage, state, account = null) {
     }
     if (url.pathname === '/api/merchant/channels' && request.method() === 'GET') {
       return json({ success: true, data: { merchant: { user_id: 1, merchant_name: 'ModelRoute 官方', merchant_status: 'active', is_merchant: true }, reviews: [
-        { id: 21, user_id: 1, channel_name: 'OpenAI 测试渠道', base_url: 'https://api.lwylink.xyz', status: 'approved', credential_configured: true, created_at: '2026-07-22T14:00:00Z' },
-        { id: 23, user_id: 1, channel_name: '待审测试线路', base_url: 'https://api.pending.example', status: 'pending', credential_configured: true, models: [{ id: 231, upstream_model_name: 'gpt-4o-mini' }], created_at: '2026-07-22T16:00:00Z' },
-        { id: 24, user_id: 1, channel_name: 'Gemini 测试线路', base_url: 'https://api.gemini.example', status: 'rejected', credential_configured: false, review_reason: '模型响应异常', created_at: '2026-07-22T15:00:00Z' },
+        { id: 21, user_id: 1, channel_name: 'OpenAI 测试渠道', provider: 'OpenAI', base_url: 'https://api.lwylink.xyz', status: 'approved', credential_configured: true, created_at: '2026-07-22T14:00:00Z' },
+        { id: 23, user_id: 1, channel_name: '待审测试线路', provider: 'OpenAI', base_url: 'https://api.pending.example', status: 'pending', credential_configured: true, models: [{ id: 231, upstream_model_name: 'gpt-4o-mini' }], created_at: '2026-07-22T16:00:00Z' },
+        { id: 24, user_id: 1, channel_name: 'Gemini 测试线路', provider: 'Gemini', base_url: 'https://api.gemini.example', status: 'rejected', credential_configured: false, review_reason: '模型响应异常', created_at: '2026-07-22T15:00:00Z' },
       ], items: [{ id: 51, user_id: 1, merchant_name: 'ModelRoute 官方', review_id: 21, canonical_model_id: 101, model: 'gpt-4o-mini', matched_models: ['gpt-4o-mini'], provider: 'OpenAI', adapter_type: 'openai_compatible', channel_name: 'OpenAI 测试渠道', base_url: 'https://api.lwylink.xyz', credential_fingerprint: 'a1b2c3...d4e5f6', status: 'active', health_state: 'healthy', created_at: '2026-07-22T14:00:00Z' }] } });
+    }
+    if (url.pathname === '/api/merchant/profile' && request.method() === 'GET') {
+      return json({ success: true, data: { id: 31, user_id: 1, display_name: 'ModelRoute 官方', website_url: 'https://modelroute.example', business_description: state.merchantDescription || '提供稳定的多厂商模型服务。', status: 'active', is_platform_merchant: true } });
+    }
+    if (url.pathname === '/api/merchant/profile' && request.method() === 'PUT') {
+      state.merchantProfileUpdateCalls += 1;
+      state.merchantProfileUpdateBody = request.postDataJSON();
+      state.merchantDescription = state.merchantProfileUpdateBody.business_description;
+      return json({ success: true, data: { id: 31, user_id: 1, display_name: 'ModelRoute 官方', website_url: 'https://modelroute.example', business_description: state.merchantDescription, status: 'active', is_platform_merchant: true } });
     }
     if (/^\/api\/merchant\/channel-reviews\/(23|24)$/.test(url.pathname) && request.method() === 'DELETE') {
       state.reviewDeleteCalls += 1;
@@ -296,7 +310,11 @@ async function mockAdminAPI(targetPage, state, account = null) {
       return json({ success: true, data: null });
     }
     if (url.pathname === '/api/admin/merchant-applications') {
-      return json({ success: true, data: { page: 1, page_size: 20, total: 1, items: [{ id: 11, user_id: 7, display_name: '东海模型服务', website_url: 'https://merchant.example', business_description: '企业模型 API 服务', status: 'pending', created_at: '2026-07-22T14:00:00Z', initial_channel: { id: 21, user_id: 7, application_id: 11, canonical_model_id: 101, model: 'gpt-4o-mini', adapter_type: 'openai_compatible', channel_name: '主线路', base_url: 'https://api.merchant.example', status: 'pending', credential_configured: true, created_at: '2026-07-22T14:00:00Z' } }] } });
+      return json({ success: true, data: { page: 1, page_size: 20, total: 1, items: [{ id: 11, user_id: 7, display_name: '东海模型服务', website_url: 'https://merchant.example', business_description: '企业模型 API 服务', status: 'pending', created_at: '2026-07-22T14:00:00Z' }] } });
+    }
+    if (url.pathname === '/api/admin/merchant-applications/11/approve' && request.method() === 'POST') {
+      state.merchantApproveCalls += 1;
+      return json({ success: true, data: { id: 32, user_id: 7, display_name: '东海模型服务', status: 'active' } });
     }
     if (url.pathname === '/api/admin/channel-reviews' && request.method() === 'GET') {
       return json({ success: true, data: { page: 1, page_size: 100, total: 1, items: [{ id: 22, user_id: 8, canonical_model_id: 102, model: 'claude-sonnet-4-5', adapter_type: 'anthropic', channel_name: 'Anthropic 备用线路', base_url: 'https://api.anthropic.example', status: 'pending', credential_configured: true, models: [{ id: 221, upstream_model_name: 'claude-sonnet-4-5', match_status: 'matched', test_status: 'pending' }], created_at: '2026-07-22T15:00:00Z' }] } });
@@ -349,10 +367,6 @@ async function mockAdminAPI(targetPage, state, account = null) {
       state.channelVerifyCalls += 1;
       return json({ success: true, data: { review_id: 22, adapter_type: 'anthropic', capabilities: ['chat_completions'], latency_ms: 315 } });
     }
-    if (url.pathname === '/api/admin/merchant-applications/11/verify' && request.method() === 'POST') {
-      state.merchantVerifyCalls += 1;
-      return json({ success: true, data: { review_id: 21, adapter_type: 'openai_compatible', capabilities: ['chat_completions'], latency_ms: 280 } });
-    }
     if (url.pathname.startsWith('/api/admin/users/') || url.pathname.startsWith('/api/keys')) {
       return json({ success: true, data: null });
     }
@@ -362,8 +376,9 @@ async function mockAdminAPI(targetPage, state, account = null) {
 
 try {
   const adminMockState = {
-    merchantVerifyCalls: 0, channelVerifyCalls: 0,
-    routeSaveCalls: 0, routeSaveBody: null, offerCreateCalls: 0, offerCreateBody: null,
+    merchantApproveCalls: 0, channelVerifyCalls: 0,
+    routeSaveCalls: 0, routeSaveBody: null, routingPreviewCalls: 0, routingPreviewBody: null,
+    offerCreateCalls: 0, offerCreateBody: null,
     offerStatusCalls: 0, offerStatusBody: null, offerDeleteCalls: 0, offerEnabled: true,
     reviewDeleteCalls: 0, reviewDeleteIDs: [], userUsageQuery: null, merchantUsageQuery: null, adminUsageQuery: null,
     merchantChannelTestCalls: 0, merchantChannelTestBody: null,
@@ -377,6 +392,7 @@ try {
     redemptionCreateCalls: 0, redemptionCreateBody: null, redemptionUpdateCalls: 0, redemptionUpdateBody: null,
     redemptionStatusCalls: 0, redemptionStatusBody: null, redemptionDeleteCalls: 0, redemptionCleanupCalls: 0,
     announcementReadCalls: 0, announcementCreateCalls: 0, announcementCreateBody: null,
+    merchantProfileUpdateCalls: 0, merchantProfileUpdateBody: null, merchantDescription: '',
   };
   await mockAdminAPI(page, adminMockState);
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
@@ -456,10 +472,17 @@ try {
   await page.getByText('主路由').first().waitFor();
   await clickActionInRow(page, '主路由', '编辑');
   await page.getByRole('dialog', { name: '编辑路由策略' }).waitFor();
+  await page.getByLabel('预览模型').waitFor();
+  await page.getByText('可用商户', { exact: true }).waitFor();
+  await page.getByText('可用渠道', { exact: true }).waitFor();
+  await page.waitForTimeout(450);
+  assert(adminMockState.routingPreviewCalls >= 1 && adminMockState.routingPreviewBody.canonical_model_id === 101, '路由范围预览没有按模型调用接口');
   assert(await page.getByLabel('最低成交倍率').inputValue() === '0.4', '路由弹窗未读取当前最低倍率');
   await page.getByLabel('启用最低缓存命中率').check();
   await page.getByText('只保留样本充足且达到阈值的文本商户，图片模型不受影响', { exact: true }).waitFor();
   await page.getByRole('spinbutton', { name: /最低缓存命中率/ }).fill('60');
+  await page.waitForTimeout(450);
+  assert(adminMockState.routingPreviewBody.minimum_cache_hit_ppm === 600000, '路由范围预览没有使用最新缓存阈值');
   await page.getByRole('button', { name: '保存策略' }).click();
   assert(adminMockState.routeSaveCalls === 1, '保存路由策略没有调用真实接口');
   assert(adminMockState.routeSaveBody.minimum_cache_hit_ppm === 600000, '最低缓存命中率没有转换为整数 PPM');
@@ -471,7 +494,7 @@ try {
 
   await page.getByRole('button', { name: '商户中心', exact: true }).click();
   const merchantSidebar = page.getByRole('complementary', { name: '商户功能' });
-  for (const label of ['经营概览', '渠道管理', '上架模型', '调用记录', '提现记录']) {
+  for (const label of ['经营概览', '渠道管理', '上架模型', '调用记录', '提现记录', '商户设置']) {
     assert(await merchantSidebar.getByRole('button', { name: label, exact: true }).count() === 1, `商户侧栏缺少${label}`);
   }
   assert(!(await page.locator('body').innerText()).includes('管理员账号当前未绑定商户资料'), '管理员仍显示专用商户缺失提示');
@@ -480,6 +503,7 @@ try {
   await page.getByText('OpenAI 测试渠道').last().waitFor();
   await page.getByText('https://api.lwylink.xyz', { exact: true }).waitFor();
   await page.getByRole('heading', { name: '渠道管理' }).waitFor();
+  assert(await page.getByRole('columnheader', { name: '厂商', exact: true }).count() === 1, '商户渠道表缺少厂商列');
   assert(await page.getByRole('columnheader', { name: '协议', exact: true }).count() === 0, '商户渠道表仍显示协议列');
   assert(!(await page.locator('body').innerText()).includes('openai_compatible'), '商户渠道表仍显示内部适配器');
   await page.getByText('51', { exact: true }).waitFor();
@@ -494,6 +518,7 @@ try {
   await page.getByRole('button', { name: '提交新渠道' }).click();
   const channelDialog = page.getByRole('dialog', { name: '提交新渠道' });
   await channelDialog.getByLabel('渠道名称').fill('企业多模型线路');
+  await channelDialog.getByLabel('模型厂商').selectOption('OpenAI');
   await channelDialog.getByLabel('上游基础地址').waitFor();
   assert(await channelDialog.getByLabel('上游基础地址').inputValue() === '', '商户新增渠道不应自动填充管理员测试地址');
   await channelDialog.getByLabel('上游基础地址').fill('https://api.lwylink.xyz');
@@ -506,11 +531,12 @@ try {
   const channelDialogText = channelDialogVisible ? await channelDialog.innerText() : await page.locator('body').innerText();
   assert(channelDialogVisible && page.url() === channelPageURL, `同步上游模型后离开了渠道弹窗：${page.url()} ${pageErrors.join('; ')} ${channelDialogText}`);
   assert(channelDialogText.includes('已匹配 1 个模型') && channelDialogText.includes('平台未收录'), `同步结果没有显示在渠道弹窗：${channelDialogText}`);
-  assert(adminMockState.channelModelSyncCalls === 1 && adminMockState.channelModelSyncBody.channel_type === 'openai_compatible', '同步模型没有提交密钥类型');
+  assert(adminMockState.channelModelSyncCalls === 1 && adminMockState.channelModelSyncBody.provider === 'OpenAI' && !('channel_type' in adminMockState.channelModelSyncBody), '同步模型没有提交模型厂商');
   await channelDialog.getByLabel('上游 API 密钥').fill('sk-local-test-key');
   await channelDialog.getByRole('button', { name: '提交渠道审核' }).click();
   await page.getByText('渠道已提交审核').waitFor();
   assert(adminMockState.channelSubmitCalls === 1 && adminMockState.channelSubmitBody.channel_name === '企业多模型线路', '渠道审核没有提交真实表单');
+  assert(adminMockState.channelSubmitBody.provider === 'OpenAI' && !('channel_type' in adminMockState.channelSubmitBody), '渠道审核没有使用公开厂商字段');
   await merchantSidebar.getByRole('button', { name: '上架模型', exact: true }).click();
   for (const label of ['缓存命中率', '调用次数', 'Token 用量', '最后调用']) {
     assert(await page.getByRole('columnheader', { name: label, exact: true }).count() === 1, `上架模型表缺少${label}列名`);
@@ -546,6 +572,14 @@ try {
   assert(adminMockState.withdrawalCreateCalls === 1, '商户提现没有调用真实接口');
   assert(adminMockState.withdrawalCreateBody.amount_quota === 100 * testQuotaPerUnit && !('recipient_type' in adminMockState.withdrawalCreateBody), '提现人民币整数金额或支付宝请求结构不正确');
   await page.getByText('MW202607220010', { exact: true }).waitFor();
+  await merchantSidebar.getByRole('button', { name: '商户设置', exact: true }).click();
+  await page.getByRole('heading', { name: '商户设置' }).waitFor();
+  assert(await page.getByLabel('商户名称').inputValue() === 'ModelRoute 官方', '商户设置没有加载只读名称');
+  assert(await page.getByLabel('商户网站').inputValue() === 'https://modelroute.example', '商户设置没有加载只读网站');
+  await page.getByLabel('商户介绍').fill('更新后的平台商户介绍，用于展示稳定服务能力。');
+  await page.getByRole('button', { name: '保存介绍' }).click();
+  await page.getByText('商户介绍已保存').waitFor();
+  assert(adminMockState.merchantProfileUpdateCalls === 1 && adminMockState.merchantProfileUpdateBody.business_description.includes('更新后的平台商户介绍'), '商户介绍没有调用资料更新接口');
   await merchantSidebar.getByRole('button', { name: '上架模型', exact: true }).click();
   await page.getByRole('button', { name: '设置模型价格' }).click();
   const quoteDialog = page.getByRole('dialog', { name: '设置模型价格' });
@@ -636,9 +670,10 @@ try {
   await page.getByText('第 1 / 3 页 · 共 41 条', { exact: true }).waitFor();
   await page.getByRole('button', { name: '商户审核' }).click();
   await page.getByText('东海模型服务').waitFor();
-  await clickRowAction(page, '验证');
-  await page.getByText('渠道验证通过').waitFor();
-  assert(adminMockState.merchantVerifyCalls === 1, '管理员验证没有调用真实商户审核接口');
+  assert(await page.getByRole('columnheader', { name: '初始渠道', exact: true }).count() === 0, '商户申请审核仍显示初始渠道');
+  await clickRowAction(page, '通过');
+  await page.getByText('商户已开通').waitFor();
+  assert(adminMockState.merchantApproveCalls === 1, '管理员没有直接通过商户申请');
   await page.getByRole('button', { name: '渠道与探活' }).click();
   await page.getByText('Anthropic 备用线路').waitFor();
   await page.getByText('51', { exact: true }).waitFor();
@@ -732,7 +767,8 @@ try {
   await paidDialog.getByRole('button', { name: '确认已打款' }).click();
   assert(adminMockState.withdrawalActionCalls === 2 && adminMockState.withdrawalActionPath.endsWith('/9/paid'), '确认线下打款没有调用真实接口');
   const merchantPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
-  await mockAdminAPI(merchantPage, { announcementReadCalls: 0 }, {
+  const merchantMockState = { announcementReadCalls: 0, routingPreviewCalls: 0, routingPreviewBody: null };
+  await mockAdminAPI(merchantPage, merchantMockState, {
     id: 8, username: 'merchant', display_name: '普通商户', role: 1, status: 1, group: 'default',
     quota: 500000, used_quota: 120000, is_merchant: true, merchant_id: 31, merchant_status: 'active',
   });
@@ -741,18 +777,31 @@ try {
   await merchantPage.getByRole('button', { name: '打开菜单' }).click();
   await merchantPage.getByRole('button', { name: '商户中心', exact: true }).click();
   const ordinaryMerchantSidebar = merchantPage.getByRole('complementary', { name: '商户功能' });
-  for (const label of ['经营概览', '渠道管理', '上架模型', '调用记录', '提现记录']) {
+  for (const label of ['经营概览', '渠道管理', '上架模型', '调用记录', '提现记录', '商户设置']) {
     assert(await ordinaryMerchantSidebar.getByRole('button', { name: label, exact: true }).count() === 1, `普通商户侧栏缺少${label}`);
   }
   await ordinaryMerchantSidebar.getByRole('button', { name: '上架模型', exact: true }).click();
   await merchantPage.getByText('2.6B', { exact: true }).waitFor();
   await merchantPage.getByText('10分钟前', { exact: true }).waitFor();
+  await ordinaryMerchantSidebar.getByRole('button', { name: '商户设置', exact: true }).click();
+  await merchantPage.getByLabel('商户介绍').waitFor();
+  assert(await merchantPage.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), '移动端商户设置出现页面级横向溢出');
+  await merchantPage.getByRole('button', { name: '打开菜单' }).click();
+  await merchantPage.getByRole('button', { name: '控制台', exact: true }).click();
+  const mobileConsoleSidebar = merchantPage.getByRole('complementary', { name: '控制台功能' });
+  await mobileConsoleSidebar.getByRole('button', { name: '路由管理', exact: true }).click();
+  await clickActionInRow(merchantPage, '主路由', '编辑');
+  const mobileRouteDialog = merchantPage.getByRole('dialog', { name: '编辑路由策略' });
+  await mobileRouteDialog.getByLabel('预览模型').waitFor();
+  await mobileRouteDialog.getByText('可用商户', { exact: true }).waitFor();
+  assert(await merchantPage.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), '移动端路由弹窗出现页面级横向溢出');
   await merchantPage.close();
 
   const anonymousPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
   let anonymousLoggedIn = false;
   let merchantApplication = null;
   let merchantApplicationCalls = 0;
+  let merchantApplicationBody = null;
   let paymentOrderCalls = 0;
   let paymentOrderBody = null;
   await anonymousPage.route('**/api/**', (route) => {
@@ -776,11 +825,11 @@ try {
       paymentOrderBody = request.postDataJSON();
       return fulfill({ success: true, data: { order: { id: 31, order_no: 'MR-USER-1', amount_cny_cents: 10000, newapi_quota: 100 * testQuotaPerUnit, payment_status: 'pending', credit_status: 'pending' }, payment_url: `${baseUrl}/payment-target` } }, 201);
     }
-    if (url.pathname === '/api/merchant/channel-tests' && request.method() === 'POST') return fulfill({ success: true, data: { id: 92, canonical_model_id: 101, adapter_type: 'openai_compatible', capabilities: ['chat_completions'], latency_ms: 305, test_receipt: 'receipt-for-merchant-apply-12345', expires_at: '2026-07-22T16:15:00Z' } }, 201);
     if (url.pathname === '/api/merchant/application' && request.method() === 'GET') return fulfill({ success: true, data: merchantApplication });
     if (url.pathname === '/api/merchant/application' && request.method() === 'POST') {
       merchantApplicationCalls += 1;
-      merchantApplication = { id: 11, user_id: 7, display_name: '北辰云智', website_url: 'https://merchant.example', business_description: '企业模型 API 服务', status: 'pending', initial_channel: { id: 21, channel_name: '主线路', canonical_model_id: 101, model: 'gpt-4o-mini', adapter_type: 'openai_compatible', base_url: 'https://api.merchant.example', status: 'pending', credential_configured: true } };
+      merchantApplicationBody = request.postDataJSON();
+      merchantApplication = { id: 11, user_id: 7, display_name: merchantApplicationBody.display_name, website_url: merchantApplicationBody.website_url, business_description: merchantApplicationBody.business_description, status: 'pending' };
       return fulfill({ success: true, data: merchantApplication }, 201);
     }
     return fulfill({ success: false, error: { code: 'not_mocked', message: url.pathname } }, 404);
@@ -806,14 +855,12 @@ try {
   const merchantDialog = anonymousPage.getByRole('dialog', { name: '申请成为商户' });
   await merchantDialog.getByLabel('商户名称').fill('北辰云智');
   await merchantDialog.getByLabel('网站地址').fill('https://merchant.example');
-  await merchantDialog.getByLabel('上游基础地址').fill('https://api.merchant.example/v1');
-  await merchantDialog.getByLabel('上游 API 密钥').fill('sk-upstream-secret');
-  await merchantDialog.getByLabel('业务说明').fill('企业模型 API 服务');
-  await merchantDialog.getByRole('button', { name: '发送 hi 检测' }).click();
-  await merchantDialog.getByText('检测通过').waitFor();
+  await merchantDialog.getByLabel('商户介绍').fill('企业模型 API 服务');
+  assert(await merchantDialog.getByLabel('上游基础地址').count() === 0, '商户申请仍要求填写渠道地址');
   await merchantDialog.getByRole('button', { name: '提交申请' }).click();
   await anonymousPage.getByText('商户申请已提交').waitFor();
   assert(merchantApplicationCalls === 1, '商户申请没有调用平台接口');
+  assert(Object.keys(merchantApplicationBody).sort().join(',') === 'business_description,display_name,website_url', '商户申请仍提交渠道或检测字段');
   await anonymousPage.getByText('等待管理员审核').waitFor();
   await anonymousConsoleSidebar.getByRole('button', { name: '充值中心', exact: true }).click();
   await anonymousPage.getByRole('button', { name: '立即充值' }).click();

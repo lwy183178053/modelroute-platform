@@ -2915,3 +2915,62 @@
 - `data/ui-preview/vite.config.mjs`：本地预览接口增加可编辑税率及动态提现金额；该文件位于 Git 忽略目录。
 - `progress.md`：追加本轮实现、验证、文件清单和回滚点。
 - 回滚点：执行 `git revert <本轮提交哈希>` 可恢复固定 `3%` 的代码、界面与测试；开发库需要精确回退时，切换到上一提交后按现有 V2 重置流程重建。本轮未发布服务器。
+
+## 2026-07-24 - Task: 拆分商户申请并增加厂商渠道与路由范围预览
+
+### What was done
+
+- 商户申请缩减为商户名称、商户介绍和网站地址，管理员可从待审核状态直接通过或驳回；商户通过后再独立提交渠道。
+- 新增商户资料读取与介绍修改接口，商户中心增加“商户设置”，名称和网站只读、介绍可编辑。
+- 商户渠道对外统一使用六厂商 `provider`，页面不展示协议或内部适配器；模型同步按厂商隔离，Anthropic 与 Gemini 支持原生适配失败后回退兼容适配。
+- 路由创建和编辑增加按模型实时范围预览，统计与真实路由共用模型、报价、渠道、商户、健康、倍率和缓存阈值条件。
+- 公网模型请求外围只负责读取公开模型名、选择渠道和替换内部别名，请求协议与参数校验继续交给核心服务；`/v1/models` 继续按密钥路由返回公开模型。
+- 增加连续迁移保存商户介绍和渠道厂商；按开发阶段约定，厂商迁移直接清理旧渠道及其级联开发数据，不保留旧渠道字段兼容。
+- 校准 Git 忽略的 `57723` 本地预览夹具，使路由预览、六厂商渠道、直接商户审批和商户设置可以实际点击验收；未发布服务器。
+
+### Testing
+
+- `go test ./internal/migrations -run TestEmbeddedMigrationIsV2Baseline -count=1` 红灯：先稳定复现重复 `000008` 导致迁移编号不连续；重编号为 `000009/000010` 后通过。
+- `npm.cmd run test:ui` 红灯：先稳定复现路由弹窗缺少“预览模型”；实现页面、接口桩和交互后通过。
+- `go test ./... -count=1`：通过，全部 Go 单元与契约测试无失败。
+- `go vet ./...`、`go build ./cmd/api`、`go build ./cmd/worker`：通过。
+- `npm.cmd run test:quota`、`npm.cmd run test:ui`、`npm.cmd run build`：通过；UI 烟雾覆盖三字段申请、管理员直接审批、六厂商渠道、商户设置、路由预览及桌面和移动布局。
+- `docker compose config --quiet`：通过；仅输出本机未加载生产环境变量的预期空值警告。
+- 直接请求 `http://127.0.0.1:57723/api/routing-policies/preview`、`/api/merchant/profile` 和 `/api/merchant/channels`：通过，分别返回 `1/1` 范围统计、官方商户资料和 OpenAI 厂商。
+- Playwright 直接访问 `http://127.0.0.1:57723/`：通过，桌面与移动端页面级横向溢出均为 `0`，页面运行错误为 `0`，路由弹窗显示可用商户 `1`、可用渠道 `1`。
+- 人工检查 `modelroute-route-preview-desktop.png` 与 `modelroute-merchant-settings-desktop.png`：统计块、表单、侧栏和操作区无文字重叠、截断或异常留白。
+- `git diff --check`：通过。
+
+### Notes
+
+- `apps/api/internal/httpapi/channel_models.go`：增加六厂商规范化、厂商模型隔离和内部适配顺序。
+- `apps/api/internal/httpapi/channel_models_handlers.go`：模型同步请求改用 `provider` 并限制正式商户调用。
+- `apps/api/internal/httpapi/channel_models_test.go`：覆盖六厂商、跨厂商过滤和原生适配回退。
+- `apps/api/internal/httpapi/merchant_handlers.go`：拆分商户申请与渠道提交，增加商户资料接口并删除旧单模型提交入口。
+- `apps/api/internal/httpapi/merchant_handlers_test.go`：覆盖三字段申请、直接审批、资料修改和商户权限。
+- `apps/api/internal/httpapi/merchant_store.go`：持久化商户介绍、渠道厂商及直接申请审批事务。
+- `apps/api/internal/httpapi/merchant_store_test.go`：同步商户资料与厂商渠道 SQL 契约。
+- `apps/api/internal/httpapi/merchant_types.go`：公共商户与渠道结构增加介绍和厂商，隐藏内部适配字段。
+- `apps/api/internal/httpapi/routing_domain.go`：删除外围请求协议与图片参数校验入口。
+- `apps/api/internal/httpapi/routing_handlers.go`：增加路由范围预览接口和输入校验。
+- `apps/api/internal/httpapi/routing_handlers_test.go`：覆盖预览鉴权、输入边界和响应。
+- `apps/api/internal/httpapi/routing_proxy.go`：模型代理只保留公开模型替换、路由和核心响应透传。
+- `apps/api/internal/httpapi/routing_proxy_test.go`：覆盖流式响应、核心错误和跨入口透传。
+- `apps/api/internal/httpapi/routing_store.go`：实现与真实候选条件一致的商户和渠道去重统计。
+- `apps/api/internal/httpapi/routing_store_test.go`：覆盖倍率、缓存、健康、下架和统计去重。
+- `apps/api/internal/httpapi/server.go`：注册商户资料与路由预览路由，移除商户申请验证路由。
+- `apps/api/internal/migrations/migrate_test.go`：锁定十份连续迁移、商户介绍、六厂商和开发数据清理约束。
+- `apps/api/internal/migrations/sql/000009_merchant_profile_description.sql`：增加商户介绍字段。
+- `apps/api/internal/migrations/sql/000010_channel_provider.sql`：清理旧渠道开发数据并增加六厂商约束。
+- `apps/web/scripts/ui-smoke.mjs`：覆盖新申请、审批、厂商渠道、商户设置和路由预览的桌面及移动交互。
+- `apps/web/src/Modals.jsx`：简化商户申请，渠道改选厂商，路由弹窗增加防抖范围预览。
+- `apps/web/src/styles.css`：增加路由统计块、商户设置和长介绍表格样式。
+- `apps/web/src/views/ConsoleView.jsx`：为路由弹窗提供模型目录并移除申请阶段渠道参数。
+- `apps/web/src/views/MerchantView.jsx`：增加厂商列和商户设置页面，接入资料读取与保存。
+- `apps/web/src/views/admin/AdminMerchants.jsx`：管理员商户审核改为资料核对后直接通过或驳回。
+- `docs/V2数据基线.md`：记录六厂商渠道和实时路由预览数据边界。
+- `docs/商户与渠道审核接口.md`：记录三字段申请、商户资料、厂商同步与审批接口。
+- `docs/模型报价路由与健康.md`：记录核心协议处理边界、范围预览和四个公网入口。
+- `data/ui-preview/vite.config.mjs`：校准本地预览的新接口和数据；该文件被 Git 忽略，仅服务当前 `57723` 验收。
+- `progress.md`：追加本轮实现、验证、文件清单和回滚边界。
+- 回滚方式：执行 `git revert <本轮提交哈希>` 恢复代码、迁移、页面、测试和文档；若本地开发库已经执行 `000010`，旧渠道数据已按约定清理，需切回上一提交后通过开发数据重置流程重建。本地预览夹具可恢复当前提交对应的预览配置。本轮未发布服务器。

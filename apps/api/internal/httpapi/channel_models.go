@@ -1,6 +1,18 @@
 package httpapi
 
-import "strings"
+import (
+	"errors"
+	"strings"
+)
+
+var supportedChannelProviders = map[string]string{
+	"openai":    "OpenAI",
+	"anthropic": "Anthropic",
+	"gemini":    "Gemini",
+	"deepseek":  "DeepSeek",
+	"qwen":      "Qwen",
+	"moonshot":  "Moonshot",
+}
 
 // SyncedChannelModel is the platform view of one model returned by an upstream channel.
 type SyncedChannelModel struct {
@@ -44,21 +56,64 @@ func matchUpstreamModels(upstream []string, canonical []CanonicalModel) []Synced
 	return result
 }
 
-func normalizeUpstreamModelName(value string) string {
-	return strings.ToLower(strings.TrimSpace(value))
+func matchUpstreamModelsForProvider(upstream []string, canonical []CanonicalModel, provider string) []SyncedChannelModel {
+	provider, err := normalizeChannelProvider(provider)
+	if err != nil {
+		return nil
+	}
+	selected := make([]CanonicalModel, 0, len(canonical))
+	knownOtherProviders := make(map[string]struct{}, len(canonical))
+	for _, model := range canonical {
+		name := normalizeUpstreamModelName(model.PublicName)
+		if name == "" || model.Status != "active" {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(model.Provider), provider) {
+			selected = append(selected, model)
+			continue
+		}
+		knownOtherProviders[name] = struct{}{}
+	}
+
+	matched := matchUpstreamModels(upstream, selected)
+	result := make([]SyncedChannelModel, 0, len(matched))
+	for _, item := range matched {
+		if item.MatchStatus != "matched" {
+			if _, belongsElsewhere := knownOtherProviders[normalizeUpstreamModelName(item.UpstreamModelName)]; belongsElsewhere {
+				continue
+			}
+			item.Provider = provider
+		}
+		result = append(result, item)
+	}
+	return result
 }
 
-func channelTypeForName(name string) (int, bool) {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "openai", "openai_compatible", "openai-compatible":
-		return 1, true
-	case "anthropic":
-		return 14, true
-	case "gemini":
-		return 24, true
-	default:
-		return 0, false
+func normalizeChannelProvider(raw string) (string, error) {
+	provider, ok := supportedChannelProviders[strings.ToLower(strings.TrimSpace(raw))]
+	if !ok {
+		return "", errors.New("渠道厂商只支持 OpenAI、Anthropic、Gemini、DeepSeek、Qwen 或 Moonshot")
 	}
+	return provider, nil
+}
+
+func channelTypesForProvider(provider string) []int {
+	provider, err := normalizeChannelProvider(provider)
+	if err != nil {
+		return nil
+	}
+	switch provider {
+	case "Anthropic":
+		return []int{14, 1}
+	case "Gemini":
+		return []int{24, 1}
+	default:
+		return []int{1}
+	}
+}
+
+func normalizeUpstreamModelName(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func newAPIChannelBaseURL(channelType int, baseURL string) string {

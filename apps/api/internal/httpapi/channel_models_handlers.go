@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -13,14 +12,14 @@ import (
 )
 
 type channelModelsSyncRequest struct {
-	ChannelType string `json:"channel_type"`
-	BaseURL     string `json:"base_url"`
-	APIKey      string `json:"api_key"`
+	Provider string `json:"provider"`
+	BaseURL  string `json:"base_url"`
+	APIKey   string `json:"api_key"`
 }
 
 func (s *server) syncMerchantChannelModels(w http.ResponseWriter, r *http.Request) {
-	_, session, ok := s.requireSession(w, r, roleCommon)
-	if !ok || !s.requireSameOrigin(w, r) || !s.merchantReady(w) {
+	_, session, _, ok := s.requireMerchant(w, r)
+	if !ok || !s.requireSameOrigin(w, r) {
 		return
 	}
 	var request channelModelsSyncRequest
@@ -28,21 +27,22 @@ func (s *server) syncMerchantChannelModels(w http.ResponseWriter, r *http.Reques
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "同步参数格式无效")
 		return
 	}
-	models, channelType, err := s.fetchAndMatchChannelModels(r, session, request.ChannelType, request.BaseURL, request.APIKey)
+	models, _, err := s.fetchAndMatchChannelModels(r, session, request.Provider, request.BaseURL, request.APIKey)
 	if err != nil {
 		writeAPIError(w, http.StatusBadGateway, "channel_models_sync_failed", err.Error())
 		return
 	}
+	provider, _ := normalizeChannelProvider(request.Provider)
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{
-		"channel_type": channelType, "items": models, "synced_at": time.Now().UTC(),
+		"provider": provider, "items": models, "synced_at": time.Now().UTC(),
 	}})
 }
 
-func (s *server) fetchAndMatchChannelModels(r *http.Request, session platformauth.Session, channelTypeName, baseURL, apiKey string) ([]SyncedChannelModel, int, error) {
+func (s *server) fetchAndMatchChannelModels(r *http.Request, session platformauth.Session, provider, baseURL, apiKey string) ([]SyncedChannelModel, int, error) {
 	if (s.services.NewAPI == nil && s.services.AdminNewAPI == nil) || s.services.Routing == nil {
 		return nil, 0, errors.New("多模型同步服务尚未就绪")
 	}
-	channelType, err := parseChannelType(channelTypeName)
+	provider, err := normalizeChannelProvider(provider)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -54,39 +54,32 @@ func (s *server) fetchAndMatchChannelModels(r *http.Request, session platformaut
 	if len(credential) < 8 || len(credential) > 65536 {
 		return nil, 0, errors.New("API 密钥长度无效")
 	}
-	requestBody := map[string]any{
-		"type": channelType, "channel_type": channelType, "base_url": newAPIChannelBaseURL(channelType, normalizedURL), "key": credential, "api_key": credential,
-	}
-	var data json.RawMessage
-	if s.services.AdminNewAPI != nil {
-		data, err = s.services.AdminNewAPI.Do(r.Context(), http.MethodPost, "/api/channel/fetch_models", requestBody)
-	} else {
-		data, err = s.services.NewAPI.Do(r.Context(), http.MethodPost, "/api/channel/fetch_models", requestBody, upstreamAuth(session))
-	}
-	if err != nil {
-		return nil, 0, fmt.Errorf("上游模型同步失败")
-	}
-	names := extractUpstreamModelNames(data)
-	if len(names) == 0 {
-		return nil, 0, errors.New("上游没有返回模型")
-	}
 	canonical, err := s.services.Routing.ListCanonicalModels(r.Context())
 	if err != nil {
 		return nil, 0, errors.New("读取平台模型目录失败")
 	}
-	return matchUpstreamModels(names, canonical), channelType, nil
-}
-
-func parseChannelType(raw string) (int, error) {
-	raw = strings.TrimSpace(raw)
-	if value, ok := channelTypeForName(raw); ok {
-		return value, nil
+	for _, channelType := range channelTypesForProvider(provider) {
+		requestBody := map[string]any{
+			"type": channelType, "channel_type": channelType,
+			"base_url": newAPIChannelBaseURL(channelType, normalizedURL),
+			"key":      credential, "api_key": credential,
+		}
+		var data json.RawMessage
+		if s.services.AdminNewAPI != nil {
+			data, err = s.services.AdminNewAPI.Do(r.Context(), http.MethodPost, "/api/channel/fetch_models", requestBody)
+		} else {
+			data, err = s.services.NewAPI.Do(r.Context(), http.MethodPost, "/api/channel/fetch_models", requestBody, upstreamAuth(session))
+		}
+		if err != nil {
+			continue
+		}
+		names := extractUpstreamModelNames(data)
+		if len(names) == 0 {
+			continue
+		}
+		return matchUpstreamModelsForProvider(names, canonical, provider), channelType, nil
 	}
-	value, err := strconv.Atoi(raw)
-	if err != nil || (value != 1 && value != 14 && value != 24) {
-		return 0, errors.New("渠道类型只支持 OpenAI 兼容、Anthropic 或 Gemini")
-	}
-	return value, nil
+	return nil, 0, fmt.Errorf("上游模型同步失败")
 }
 
 func extractUpstreamModelNames(data json.RawMessage) []string {
@@ -183,7 +176,7 @@ func (s *server) syncExistingMerchantChannelModels(w http.ResponseWriter, r *htt
 		writeAPIError(w, http.StatusInternalServerError, "model_store_error", "读取平台模型目录失败")
 		return
 	}
-	matched := matchUpstreamModels(names, canonical)
+	matched := matchUpstreamModelsForProvider(names, canonical, channel.Provider)
 	if err := repository.SyncChannelModels(r.Context(), channelID, matched); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "merchant_store_error", "保存渠道模型失败")
 		return

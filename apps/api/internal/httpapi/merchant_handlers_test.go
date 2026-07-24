@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -46,12 +45,12 @@ func TestMerchantChannelResponsesHideInternalLegacyFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(payload)
-	for _, field := range []string{"channel_type", "requested_models", "verified_models", "models", "merchant_id", "newapi_channel_id"} {
+	for _, field := range []string{"channel_type", "adapter_type", "requested_models", "verified_models", "models", "merchant_id", "newapi_channel_id"} {
 		if strings.Contains(text, `"`+field+`"`) {
 			t.Fatalf("V2 公共响应仍暴露内部字段 %s：%s", field, text)
 		}
 	}
-	for _, field := range []string{"canonical_model_id", "model", "adapter_type", "user_id", "merchant_name", "matched_models"} {
+	for _, field := range []string{"canonical_model_id", "model", "provider", "user_id", "merchant_name", "matched_models"} {
 		if !strings.Contains(text, `"`+field+`"`) {
 			t.Fatalf("V2 公共响应缺少单模型字段 %s：%s", field, text)
 		}
@@ -78,16 +77,20 @@ func (s *filteredMerchantRepositoryStub) ListChannelsFiltered(ctx context.Contex
 
 type merchantRepositoryStub struct {
 	MerchantRepository
-	identity          func(context.Context, int) (MerchantIdentity, error)
-	channels          func(context.Context, int) ([]MerchantChannel, error)
-	createApplication func(context.Context, CreateMerchantApplication) (MerchantApplication, error)
-	claimReview       func(context.Context, int64, string) (MerchantChannelReview, error)
-	finishVerify      func(context.Context, int64, int, string, string) error
-	finishApproval    func(context.Context, int64, int, int) (MerchantApproval, error)
-	cancelApproval    func(context.Context, int64, string) error
-	saveChannelTest   func(context.Context, CreateChannelTest) (ChannelTest, error)
-	merchant          func(context.Context, int64) (MerchantProfile, error)
-	setMerchantStatus func(context.Context, int64, bool, int, string) (MerchantStatusChange, error)
+	identity           func(context.Context, int) (MerchantIdentity, error)
+	channels           func(context.Context, int) ([]MerchantChannel, error)
+	createApplication  func(context.Context, CreateMerchantApplication) (MerchantApplication, error)
+	application        func(context.Context, int64) (MerchantApplication, error)
+	approveApplication func(context.Context, int64, int) (MerchantProfile, error)
+	rejectApplication  func(context.Context, int64, int, string) error
+	claimReview        func(context.Context, int64, string) (MerchantChannelReview, error)
+	finishVerify       func(context.Context, int64, int, string, string) error
+	finishApproval     func(context.Context, int64, int, int) (MerchantApproval, error)
+	cancelApproval     func(context.Context, int64, string) error
+	saveChannelTest    func(context.Context, CreateChannelTest) (ChannelTest, error)
+	merchant           func(context.Context, int64) (MerchantProfile, error)
+	updateDescription  func(context.Context, int64, string) (MerchantProfile, error)
+	setMerchantStatus  func(context.Context, int64, bool, int, string) (MerchantStatusChange, error)
 }
 
 func (s *merchantRepositoryStub) SaveChannelTest(ctx context.Context, command CreateChannelTest) (ChannelTest, error) {
@@ -111,6 +114,18 @@ func (s *merchantRepositoryStub) Identity(ctx context.Context, userID int) (Merc
 
 func (s *merchantRepositoryStub) CreateApplication(ctx context.Context, command CreateMerchantApplication) (MerchantApplication, error) {
 	return s.createApplication(ctx, command)
+}
+
+func (s *merchantRepositoryStub) Application(ctx context.Context, applicationID int64) (MerchantApplication, error) {
+	return s.application(ctx, applicationID)
+}
+
+func (s *merchantRepositoryStub) ApproveApplication(ctx context.Context, applicationID int64, adminID int) (MerchantProfile, error) {
+	return s.approveApplication(ctx, applicationID, adminID)
+}
+
+func (s *merchantRepositoryStub) RejectApplication(ctx context.Context, applicationID int64, adminID int, reason string) error {
+	return s.rejectApplication(ctx, applicationID, adminID, reason)
 }
 
 func (s *merchantRepositoryStub) ChannelsForUser(ctx context.Context, userID int) ([]MerchantChannel, error) {
@@ -143,6 +158,10 @@ func (s *merchantRepositoryStub) Merchant(ctx context.Context, merchantID int64)
 	return s.merchant(ctx, merchantID)
 }
 
+func (s *merchantRepositoryStub) UpdateMerchantDescription(ctx context.Context, merchantID int64, description string) (MerchantProfile, error) {
+	return s.updateDescription(ctx, merchantID, description)
+}
+
 func (s *merchantRepositoryStub) SetMerchantStatus(ctx context.Context, merchantID int64, enabled bool, adminID int, reason string) (MerchantStatusChange, error) {
 	return s.setMerchantStatus(ctx, merchantID, enabled, adminID, reason)
 }
@@ -167,30 +186,24 @@ func createPlatformSession(t *testing.T, services Services, userID int, role int
 	return token
 }
 
-func TestMerchantApplicationEncryptsCredentialAndNeverReturnsIt(t *testing.T) {
+func TestMerchantApplicationOnlyStoresMerchantProfileFields(t *testing.T) {
 	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		t.Fatal("提交申请不应调用 New API")
 	}))
-	box := testCredentialBox(t)
-	secret := "sk-upstream-secret"
-	repository := &merchantRepositoryStub{}
+	repository := &merchantRepositoryStub{identity: func(context.Context, int) (MerchantIdentity, error) {
+		return MerchantIdentity{}, ErrMerchantNotFound
+	}}
 	repository.createApplication = func(_ context.Context, command CreateMerchantApplication) (MerchantApplication, error) {
-		if command.UserID != 7 || command.DisplayName != "北辰云智" || command.Channel.CanonicalModelID != 61 || command.Channel.TestReceipt != "test-receipt-123" {
+		if command.UserID != 7 || command.DisplayName != "北辰云智" || command.WebsiteURL != "https://merchant.example" || command.BusinessDescription != "企业模型 API 服务" {
 			t.Fatalf("申请参数=%+v", command)
 		}
-		if bytes.Contains(command.Channel.EncryptedCredential, []byte(secret)) || len(command.Channel.EncryptedCredential) == 0 {
-			t.Fatal("仓储收到未加密密钥或空密文")
-		}
-		if len(command.Channel.CredentialFingerprint) != 64 {
-			t.Fatalf("密钥指纹=%q", command.Channel.CredentialFingerprint)
-		}
-		return MerchantApplication{ID: 11, UserID: 7, DisplayName: command.DisplayName, WebsiteURL: command.WebsiteURL, Status: "pending", InitialReview: MerchantChannelReview{ID: 21, ChannelName: command.Channel.ChannelName, Status: "pending", CredentialConfigured: true}}, nil
+		return MerchantApplication{ID: 11, UserID: 7, DisplayName: command.DisplayName, WebsiteURL: command.WebsiteURL, BusinessDescription: command.BusinessDescription, Status: "pending"}, nil
 	}
 	services.Merchants = repository
-	services.Credentials = box
+	services.Credentials = testCredentialBox(t)
 	token := createPlatformSession(t, services, 7, 1)
 	handler := NewServerWithServices("test", Dependencies{}, services)
-	body := `{"display_name":"北辰云智","website_url":"https://merchant.example","business_description":"企业模型 API 服务","channel_name":"主线路","canonical_model_id":61,"test_receipt":"test-receipt-123","base_url":"https://api.merchant.example","api_key":"` + secret + `"}`
+	body := `{"display_name":"北辰云智","website_url":"https://merchant.example","business_description":"企业模型 API 服务"}`
 	request := httptest.NewRequest(http.MethodPost, "/api/merchant/application", strings.NewReader(body))
 	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
@@ -199,11 +212,97 @@ func TestMerchantApplicationEncryptsCredentialAndNeverReturnsIt(t *testing.T) {
 	if response.Code != http.StatusCreated {
 		t.Fatalf("状态码=%d，响应=%s", response.Code, response.Body.String())
 	}
-	if strings.Contains(response.Body.String(), secret) || strings.Contains(response.Body.String(), "encrypted_credential") {
-		t.Fatalf("申请响应泄露凭据：%s", response.Body.String())
+	if strings.Contains(response.Body.String(), "initial_channel") || strings.Contains(response.Body.String(), "credential_configured") {
+		t.Fatalf("商户申请仍包含渠道信息：%s", response.Body.String())
 	}
-	if !strings.Contains(response.Body.String(), `"credential_configured":true`) {
-		t.Fatalf("申请响应缺少凭据状态：%s", response.Body.String())
+}
+
+func TestMerchantChannelTestRequiresActiveMerchant(t *testing.T) {
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("普通用户不应触发渠道检测")
+	}))
+	services.Merchants = &merchantRepositoryStub{identity: func(context.Context, int) (MerchantIdentity, error) {
+		return MerchantIdentity{}, ErrMerchantNotFound
+	}}
+	services.Credentials = testCredentialBox(t)
+	token := createPlatformSession(t, services, 7, 1)
+	handler := NewServerWithServices("test", Dependencies{}, services)
+	request := httptest.NewRequest(http.MethodPost, "/api/merchant/channel-tests", strings.NewReader(`{"canonical_model_id":61,"base_url":"https://api.merchant.example","api_key":"sk-upstream-secret"}`))
+	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
+	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), `"code":"merchant_required"`) {
+		t.Fatalf("普通用户渠道检测响应=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestAdminApprovesMerchantApplicationWithoutCreatingChannel(t *testing.T) {
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("商户身份审批不应调用渠道服务")
+	}))
+	repository := &merchantRepositoryStub{
+		application: func(_ context.Context, applicationID int64) (MerchantApplication, error) {
+			return MerchantApplication{ID: applicationID, UserID: 7, Status: "pending"}, nil
+		},
+		approveApplication: func(_ context.Context, applicationID int64, adminID int) (MerchantProfile, error) {
+			if applicationID != 11 || adminID != 1 {
+				t.Fatalf("审批参数=%d/%d", applicationID, adminID)
+			}
+			return MerchantProfile{ID: 31, UserID: 7, DisplayName: "北辰云智", BusinessDescription: "企业模型 API 服务", Status: "active"}, nil
+		},
+	}
+	services.Merchants = repository
+	services.Credentials = testCredentialBox(t)
+	token := createPlatformSession(t, services, 1, 10)
+	handler := NewServerWithServices("test", Dependencies{}, services)
+	request := httptest.NewRequest(http.MethodPost, "/api/admin/merchant-applications/11/approve", nil)
+	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
+	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"display_name":"北辰云智"`) {
+		t.Fatalf("商户审批响应=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestMerchantProfileCanOnlyUpdateDescription(t *testing.T) {
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	repository := &merchantRepositoryStub{
+		identity: func(_ context.Context, userID int) (MerchantIdentity, error) {
+			return MerchantIdentity{MerchantID: 31, UserID: userID, IsMerchant: true, Status: "active"}, nil
+		},
+		merchant: func(_ context.Context, merchantID int64) (MerchantProfile, error) {
+			return MerchantProfile{ID: merchantID, UserID: 7, DisplayName: "北辰云智", WebsiteURL: "https://merchant.example", BusinessDescription: "原商户介绍", Status: "active"}, nil
+		},
+		updateDescription: func(_ context.Context, merchantID int64, description string) (MerchantProfile, error) {
+			if merchantID != 31 || description != "更新后的商户介绍内容" {
+				t.Fatalf("资料更新参数=%d/%q", merchantID, description)
+			}
+			return MerchantProfile{ID: merchantID, UserID: 7, DisplayName: "北辰云智", WebsiteURL: "https://merchant.example", BusinessDescription: description, Status: "active"}, nil
+		},
+	}
+	services.Merchants = repository
+	services.Credentials = testCredentialBox(t)
+	token := createPlatformSession(t, services, 7, 1)
+	handler := NewServerWithServices("test", Dependencies{}, services)
+	request := httptest.NewRequest(http.MethodPut, "/api/merchant/profile", strings.NewReader(`{"business_description":"更新后的商户介绍内容"}`))
+	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
+	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"business_description":"更新后的商户介绍内容"`) {
+		t.Fatalf("商户资料响应=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestMerchantApplicationVerifyRouteIsRemoved(t *testing.T) {
+	handler := NewServerWithServices("test", Dependencies{}, Services{})
+	request := httptest.NewRequest(http.MethodPost, "/api/admin/merchant-applications/11/verify", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("旧商户验证入口状态码=%d，响应=%s", response.Code, response.Body.String())
 	}
 }
 
@@ -220,7 +319,9 @@ func TestMerchantChannelTestReturnsBoundReceiptWithoutPersistingCredential(t *te
 		}
 		return ChannelTestOutcome{AdapterType: "anthropic", Capabilities: []string{"responses"}, LatencyMS: 125}, nil
 	}}
-	repository := &merchantRepositoryStub{}
+	repository := &merchantRepositoryStub{identity: func(_ context.Context, userID int) (MerchantIdentity, error) {
+		return MerchantIdentity{MerchantID: 31, UserID: userID, DisplayName: "北辰云智", Status: "active", IsMerchant: true}, nil
+	}}
 	var savedReceiptHash string
 	repository.saveChannelTest = func(_ context.Context, command CreateChannelTest) (ChannelTest, error) {
 		if command.UserID != 7 || command.CanonicalModelID != 61 || command.AdapterType != "anthropic" || command.LatencyMS != 125 {

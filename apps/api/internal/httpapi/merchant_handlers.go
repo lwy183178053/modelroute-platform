@@ -24,8 +24,8 @@ type merchantChannelTestRequest struct {
 }
 
 func (s *server) createMerchantChannelTest(w http.ResponseWriter, r *http.Request) {
-	_, session, ok := s.requireSession(w, r, roleCommon)
-	if !ok || !s.requireSameOrigin(w, r) || !s.merchantReady(w) {
+	_, session, _, ok := s.requireMerchant(w, r)
+	if !ok || !s.requireSameOrigin(w, r) {
 		return
 	}
 	if s.services.Routing == nil || s.services.ChannelTests == nil {
@@ -150,6 +150,44 @@ func (s *server) merchantApplication(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": application})
 }
 
+func (s *server) merchantProfile(w http.ResponseWriter, r *http.Request) {
+	_, _, identity, ok := s.requireMerchant(w, r)
+	if !ok {
+		return
+	}
+	profile, err := s.services.Merchants.Merchant(r.Context(), identity.MerchantID)
+	if err != nil {
+		s.writeMerchantStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": profile})
+}
+
+func (s *server) updateMerchantProfile(w http.ResponseWriter, r *http.Request) {
+	_, _, identity, ok := s.requireMerchant(w, r)
+	if !ok || !s.requireSameOrigin(w, r) {
+		return
+	}
+	var request struct {
+		BusinessDescription string `json:"business_description"`
+	}
+	if err := decodeJSON(r, &request); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "商户资料格式无效")
+		return
+	}
+	description := strings.TrimSpace(request.BusinessDescription)
+	if len([]rune(description)) < 10 || len([]rune(description)) > 2000 {
+		writeAPIError(w, http.StatusBadRequest, "invalid_description", "商户介绍需为 10 至 2000 字")
+		return
+	}
+	profile, err := s.services.Merchants.UpdateMerchantDescription(r.Context(), identity.MerchantID, description)
+	if err != nil {
+		s.writeMerchantStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": profile})
+}
+
 func (s *server) merchantChannels(w http.ResponseWriter, r *http.Request) {
 	_, session, identity, ok := s.requireMerchant(w, r)
 	if !ok {
@@ -192,29 +230,18 @@ func (s *server) createMerchantChannel(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "渠道申请格式无效")
 		return
 	}
-	var channel ChannelSubmission
-	var err error
-	if strings.TrimSpace(request.ChannelType) != "" {
-		channel, err = s.buildMultiModelSubmission(r, session, request.ChannelName, request.ChannelType, request.BaseURL, request.APIKey)
-	} else {
-		channel, err = s.buildChannelSubmission(request.ChannelName, request.CanonicalModelID, request.BaseURL, request.APIKey, request.TestReceipt)
-	}
+	channel, err := s.buildMultiModelSubmission(r, session, request.ChannelName, request.Provider, request.BaseURL, request.APIKey)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	command := CreateMerchantChannel{UserID: session.UserID, Channel: channel}
-	var review MerchantChannelReview
-	if len(channel.UpstreamModels) > 0 {
-		repository, supported := s.services.Merchants.(MultiModelMerchantRepository)
-		if !supported {
-			writeAPIError(w, http.StatusServiceUnavailable, "multimodel_unavailable", "多模型渠道服务尚未就绪")
-			return
-		}
-		review, err = repository.CreateMultiModelChannelReview(r.Context(), command)
-	} else {
-		review, err = s.services.Merchants.CreateChannelReview(r.Context(), command)
+	repository, supported := s.services.Merchants.(MultiModelMerchantRepository)
+	if !supported {
+		writeAPIError(w, http.StatusServiceUnavailable, "multimodel_unavailable", "多模型渠道服务尚未就绪")
+		return
 	}
+	review, err := repository.CreateMultiModelChannelReview(r.Context(), command)
 	if err != nil {
 		s.writeMerchantStoreError(w, err)
 		return
@@ -296,13 +323,6 @@ func (s *server) adminMerchantChannels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"page": page, "page_size": pageSize, "total": total, "items": items}})
 }
 
-func (s *server) adminVerifyApplication(w http.ResponseWriter, r *http.Request) {
-	application, ok := s.requireAdminApplication(w, r)
-	if ok {
-		s.adminVerifyReviewID(w, r, application.InitialReview.ID)
-	}
-}
-
 func (s *server) adminVerifyReview(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathInt64(w, r, "id", "渠道审核编号无效")
 	if ok {
@@ -374,10 +394,20 @@ func (s *server) adminVerifyReviewID(w http.ResponseWriter, r *http.Request, rev
 }
 
 func (s *server) adminApproveApplication(w http.ResponseWriter, r *http.Request) {
-	application, ok := s.requireAdminApplication(w, r)
-	if ok {
-		s.adminApproveReviewID(w, r, application.InitialReview.ID)
+	_, session, ok := s.requireSession(w, r, roleAdmin)
+	if !ok || !s.requireSameOrigin(w, r) || !s.merchantReady(w) {
+		return
 	}
+	id, ok := pathInt64(w, r, "id", "申请编号无效")
+	if !ok {
+		return
+	}
+	profile, err := s.services.Merchants.ApproveApplication(r.Context(), id, session.UserID)
+	if err != nil {
+		s.writeMerchantStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": profile})
 }
 
 func (s *server) adminApproveReview(w http.ResponseWriter, r *http.Request) {
@@ -506,10 +536,26 @@ func channelTypeForAdapter(adapter string) (int, bool) {
 }
 
 func (s *server) adminRejectApplication(w http.ResponseWriter, r *http.Request) {
-	application, ok := s.requireAdminApplication(w, r)
-	if ok {
-		s.adminRejectReviewID(w, r, application.InitialReview.ID)
+	_, session, ok := s.requireSession(w, r, roleAdmin)
+	if !ok || !s.requireSameOrigin(w, r) || !s.merchantReady(w) {
+		return
 	}
+	id, ok := pathInt64(w, r, "id", "申请编号无效")
+	if !ok {
+		return
+	}
+	var request struct {
+		Reason string `json:"reason"`
+	}
+	if err := decodeJSON(r, &request); err != nil || len(strings.TrimSpace(request.Reason)) < 2 || len(request.Reason) > 500 {
+		writeAPIError(w, http.StatusBadRequest, "invalid_reason", "请输入 2 至 500 字的驳回原因")
+		return
+	}
+	if err := s.services.Merchants.RejectApplication(r.Context(), id, session.UserID, strings.TrimSpace(request.Reason)); err != nil {
+		s.writeMerchantStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"application_id": id, "status": "rejected"}})
 }
 
 func (s *server) adminRejectReview(w http.ResponseWriter, r *http.Request) {
@@ -595,19 +641,16 @@ func (s *server) adminUserMerchantStatus(w http.ResponseWriter, r *http.Request)
 }
 
 type merchantChannelRequest struct {
-	ChannelName      string `json:"channel_name"`
-	CanonicalModelID int64  `json:"canonical_model_id"`
-	TestReceipt      string `json:"test_receipt"`
-	ChannelType      string `json:"channel_type"`
-	BaseURL          string `json:"base_url"`
-	APIKey           string `json:"api_key"`
+	ChannelName string `json:"channel_name"`
+	Provider    string `json:"provider"`
+	BaseURL     string `json:"base_url"`
+	APIKey      string `json:"api_key"`
 }
 
 type merchantSubmissionRequest struct {
 	DisplayName         string `json:"display_name"`
 	WebsiteURL          string `json:"website_url"`
 	BusinessDescription string `json:"business_description"`
-	merchantChannelRequest
 }
 
 type merchantDisplayName struct {
@@ -641,56 +684,26 @@ func (s *server) buildApplicationCommand(userID int, request merchantSubmissionR
 		return CreateMerchantApplication{}, err
 	}
 	description := strings.TrimSpace(request.BusinessDescription)
-	if len(description) < 10 || len(description) > 2000 {
+	if len([]rune(description)) < 10 || len([]rune(description)) > 2000 {
 		return CreateMerchantApplication{}, errors.New("业务说明需为 10 至 2000 字")
 	}
 	website, err := normalizePublicHTTPSURL(request.WebsiteURL, false)
 	if err != nil {
 		return CreateMerchantApplication{}, errors.New("网站地址必须是公开 HTTPS 地址")
 	}
-	channel, err := s.buildChannelSubmission(request.ChannelName, request.CanonicalModelID, request.BaseURL, request.APIKey, request.TestReceipt)
-	if err != nil {
-		return CreateMerchantApplication{}, err
-	}
-	return CreateMerchantApplication{UserID: userID, DisplayName: displayName.Value, DisplayNameKey: displayName.Key, WebsiteURL: website, BusinessDescription: description, Channel: channel}, nil
+	return CreateMerchantApplication{UserID: userID, DisplayName: displayName.Value, DisplayNameKey: displayName.Key, WebsiteURL: website, BusinessDescription: description}, nil
 }
 
-func (s *server) buildChannelSubmission(name string, canonicalModelID int64, baseURL string, apiKey string, testReceipt string) (ChannelSubmission, error) {
-	name = strings.TrimSpace(name)
-	testReceipt = strings.TrimSpace(testReceipt)
-	credential := []byte(strings.TrimSpace(apiKey))
-	if len(name) < 2 || len(name) > 100 {
-		return ChannelSubmission{}, errors.New("渠道名称需为 2 至 100 字")
-	}
-	if canonicalModelID <= 0 || len(testReceipt) < 16 || len(testReceipt) > 256 {
-		return ChannelSubmission{}, errors.New("必须选择模型并先完成渠道检测")
-	}
-	normalizedBase, err := normalizePublicHTTPSURL(baseURL, false)
-	if err != nil {
-		return ChannelSubmission{}, errors.New("基础地址必须是公开 HTTPS 地址")
-	}
-	if len(credential) < 8 || len(credential) > 65536 {
-		return ChannelSubmission{}, errors.New("API 密钥长度无效")
-	}
-	ciphertext, err := s.services.Credentials.Encrypt(credential)
-	if err != nil {
-		zeroBytes(credential)
-		return ChannelSubmission{}, errors.New("加密渠道凭据失败")
-	}
-	fingerprint := s.services.Credentials.Fingerprint(credential)
-	zeroBytes(credential)
-	return ChannelSubmission{
-		ChannelName: name, CanonicalModelID: canonicalModelID, TestReceipt: testReceipt,
-		BaseURL: normalizedBase, EncryptedCredential: ciphertext, CredentialFingerprint: fingerprint,
-	}, nil
-}
-
-func (s *server) buildMultiModelSubmission(r *http.Request, session platformauth.Session, name, channelType, baseURL, apiKey string) (ChannelSubmission, error) {
+func (s *server) buildMultiModelSubmission(r *http.Request, session platformauth.Session, name, provider, baseURL, apiKey string) (ChannelSubmission, error) {
 	name = strings.TrimSpace(name)
 	if len(name) < 2 || len(name) > 100 {
 		return ChannelSubmission{}, errors.New("渠道名称需为 2 至 100 字")
 	}
-	models, numericType, err := s.fetchAndMatchChannelModels(r, session, channelType, baseURL, apiKey)
+	provider, err := normalizeChannelProvider(provider)
+	if err != nil {
+		return ChannelSubmission{}, err
+	}
+	models, numericType, err := s.fetchAndMatchChannelModels(r, session, provider, baseURL, apiKey)
 	if err != nil {
 		return ChannelSubmission{}, err
 	}
@@ -702,7 +715,7 @@ func (s *server) buildMultiModelSubmission(r *http.Request, session platformauth
 	}
 	fingerprint := s.services.Credentials.Fingerprint(credential)
 	zeroBytes(credential)
-	return ChannelSubmission{ChannelName: name, ChannelType: numericType, AdapterType: adapterForChannelType(numericType), BaseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"), UpstreamModels: models, EncryptedCredential: ciphertext, CredentialFingerprint: fingerprint}, nil
+	return ChannelSubmission{ChannelName: name, Provider: provider, ChannelType: numericType, AdapterType: adapterForChannelType(numericType), BaseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"), UpstreamModels: models, EncryptedCredential: ciphertext, CredentialFingerprint: fingerprint}, nil
 }
 
 func (s *server) requireAdminApplication(w http.ResponseWriter, r *http.Request) (MerchantApplication, bool) {

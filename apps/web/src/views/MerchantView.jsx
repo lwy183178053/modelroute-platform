@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BadgeDollarSign, CloudCog, HeartPulse, Landmark, LayoutDashboard,
-  Plus, ServerCog, WalletCards, Waypoints, FileText,
+  Plus, ServerCog, Settings2, WalletCards, Waypoints, FileText,
 } from 'lucide-react';
 import { apiRequest, formatCompactCount, formatLastCalled, formatQuota, getQuotaPerUnit } from '../api';
-import { ActionMenu, Button, InlineNotice, Metric, PageHeader, Pagination, Section, Select, Status } from '../ui';
+import { ActionMenu, Button, Field, InlineNotice, Metric, PageHeader, Pagination, Section, Select, Status, TextInput } from '../ui';
 import { UsageLogTable, useUsage } from './UsagePanels';
 
 const statusNames = {
@@ -22,6 +22,7 @@ const merchantSections = [
   { id: 'offers', label: '上架模型', icon: BadgeDollarSign },
   { id: 'usage', label: '调用记录', icon: FileText },
   { id: 'withdrawals', label: '提现记录', icon: Landmark },
+  { id: 'settings', label: '商户设置', icon: Settings2 },
 ];
 
 function formatAvailability(value) {
@@ -79,6 +80,9 @@ export default function MerchantView({ account, openModal }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busyChannel, setBusyChannel] = useState(0);
+  const [businessDescription, setBusinessDescription] = useState('');
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMessage, setProfileMessage] = useState('');
 
   const usageEndpoint = useMemo(() => {
     const query = new URLSearchParams({ p: String(usagePage), page_size: String(usagePageSize) });
@@ -94,12 +98,13 @@ export default function MerchantView({ account, openModal }) {
       const financeRequests = account?.is_merchant || Number(account?.role) >= 10
         ? [apiRequest('/api/merchant/balance'), apiRequest(`/api/merchant/withdrawals?p=${withdrawalPage}&page_size=${withdrawalPageSize}`)]
         : [Promise.resolve(null), Promise.resolve(null)];
-      const [channelData, modelData, offerData, balanceData, withdrawalData] = await Promise.all([
-        apiRequest('/api/merchant/channels'), apiRequest('/api/models'), apiRequest('/api/merchant/offers'), ...financeRequests,
+      const [channelData, profileData, modelData, offerData, balanceData, withdrawalData] = await Promise.all([
+        apiRequest('/api/merchant/channels'), apiRequest('/api/merchant/profile'), apiRequest('/api/models'), apiRequest('/api/merchant/offers'), ...financeRequests,
       ]);
       setChannels(channelData?.items || []);
       setReviews(channelData?.reviews || []);
-      setMerchant(channelData?.merchant || null);
+      setMerchant(profileData || channelData?.merchant || null);
+      setBusinessDescription(profileData?.business_description || '');
       setModels(modelData || []);
       setOffers(offerData || []);
       setBalance(balanceData || null);
@@ -152,6 +157,25 @@ export default function MerchantView({ account, openModal }) {
     try { await apiRequest(`/api/merchant/offers/${model.id}`, { method: 'DELETE' }); await load(); }
     catch (requestError) { setError(requestError.message || '删除上架模型失败'); }
   };
+  const saveProfile = async () => {
+    const description = businessDescription.trim();
+    if (description.length < 10 || description.length > 2000) {
+      setProfileMessage('商户介绍需为 10 至 2000 字');
+      return;
+    }
+    setProfileSaving(true);
+    setProfileMessage('');
+    try {
+      const profile = await apiRequest('/api/merchant/profile', { method: 'PUT', body: { business_description: description } });
+      setMerchant(profile);
+      setBusinessDescription(profile.business_description || '');
+      setProfileMessage('商户介绍已保存');
+    } catch (requestError) {
+      setProfileMessage(requestError.message || '保存商户介绍失败');
+    } finally {
+      setProfileSaving(false);
+    }
+  };
 
   const activeCount = channels.filter((channel) => channel.status === 'active').length;
   const pendingCount = reviews.filter((review) => ['pending', 'verifying', 'verified', 'approving'].includes(review.status)).length;
@@ -159,10 +183,11 @@ export default function MerchantView({ account, openModal }) {
   const healthyChannels = offers.flatMap((offer) => offer.channels || []).filter((channel) => channel.health_state === 'healthy').length;
   const canSubmit = Boolean(account?.is_merchant || Number(account?.role) >= 10);
   const lifecycleRows = channelLifecycleRows(reviews, channels);
+  const merchantName = merchant?.display_name || merchant?.merchant_name || '';
 
   return (
     <div className="view-shell merchant-view">
-      <PageHeader eyebrow={`商户中心 · 用户 ID ${account.id}`} title="商户经营概览" description="管理渠道、上架模型、调用收入和人工提现。" actions={merchant && <span className="merchant-name-badge" title={merchant.merchant_name}>{merchant.merchant_name}</span>} />
+      <PageHeader eyebrow={`商户中心 · 用户 ID ${account.id}`} title="商户经营概览" description="管理渠道、上架模型、调用收入和人工提现。" actions={merchantName && <span className="merchant-name-badge" title={merchantName}>{merchantName}</span>} />
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}
       {!error && !loading && !canSubmit && <InlineNotice tone="warning">当前商户资料尚未就绪</InlineNotice>}
 
@@ -187,11 +212,11 @@ export default function MerchantView({ account, openModal }) {
             </div>
           </>}
 
-          {section === 'channels' && <Section title="渠道管理" description="审核中、已审核、不通过和已下架渠道统一展示" actions={canSubmit && <Button icon={Plus} variant="primary" onClick={() => openModal({ type: 'channel', models: models.filter((model) => model.status === 'active'), onSaved: load })}>提交新渠道</Button>}>
-            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>渠道</th><th>模型</th><th>基础地址</th><th>状态</th><th>结果</th><th>操作</th></tr></thead><tbody>
-              {lifecycleRows.map((item) => <tr key={`${item.kind}-${item.id}`}><td><code>{item.id}</code></td><td><strong>{item.channel_name}</strong>{item.kind === 'channel' && <small>密钥 {item.credential_fingerprint || '-'}</small>}</td><td>{item.kind === 'review' && item.models?.length ? item.models.map((binding) => <span className="tag" key={binding.id}>{binding.upstream_model_name}</span>) : item.matched_models?.length ? item.matched_models.map((model) => <span className="tag" key={model}>{model}</span>) : (item.model || '-')}</td><td><code>{item.base_url}</code></td><td><Status>{item.kind === 'channel' && item.status === 'disabled' ? '已下架' : statusNames[item.status] || item.status}</Status></td><td>{item.verification_error || item.review_reason || '-'}</td><td>{item.kind === 'channel' ? <ActionMenu items={[{ label: '同步模型', disabled: busyChannel === item.id, onClick: () => syncChannel(item) }, { label: item.status === 'active' ? '下架' : '重新启用', disabled: busyChannel === item.id || item.status === 'archived', onClick: () => toggleChannel(item) }, { label: '删除', danger: true, disabled: busyChannel === item.id, onClick: () => deleteChannel(item) }]} /> : <ActionMenu items={[['pending', 'verified'].includes(item.status) && { label: '撤销审核', onClick: () => deleteReview(item) }, item.status === 'rejected' && { label: '删除记录', danger: true, onClick: () => deleteReview(item) }]} />}</td></tr>)}
-              {!loading && lifecycleRows.length === 0 && <tr><td className="table-message" colSpan="7">暂无渠道</td></tr>}
-              {loading && <tr><td className="table-message" colSpan="7">正在读取渠道</td></tr>}
+          {section === 'channels' && <Section title="渠道管理" description="审核中、已审核、不通过和已下架渠道统一展示" actions={canSubmit && <Button icon={Plus} variant="primary" onClick={() => openModal({ type: 'channel', onSaved: load })}>提交新渠道</Button>}>
+            <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>渠道</th><th>厂商</th><th>模型</th><th>基础地址</th><th>状态</th><th>结果</th><th>操作</th></tr></thead><tbody>
+              {lifecycleRows.map((item) => <tr key={`${item.kind}-${item.id}`}><td><code>{item.id}</code></td><td><strong>{item.channel_name}</strong>{item.kind === 'channel' && <small>密钥 {item.credential_fingerprint || '-'}</small>}</td><td>{item.provider || '-'}</td><td>{item.kind === 'review' && item.models?.length ? item.models.map((binding) => <span className="tag" key={binding.id}>{binding.upstream_model_name}</span>) : item.matched_models?.length ? item.matched_models.map((model) => <span className="tag" key={model}>{model}</span>) : (item.model || '-')}</td><td><code>{item.base_url}</code></td><td><Status>{item.kind === 'channel' && item.status === 'disabled' ? '已下架' : statusNames[item.status] || item.status}</Status></td><td>{item.verification_error || item.review_reason || '-'}</td><td>{item.kind === 'channel' ? <ActionMenu items={[{ label: '同步模型', disabled: busyChannel === item.id, onClick: () => syncChannel(item) }, { label: item.status === 'active' ? '下架' : '重新启用', disabled: busyChannel === item.id || item.status === 'archived', onClick: () => toggleChannel(item) }, { label: '删除', danger: true, disabled: busyChannel === item.id, onClick: () => deleteChannel(item) }]} /> : <ActionMenu items={[['pending', 'verified'].includes(item.status) && { label: '撤销审核', onClick: () => deleteReview(item) }, item.status === 'rejected' && { label: '删除记录', danger: true, onClick: () => deleteReview(item) }]} />}</td></tr>)}
+              {!loading && lifecycleRows.length === 0 && <tr><td className="table-message" colSpan="8">暂无渠道</td></tr>}
+              {loading && <tr><td className="table-message" colSpan="8">正在读取渠道</td></tr>}
             </tbody></table></div>
           </Section>}
 
@@ -211,6 +236,17 @@ export default function MerchantView({ account, openModal }) {
               {!loading && withdrawals.length === 0 && <tr><td className="table-message" colSpan="8">暂无提现申请</td></tr>}
             </tbody></table></div>
             <Pagination page={withdrawalPage} pageSize={withdrawalPageSize} total={withdrawalTotal} onPageChange={setWithdrawalPage} onPageSizeChange={(nextPageSize) => { setWithdrawalPageSize(nextPageSize); setWithdrawalPage(1); }} />
+          </Section>}
+
+          {section === 'settings' && <Section title="商户设置" description="商户名称和网站由审核资料确定，当前仅允许修改商户介绍。" actions={<Button disabled={profileSaving} icon={Settings2} onClick={saveProfile} variant="primary">{profileSaving ? '保存中' : '保存介绍'}</Button>}>
+            <div className="merchant-settings-form">
+              <div className="form-grid two-column">
+                <Field label="商户名称"><TextInput readOnly value={merchant?.display_name || ''} /></Field>
+                <Field label="商户网站"><TextInput readOnly value={merchant?.website_url || ''} /></Field>
+              </div>
+              <Field label="商户介绍" hint={`${businessDescription.length}/2000 字`}><textarea className="textarea" maxLength="2000" onChange={(event) => { setBusinessDescription(event.target.value); setProfileMessage(''); }} rows="7" value={businessDescription} /></Field>
+              {profileMessage && <InlineNotice tone={profileMessage === '商户介绍已保存' ? 'success' : 'warning'}>{profileMessage}</InlineNotice>}
+            </div>
           </Section>}
         </div>
       </div>

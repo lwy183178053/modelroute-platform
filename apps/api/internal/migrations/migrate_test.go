@@ -10,8 +10,8 @@ func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Files() 返回错误：%v", err)
 	}
-	if len(files) != 8 {
-		t.Fatalf("V2 必须包含八份连续迁移，实际 = %d", len(files))
+	if len(files) != 10 {
+		t.Fatalf("V2 必须包含十份连续迁移，实际 = %d", len(files))
 	}
 	file := files[0]
 	if file.Version != 1 || file.Name != "000001_v2_baseline.sql" {
@@ -137,5 +137,19 @@ func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
 		if !strings.Contains(files[7].SQL, fragment) {
 			t.Fatalf("提现税率迁移缺少 %q", fragment)
 		}
+	}
+	if !strings.Contains(files[9].SQL, "ADD COLUMN provider varchar(32)") {
+		t.Fatal("渠道厂商迁移缺少 provider 字段")
+	}
+	for _, provider := range []string{"OpenAI", "Anthropic", "Gemini", "DeepSeek", "Qwen", "Moonshot"} {
+		if !strings.Contains(files[9].SQL, provider) {
+			t.Fatalf("渠道厂商迁移缺少厂商 %q", provider)
+		}
+	}
+	if !strings.Contains(files[8].SQL, "business_description") {
+		t.Fatal("商户资料迁移缺少商户介绍字段")
+	}
+	if !strings.Contains(files[9].SQL, "TRUNCATE TABLE merchant_channel_reviews, merchant_channels") {
+		t.Fatal("渠道厂商迁移未按开发约定清理旧渠道数据")
 	}
 }

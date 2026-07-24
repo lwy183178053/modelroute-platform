@@ -163,11 +163,15 @@ func TestTextModelUsesTheSameRouteForChatAndResponses(t *testing.T) {
 	}
 }
 
-func TestImageModelRejectsTextEndpoints(t *testing.T) {
+func TestCoreServiceDecidesWhetherModelSupportsEndpoint(t *testing.T) {
 	for _, path := range []string{"/v1/chat/completions", "/v1/responses"} {
 		t.Run(path, func(t *testing.T) {
 			upstreamCalls := 0
-			services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { upstreamCalls++ }))
+			services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				upstreamCalls++
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":{"code":"unsupported_model_protocol"}}`))
+			}))
 			services.Credentials = testCredentialBox(t)
 			services.Routing = &routeRepositoryStub{selection: RouteSelection{
 				TokenBindingID: 81, PolicyID: 91, CanonicalModelID: 61, Priority: "balanced", PriceKind: "image",
@@ -178,14 +182,14 @@ func TestImageModelRejectsTextEndpoints(t *testing.T) {
 			request.Header.Set("Authorization", "Bearer sk-user-route")
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
-			if response.Code != http.StatusBadRequest || upstreamCalls != 0 || !strings.Contains(response.Body.String(), `"code":"unsupported_model_protocol"`) {
+			if response.Code != http.StatusBadRequest || upstreamCalls != 1 || !strings.Contains(response.Body.String(), `"code":"unsupported_model_protocol"`) {
 				t.Fatalf("响应=%d %s，上游调用=%d", response.Code, response.Body.String(), upstreamCalls)
 			}
 		})
 	}
 }
 
-func TestImageProxyRejectsUnpricedCombinationAndInvalidCountBeforeUpstream(t *testing.T) {
+func TestImageRequestValidationIsDelegatedToCoreService(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		body string
@@ -196,7 +200,11 @@ func TestImageProxyRejectsUnpricedCombinationAndInvalidCountBeforeUpstream(t *te
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			upstreamCalls := 0
-			services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { upstreamCalls++ }))
+			services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				upstreamCalls++
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":{"code":"invalid_request_error"}}`))
+			}))
 			services.Credentials = testCredentialBox(t)
 			repository := &routeRepositoryStub{
 				selection:   RouteSelection{TokenBindingID: 81, PolicyID: 91, CanonicalModelID: 61, Priority: "price", PriceKind: "image", Candidates: []RouteCandidate{{OfferID: 1, OfferChannelAliasID: 101, MerchantChannelID: 51, CanonicalModelID: 61, InternalAlias: "mkt-ov-image"}}},
@@ -208,7 +216,7 @@ func TestImageProxyRejectsUnpricedCombinationAndInvalidCountBeforeUpstream(t *te
 			request.Header.Set("Authorization", "Bearer sk-user-route")
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
-			if response.Code != http.StatusBadRequest || upstreamCalls != 0 || len(repository.started) != 0 || !strings.Contains(response.Body.String(), `"code":"invalid_request_error"`) {
+			if response.Code != http.StatusBadRequest || upstreamCalls != 1 || len(repository.started) != 1 || !strings.Contains(response.Body.String(), `"code":"invalid_request_error"`) {
 				t.Fatalf("响应=%d %s，上游调用=%d，路由记录=%+v", response.Code, response.Body.String(), upstreamCalls, repository.started)
 			}
 		})

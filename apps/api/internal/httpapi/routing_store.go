@@ -41,12 +41,12 @@ type CreateCanonicalModelCommand struct {
 }
 
 type CanonicalModel struct {
-	ID          int64         `json:"id"`
-	PublicName  string        `json:"public_name"`
-	Provider    string        `json:"provider"`
-	Status      string        `json:"status"`
-	Price       OfficialPrice `json:"price"`
-	CreatedAt   time.Time     `json:"created_at,omitempty"`
+	ID         int64         `json:"id"`
+	PublicName string        `json:"public_name"`
+	Provider   string        `json:"provider"`
+	Status     string        `json:"status"`
+	Price      OfficialPrice `json:"price"`
+	CreatedAt  time.Time     `json:"created_at,omitempty"`
 }
 
 type RoutingRepository interface {
@@ -187,11 +187,28 @@ type RouteObservation struct {
 }
 
 type RoutingPolicyInput struct {
-	Name                 string  `json:"name"`
-	Priority             string  `json:"priority"`
-	MinimumMultiplierBPS int     `json:"minimum_multiplier_bps"`
-	MaximumMultiplierBPS int     `json:"maximum_multiplier_bps"`
-	MinimumCacheHitPPM   *int    `json:"minimum_cache_hit_ppm"`
+	Name                 string `json:"name"`
+	Priority             string `json:"priority"`
+	MinimumMultiplierBPS int    `json:"minimum_multiplier_bps"`
+	MaximumMultiplierBPS int    `json:"maximum_multiplier_bps"`
+	MinimumCacheHitPPM   *int   `json:"minimum_cache_hit_ppm"`
+}
+
+type RoutingPreviewInput struct {
+	CanonicalModelID     int64 `json:"canonical_model_id"`
+	MinimumMultiplierBPS int   `json:"minimum_multiplier_bps"`
+	MaximumMultiplierBPS int   `json:"maximum_multiplier_bps"`
+	MinimumCacheHitPPM   *int  `json:"minimum_cache_hit_ppm"`
+}
+
+type RoutingPreview struct {
+	CanonicalModelID       int64 `json:"canonical_model_id"`
+	AvailableMerchantCount int   `json:"available_merchant_count"`
+	AvailableChannelCount  int   `json:"available_channel_count"`
+}
+
+type RoutingPreviewRepository interface {
+	PreviewRoute(context.Context, RoutingPreviewInput) (RoutingPreview, error)
 }
 
 type RoutingPolicy struct {
@@ -961,6 +978,81 @@ WHERE newapi_user_id = $1 AND newapi_token_id = $2
 		return fmt.Errorf("撤销令牌路由绑定：%w", err)
 	}
 	return nil
+}
+
+func (s *SQLRoutingStore) PreviewRoute(ctx context.Context, input RoutingPreviewInput) (RoutingPreview, error) {
+	if validateRoutingPreviewInput(input) != nil {
+		return RoutingPreview{}, ErrRoutingInvalidState
+	}
+	var priceKind string
+	err := s.database.QueryRowContext(ctx, `
+SELECT price.price_kind
+FROM canonical_models model
+JOIN official_price_versions price ON price.id = model.current_official_price_version_id
+WHERE model.id = $1 AND model.status = 'active'
+`, input.CanonicalModelID).Scan(&priceKind)
+	if errors.Is(err, sql.ErrNoRows) {
+		return RoutingPreview{}, ErrRoutingNotFound
+	}
+	if err != nil {
+		return RoutingPreview{}, fmt.Errorf("读取预览模型：%w", err)
+	}
+
+	rows, err := s.database.QueryContext(ctx, `
+WITH merchant_metrics AS (
+    SELECT channel.merchant_profile_id, snapshot.canonical_model_id,
+           sum(snapshot.prompt_tokens) AS prompt_tokens,
+           CASE WHEN sum(snapshot.prompt_tokens) = 0 THEN 0
+                ELSE LEAST(1000000, (sum(snapshot.cache_tokens) * 1000000 / sum(snapshot.prompt_tokens))::integer) END AS cache_hit_ppm,
+           sum(snapshot.prompt_tokens) >= 1000000 AS cache_weight_ready
+    FROM route_metric_snapshots snapshot
+    JOIN merchant_channels channel ON channel.id = snapshot.merchant_channel_id AND channel.status = 'active'
+    GROUP BY channel.merchant_profile_id, snapshot.canonical_model_id
+)
+SELECT merchant.id, channel.id,
+       COALESCE(metric.cache_hit_ppm, 0), COALESCE(metric.cache_weight_ready, false)
+FROM canonical_models model
+JOIN offer_versions offer ON offer.canonical_model_id = model.id AND offer.status = 'active'
+JOIN offer_channel_aliases alias ON alias.offer_version_id = offer.id
+JOIN merchant_channels channel ON channel.id = alias.merchant_channel_id AND channel.status = 'active'
+JOIN merchant_profiles merchant ON merchant.id = channel.merchant_profile_id AND merchant.status = 'active'
+JOIN channel_health health ON health.merchant_channel_id = channel.id
+LEFT JOIN merchant_metrics metric
+    ON metric.merchant_profile_id = merchant.id AND metric.canonical_model_id = model.id
+WHERE model.id = $1 AND model.status = 'active'
+  AND (channel.canonical_model_id = $1 OR EXISTS (
+      SELECT 1 FROM merchant_channel_model_bindings binding
+      WHERE binding.merchant_channel_id = channel.id
+        AND binding.canonical_model_id = $1 AND binding.match_status = 'matched'
+  ))
+  AND offer.multiplier_bps BETWEEN $2 AND $3
+  AND health.state IN ('healthy', 'degraded')
+`, input.CanonicalModelID, input.MinimumMultiplierBPS, input.MaximumMultiplierBPS)
+	if err != nil {
+		return RoutingPreview{}, fmt.Errorf("查询路由预览候选：%w", err)
+	}
+	defer rows.Close()
+	merchants := map[int64]struct{}{}
+	channels := map[int64]struct{}{}
+	selection := RouteSelection{PriceKind: priceKind, MinimumCacheHitPPM: input.MinimumCacheHitPPM}
+	for rows.Next() {
+		var merchantID, channelID int64
+		var candidate RouteCandidate
+		if err := rows.Scan(&merchantID, &channelID, &candidate.MerchantCacheHitPPM, &candidate.MerchantCacheWeightReady); err != nil {
+			return RoutingPreview{}, fmt.Errorf("解析路由预览候选：%w", err)
+		}
+		if !routeCandidateMeetsCacheFloor(selection, candidate) {
+			continue
+		}
+		merchants[merchantID] = struct{}{}
+		channels[channelID] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return RoutingPreview{}, fmt.Errorf("遍历路由预览候选：%w", err)
+	}
+	return RoutingPreview{
+		CanonicalModelID: input.CanonicalModelID, AvailableMerchantCount: len(merchants), AvailableChannelCount: len(channels),
+	}, nil
 }
 
 func (s *SQLRoutingStore) ResolveRoute(ctx context.Context, fingerprint string, publicModel string) (RouteSelection, error) {

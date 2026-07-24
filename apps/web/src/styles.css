@@ -294,7 +294,16 @@ main { min-height: calc(100vh - 66px); }
 .priority-options label:last-child { grid-column: 1 / -1; }
 .cache-floor-setting { padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-soft); }
 .cache-floor-setting .toggle-line { margin-top: 0; background: white; }
+.route-preview-section { padding-top: 16px; border-top: 1px solid var(--line); }
+.route-preview-stats { margin-top: 12px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.route-preview-stats > div { min-height: 58px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-soft); display: grid; align-content: center; gap: 3px; }
+.route-preview-stats span, .route-preview-loading { color: var(--muted); font-size: 10px; }
+.route-preview-stats strong { font-size: 18px; line-height: 24px; }
+.route-preview-loading { min-height: 34px; padding-top: 10px; }
 .merchant-name-badge { max-width: min(240px, 42vw); padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-soft); color: var(--teal-dark); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.merchant-description-cell { min-width: 240px; max-width: 420px; white-space: normal !important; line-height: 18px; }
+.merchant-settings-form { margin: 0 !important; padding: 18px; display: grid; gap: 16px; }
+.merchant-settings-form .input:read-only { background: var(--surface-soft); color: var(--muted); }
 .merchant-checks { display: grid; gap: 7px; }.merchant-checks label { min-height: 50px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 6px; display: flex; align-items: center; gap: 10px; }.merchant-checks input { accent-color: var(--teal); }.merchant-checks span { display: grid; gap: 2px; }.merchant-checks small { color: var(--muted); font-size: 9px; }
 .quote-summary { margin-bottom: 16px; border: 1px solid var(--line); border-radius: 6px; display: grid; grid-template-columns: repeat(3, 1fr); }.quote-summary div { min-height: 64px; padding: 10px; border-right: 1px solid var(--line); display: grid; align-content: center; gap: 4px; }.quote-summary div:last-child { border-right: 0; }.quote-summary span { color: var(--muted); font-size: 9px; }.quote-summary strong { font-size: 12px; }
 .withdrawal-summary { margin: 14px 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }

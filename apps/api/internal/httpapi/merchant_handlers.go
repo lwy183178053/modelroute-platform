@@ -520,10 +520,6 @@ func (s *server) adminApproveReviewID(w http.ResponseWriter, r *http.Request, re
 		s.writeMerchantStoreError(w, err)
 		return
 	}
-	if err := repository.PromoteReviewModels(r.Context(), reviewID, approval.ChannelID); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "merchant_store_error", "保存正式渠道模型失败")
-		return
-	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": approval})
 }
 

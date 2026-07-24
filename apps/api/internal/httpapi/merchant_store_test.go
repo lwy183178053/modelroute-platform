@@ -274,6 +274,9 @@ func TestSQLMerchantStoreFinalApprovalClearsCredentialAndCreatesOwnership(t *tes
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO merchant_channels")).WithArgs(int64(31), int64(21), int64(61), 41, "OpenAI", "主线路", "https://api.merchant.example", "openai_compatible", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(51))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO channel_health")).WithArgs(int64(51)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("(?s)INSERT INTO merchant_channel_model_bindings.*WHERE review_id = \\$2.*match_status = 'matched'.*test_status = 'passed'").
+		WithArgs(int64(51), int64(21)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE merchant_channel_reviews")).WithArgs(1, int64(21), int64(31)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE merchant_applications")).WithArgs(1, int64(11)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE merchant_name_reservations")).WithArgs(int64(31), int64(11)).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -284,24 +287,6 @@ func TestSQLMerchantStoreFinalApprovalClearsCredentialAndCreatesOwnership(t *tes
 	}
 	if approval.MerchantID != 31 || approval.ChannelID != 51 || approval.NewAPIChannelID != 41 || approval.UserID != 7 {
 		t.Fatalf("审批结果=%+v", approval)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestSQLMerchantStorePromotesOnlyPassedMatchedModels(t *testing.T) {
-	database, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer database.Close()
-	store := NewSQLMerchantStore(database)
-	mock.ExpectExec("(?s)INSERT INTO merchant_channel_model_bindings.*WHERE review_id = \\$2.*match_status = 'matched'.*test_status = 'passed'").
-		WithArgs(int64(51), int64(21)).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	if err := store.PromoteReviewModels(context.Background(), 21, 51); err != nil {
-		t.Fatalf("提升审核模型失败：%v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

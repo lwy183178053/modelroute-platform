@@ -23,10 +23,11 @@ type Dependencies struct {
 }
 
 type server struct {
-	version      string
-	dependencies Dependencies
-	services     Services
-	readiness    readinessCache
+	version       string
+	dependencies  Dependencies
+	services      Services
+	readiness     readinessCache
+	keyCreationMu sync.Mutex
 }
 
 const readinessCacheDuration = time.Second

@@ -2,11 +2,14 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 type routingRepositoryStub struct {
@@ -638,6 +641,77 @@ func TestCreateKeyDeletesNewTokenWhenRouteBindingFails(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusConflict || !deleted {
 		t.Fatalf("绑定失败补偿响应=%d %s deleted=%v", response.Code, response.Body.String(), deleted)
+	}
+}
+
+func TestConcurrentKeyCreationSerializesCoreTokenDiscovery(t *testing.T) {
+	var mu sync.Mutex
+	activeCreates := 0
+	maximumActiveCreates := 0
+	nextTokenID := 8
+	tokenIDs := make([]int, 0, 2)
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/token/":
+			mu.Lock()
+			items := make([]map[string]any, 0, len(tokenIDs))
+			for index := len(tokenIDs) - 1; index >= 0; index-- {
+				items = append(items, map[string]any{"id": tokenIDs[index], "name": fmt.Sprintf("密钥-%d", tokenIDs[index])})
+			}
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{"items": items, "total": len(items)}})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/token/":
+			mu.Lock()
+			activeCreates++
+			if activeCreates > maximumActiveCreates {
+				maximumActiveCreates = activeCreates
+			}
+			mu.Unlock()
+			time.Sleep(150 * time.Millisecond)
+			mu.Lock()
+			nextTokenID++
+			tokenIDs = append(tokenIDs, nextTokenID)
+			activeCreates--
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": nil})
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/token/") && strings.HasSuffix(r.URL.Path, "/key"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{"key": "sk-concurrent-key"}})
+		default:
+			t.Fatalf("未知核心调用=%s %s", r.Method, r.URL.RequestURI())
+		}
+	}))
+	repository := &routingRepositoryStub{}
+	repository.createTokenBinding = func(_ context.Context, userID int, tokenID int, _ string, provider string, _ []int64) (TokenRoutingBinding, error) {
+		return TokenRoutingBinding{TokenID: tokenID, Provider: provider}, nil
+	}
+	services.Routing = repository
+	services.Credentials = testCredentialBox(t)
+	sessionToken := createPlatformSession(t, services, 7, 1)
+	handler := NewServerWithServices("test", Dependencies{}, services)
+
+	responses := make(chan *httptest.ResponseRecorder, 2)
+	var requests sync.WaitGroup
+	for index := 0; index < 2; index++ {
+		requests.Add(1)
+		go func(index int) {
+			defer requests.Done()
+			request := httptest.NewRequest(http.MethodPost, "/api/keys", strings.NewReader(fmt.Sprintf(`{"name":"并发密钥 %d","expired_time":-1,"unlimited_quota":true,"provider":"OpenAI","routing_policy_ids":[]}`, index)))
+			request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
+			request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: sessionToken})
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			responses <- response
+		}(index)
+	}
+	requests.Wait()
+	close(responses)
+	for response := range responses {
+		if response.Code != http.StatusOK {
+			t.Fatalf("并发创建响应=%d %s", response.Code, response.Body.String())
+		}
+	}
+	if maximumActiveCreates != 1 {
+		t.Fatalf("核心并发创建数=%d，期望平台串行创建并识别密钥", maximumActiveCreates)
 	}
 }
 

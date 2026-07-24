@@ -80,6 +80,8 @@ func (s *server) createKey(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusServiceUnavailable, "routing_unavailable", "路由服务正在初始化")
 		return
 	}
+	s.keyCreationMu.Lock()
+	defer s.keyCreationMu.Unlock()
 	tokenIDsBefore, err := s.userTokenIDs(r, session)
 	if err != nil {
 		writeUpstreamError(w, err, http.StatusBadGateway)

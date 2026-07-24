@@ -462,20 +462,6 @@ SET canonical_model_id = EXCLUDED.canonical_model_id, match_status = EXCLUDED.ma
 	return tx.Commit()
 }
 
-func (s *SQLMerchantStore) PromoteReviewModels(ctx context.Context, reviewID int64, channelID int64) error {
-	_, err := s.database.ExecContext(ctx, `
-INSERT INTO merchant_channel_model_bindings
-    (merchant_channel_id, upstream_model_name, canonical_model_id, match_status)
-SELECT $1, upstream_model_name, canonical_model_id, match_status
-FROM merchant_review_model_bindings
-WHERE review_id = $2 AND match_status = 'matched' AND test_status = 'passed'
-ON CONFLICT (merchant_channel_id, upstream_model_name) DO UPDATE
-SET canonical_model_id = EXCLUDED.canonical_model_id, match_status = EXCLUDED.match_status,
-    last_synced_at = now(), updated_at = now()
-`, channelID, reviewID)
-	return err
-}
-
 func (s *SQLMerchantStore) ReviewModels(ctx context.Context, reviewID int64) ([]ReviewModelBinding, error) {
 	rows, err := s.database.QueryContext(ctx, `SELECT id, review_id, upstream_model_name, COALESCE(canonical_model_id, 0), match_status, test_status, COALESCE(tested_by_newapi_user_id, 0), tested_at, COALESCE(test_latency_ms, 0), COALESCE(test_error, '') FROM merchant_review_model_bindings WHERE review_id = $1 ORDER BY id`, reviewID)
 	if err != nil {
@@ -862,6 +848,18 @@ RETURNING id
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO channel_health (merchant_channel_id) VALUES ($1)`, channelID); err != nil {
 		return MerchantApproval{}, fmt.Errorf("初始化渠道健康状态：%w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO merchant_channel_model_bindings
+    (merchant_channel_id, upstream_model_name, canonical_model_id, match_status)
+SELECT $1, upstream_model_name, canonical_model_id, match_status
+FROM merchant_review_model_bindings
+WHERE review_id = $2 AND match_status = 'matched' AND test_status = 'passed'
+ON CONFLICT (merchant_channel_id, upstream_model_name) DO UPDATE
+SET canonical_model_id = EXCLUDED.canonical_model_id, match_status = EXCLUDED.match_status,
+    last_synced_at = now(), updated_at = now()
+`, channelID, review.ID); err != nil {
+		return MerchantApproval{}, fmt.Errorf("保存正式渠道模型：%w", err)
 	}
 	result, err := tx.ExecContext(ctx, `
 UPDATE merchant_channel_reviews

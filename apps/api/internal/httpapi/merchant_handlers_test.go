@@ -106,9 +106,8 @@ type merchantRepositoryStub struct {
 type multiModelMerchantRepositoryStub struct {
 	*merchantRepositoryStub
 	MultiModelMerchantRepository
-	reviewModels  func(context.Context, int64) ([]ReviewModelBinding, error)
-	setModelTest  func(context.Context, int64, int64, int, string, int, string) error
-	promoteModels func(context.Context, int64, int64) error
+	reviewModels func(context.Context, int64) ([]ReviewModelBinding, error)
+	setModelTest func(context.Context, int64, int64, int, string, int, string) error
 }
 
 func (s *multiModelMerchantRepositoryStub) ReviewModels(ctx context.Context, reviewID int64) ([]ReviewModelBinding, error) {
@@ -117,13 +116,6 @@ func (s *multiModelMerchantRepositoryStub) ReviewModels(ctx context.Context, rev
 
 func (s *multiModelMerchantRepositoryStub) SetReviewModelTest(ctx context.Context, reviewID int64, bindingID int64, adminID int, status string, latency int, testError string) error {
 	return s.setModelTest(ctx, reviewID, bindingID, adminID, status, latency, testError)
-}
-
-func (s *multiModelMerchantRepositoryStub) PromoteReviewModels(ctx context.Context, reviewID int64, channelID int64) error {
-	if s.promoteModels == nil {
-		return nil
-	}
-	return s.promoteModels(ctx, reviewID, channelID)
 }
 
 func (s *merchantRepositoryStub) SaveChannelTest(ctx context.Context, command CreateChannelTest) (ChannelTest, error) {
@@ -602,12 +594,6 @@ func TestAdminApprovalCreatesChannelWithPassedModelsWithoutRetesting(t *testing.
 		}, nil
 	}
 	repository.setModelTest = func(context.Context, int64, int64, int, string, int, string) error { return nil }
-	repository.promoteModels = func(_ context.Context, reviewID int64, channelID int64) error {
-		if reviewID != 21 || channelID != 51 {
-			t.Fatalf("提升模型参数=%d %d", reviewID, channelID)
-		}
-		return nil
-	}
 	services.Merchants = repository
 	services.Credentials = box
 	token := createPlatformSession(t, services, 1, 100)

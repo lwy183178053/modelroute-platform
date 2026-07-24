@@ -3394,3 +3394,34 @@
 - `progress.md`：追加本次发布、浏览器筛选验收、容器与稳定窗口证据。
 - 生产发布目录：`/opt/modelroute-platform/releases/6772cc72c6ef`。
 - 回滚点：`/opt/modelroute-platform/releases/a26123dafcdf`；可创建指向该固定目录的临时软链接并使用 `mv -Tf` 原子切回，再执行该目录的 `deploy/scripts/verify.sh`。本轮没有数据库迁移，回滚不需要恢复数据库。
+
+## 2026-07-24 - Task: 项目代码检查与一致性修复
+
+### What was done
+
+- 完成后端、前端、部署编排、依赖、死代码和敏感正文检查；未发现新的阻断项，保留 React 19 与图标库深层依赖声明范围不一致这一非阻断警告，不在本轮升级依赖。
+- 修复渠道审核通过的原子性缺口：正式渠道模型绑定改为与渠道归属、健康初始状态、审核状态和待审密钥清除在同一数据库事务内完成，任一步骤失败都会整体回滚。
+- 修复并发创建用户密钥时可能识别到同一核心 Token 的竞态：当前单 API 实例串行执行创建前后列表识别及路由绑定；同时删除事务外模型提升接口及其测试桩。
+
+### Testing
+
+- 两个回归用例先确认失败：审批事务缺少模型绑定 SQL；并发密钥创建最大同时进入核心创建数为 2。修复后聚焦测试通过，竞态检测通过。
+- `go test ./... -count=1`、`go test -race ./...`、`go vet ./...`、`staticcheck ./...` 和 API、Worker、模型种子构建：通过。
+- `npm.cmd test`、`npm.cmd run test:ui` 和 Vite 生产构建：通过，1612 个模块转换完成。
+- 部署 Python 测试：28 项通过；`docker compose --env-file .env.example config --quiet`：通过。
+- `npm audit --audit-level=high`：0 个漏洞；`npx knip`、Go TODO/FIXME 和受版本控制敏感正文扫描均无结果。
+
+### Notes
+
+- `apps/api/internal/httpapi/server.go`：增加单 API 实例的密钥创建互斥边界。
+- `apps/api/internal/httpapi/account_handlers.go`：串行完成核心密钥创建、编号识别和路由绑定。
+- `apps/api/internal/httpapi/merchant_store.go`：将正式模型绑定写入移入审批事务并删除独立提升入口。
+- `apps/api/internal/httpapi/merchant_handlers.go`：删除审批事务提交后的第二次模型写入。
+- `apps/api/internal/httpapi/merchant_types.go`：移除废弃的模型提升仓储接口。
+- `apps/api/internal/httpapi/merchant_handlers_test.go`：清理废弃接口测试桩。
+- `apps/api/internal/httpapi/merchant_store_test.go`：锁定正式模型绑定必须在审批事务提交前完成。
+- `apps/api/internal/httpapi/routing_handlers_test.go`：增加并发密钥创建串行化回归。
+- `docs/商户与渠道审核接口.md`：补充渠道审批的完整事务边界。
+- `docs/账号与管理员接口.md`：记录密钥编号识别与单 API 实例约束。
+- `progress.md`：追加本轮检查、修复、验证证据和回滚点。
+- 回滚点：本轮前一提交为 `f3920b31e90d`；执行 `git revert <本轮提交哈希>` 可回退本轮修复。本轮没有数据库迁移，不影响现有账号、密钥、路由、渠道或调用记录数据。

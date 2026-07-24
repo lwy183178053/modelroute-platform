@@ -240,7 +240,6 @@ type MultiModelMerchantRepository interface {
 	ReviewModels(context.Context, int64) ([]ReviewModelBinding, error)
 	ChannelModels(context.Context, int64) ([]ChannelModelBinding, error)
 	SetReviewModelTest(context.Context, int64, int64, int, string, int, string) error
-	PromoteReviewModels(context.Context, int64, int64) error
 }
 
 type MerchantChannelManagement interface {

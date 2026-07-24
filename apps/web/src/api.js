@@ -53,9 +53,12 @@ export function getQuotaPerUnit() {
 
 export function formatQuota(value) {
   const quota = Number(value || 0);
+  // 余额按分截断展示，避免小额扣费四舍五入回原金额。
+  const integerQuota = Number.isFinite(quota) ? Math.trunc(quota) : 0;
+  const displayCents = Number((BigInt(integerQuota) * 100n) / BigInt(getQuotaPerUnit()));
   return new Intl.NumberFormat('zh-CN', {
     style: 'currency', currency: 'CNY', minimumFractionDigits: 2, maximumFractionDigits: 2,
-  }).format(quota / getQuotaPerUnit());
+  }).format(displayCents / 100);
 }
 
 export function formatUsageQuota(value) {

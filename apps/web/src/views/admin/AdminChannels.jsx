@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, Power, RefreshCw, Search, ShieldCheck, Trash2, X } from 'lucide-react';
 import { apiRequest } from '../../api';
 import { ActionMenu, Button, InlineNotice, Section, Select, Status, TextInput } from '../../ui';
+import ChannelModelsModal, { ChannelModelsButton } from '../../ChannelModelsModal';
 
 const reviewStatuses = new Set(['pending', 'verifying', 'verified', 'approving']);
 const healthNames = {
@@ -9,7 +10,11 @@ const healthNames = {
 };
 
 function displayStatus(item) {
-  if (item.kind === 'review') return item.status === 'rejected' ? '不通过' : reviewStatuses.has(item.status) ? '审核中' : '已审核';
+  if (item.kind === 'review') {
+    if (item.status === 'rejected') return '不通过';
+    if (item.status === 'verified') return '已验证';
+    return reviewStatuses.has(item.status) ? '审核中' : '已审核';
+  }
   return item.status === 'active' ? '已审核' : '已下架';
 }
 
@@ -29,6 +34,7 @@ export default function AdminChannels({ notify }) {
   const [busyID, setBusyID] = useState('');
   const [query, setQuery] = useState('');
   const [merchantFilter, setMerchantFilter] = useState('all');
+  const [modelTarget, setModelTarget] = useState(null);
 
   const load = useCallback(async () => {
     setError('');
@@ -55,8 +61,8 @@ export default function AdminChannels({ notify }) {
     }
     setBusyID(`review-${review.id}-${action}`);
     try {
-      await apiRequest(`/api/admin/channel-reviews/${review.id}/${action}`, { method: 'POST', body });
-      notify(action === 'verify' ? '渠道验证完成' : action === 'approve' ? '渠道已审核通过' : '渠道审核不通过');
+      const result = await apiRequest(`/api/admin/channel-reviews/${review.id}/${action}`, { method: 'POST', body });
+      notify(action === 'verify' ? `渠道验证完成：成功 ${result?.passed || 0} 个，失败 ${result?.failed || 0} 个` : action === 'approve' ? '渠道已审核通过' : '渠道审核不通过');
       await load();
     } catch (requestError) {
       notify(requestError.message || '渠道审核操作失败');
@@ -100,6 +106,7 @@ export default function AdminChannels({ notify }) {
       await load();
     } catch (requestError) {
       notify(requestError.message || '模型检查失败');
+      await load();
     } finally {
       setBusyID('');
     }
@@ -115,6 +122,7 @@ export default function AdminChannels({ notify }) {
     const text = `${item.id}${item.user_id}${item.merchant_name || ''}${item.channel_name}${item.model || ''}${item.base_url || ''}`.toLowerCase();
     return text.includes(query.trim().toLowerCase()) && (merchantFilter === 'all' || String(item.user_id) === merchantFilter);
   });
+  const selectedModelRow = modelTarget ? rows.find((item) => item.kind === modelTarget.kind && item.id === modelTarget.id) : null;
 
   return (
     <div>
@@ -131,7 +139,7 @@ export default function AdminChannels({ notify }) {
               <td><code>{item.id}</code><small>{item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : '-'}</small></td>
               <td><strong>{item.merchant_name || `用户 ${item.user_id}`}</strong><small>用户 ID {item.user_id}</small></td>
               <td><strong>{item.channel_name}</strong></td>
-              <td>{item.kind === 'review' && item.models?.length ? item.models.map((binding) => <div key={binding.id} className="model-review-row"><span>{binding.upstream_model_name}</span>{binding.match_status === 'matched' && <Button disabled={Boolean(busyID)} variant="ghost" onClick={() => testModel(item, binding)}>hi 检查</Button>}</div>) : (item.matched_models?.length ? item.matched_models.map((model) => <span className="tag" key={model}>{model}</span>) : item.model || '-')}</td>
+              <td><ChannelModelsButton item={item} onClick={() => setModelTarget({ kind: item.kind, id: item.id })} /></td>
               <td><code>{item.base_url}</code></td>
               <td><Status>{displayStatus(item)}</Status><small>{item.verification_error || item.review_reason || ''}</small></td>
               <td>{item.kind === 'channel' ? <Status>{healthNames[item.health_state] || item.health_state || '待调用'}</Status> : '-'}</td>
@@ -141,6 +149,7 @@ export default function AdminChannels({ notify }) {
           {visibleRows.length === 0 && <tr><td className="table-message" colSpan="8">暂无匹配渠道</td></tr>}
         </tbody></table></div>
       </Section>
+      {selectedModelRow && <ChannelModelsModal item={selectedModelRow} busyID={busyID} onClose={() => setModelTarget(null)} onTest={selectedModelRow.kind === 'review' ? testModel : undefined} />}
     </div>
   );
 }

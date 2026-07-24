@@ -69,11 +69,12 @@ async function captureSet(viewport, suffix) {
       logs: { page: 1, page_size: 20, total: 1, items: [{ id: 901, user_id: 7, created_at: 1784692800, model_name: 'gpt-4o-mini', quota: 500000, prompt_tokens: 2400, completion_tokens: 680, cache_tokens: 1200, token_id: 9, merchant_user_id: 8, merchant_name: '北辰云智', channel_id: 51, channel_name: 'OpenAI 主线路', request_id: 'req-user-1001' }] },
     } });
     if (url.pathname === '/api/merchant/channels') return fulfill({ success: true, data: { merchant: { user_id: 1, merchant_name: 'ModelRoute 官方', merchant_status: 'active', is_merchant: true }, items: [{ id: 51, user_id: 1, merchant_name: 'ModelRoute 官方', review_id: 21, channel_name: 'OpenAI 测试渠道', matched_models: ['gpt-4o-mini'], adapter_type: 'openai_compatible', base_url: 'https://api.lwylink.xyz', credential_fingerprint: 'a1b2c3...d4e5f6', status: 'active', health_state: 'healthy', created_at: '2026-07-22T14:00:00Z' }], reviews: [{ id: 21, user_id: 1, channel_name: 'OpenAI 测试渠道', adapter_type: 'openai_compatible', base_url: 'https://api.lwylink.xyz', status: 'approved', credential_configured: true, created_at: '2026-07-22T14:00:00Z' }] } });
+    if (url.pathname === '/api/merchant/profile') return fulfill({ success: true, data: { id: 31, user_id: 1, display_name: 'ModelRoute 官方', website_url: 'https://aggregate.lwylink.xyz', business_description: '提供稳定的多厂商模型服务。', status: 'active', is_platform_merchant: true } });
     if (url.pathname === '/api/merchant/offers') return fulfill({ success: true, data: [{ offer_id: 201, merchant_id: 31, merchant_name: '北辰云智', model: 'gpt-4o-mini', multiplier_bps: 12000, call_count: 32400, token_usage: 2600000000, last_called_at: new Date(Date.now() - 10 * 60_000).toISOString(), price_tiers: [{ tier_order: 1, minimum_input_tokens: 0, maximum_input_tokens: null, input_price_micros: 180000, output_price_micros: 720000, cache_read_price_micros: 90000, cache_write_price_micros: 240000 }], channel_count: 1, offer_status: 'active', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200, cache_hit_ppm: 720000, cache_sample_input_tokens: 2000000, cache_weight_ready: true, channels: [{ merchant_channel_id: 51, channel_name: 'OpenAI 主线路', health_state: 'healthy', availability_ppm: 999800, ttft_p95_ms: 1200, cache_hit_ppm: 680000, cache_sample_input_tokens: 1200000, cache_weight_ready: true }] }] });
     if (url.pathname === '/api/merchant/balance') return fulfill({ success: true, data: { merchant_id: 31, available_quota: 90000000, frozen_quota: 25000000, lifetime_earned_quota: 140000000, lifetime_refunded_quota: 5000000, lifetime_paid_quota: 20000000 } });
     if (url.pathname === '/api/merchant/usage') return fulfill({ success: true, data: { filters: { models: ['gpt-4o-mini'] }, logs: { page: 1, page_size: 20, total: 1, items: [{ id: 902, created_at: 1784692800, model_name: 'gpt-4o-mini', prompt_tokens: 3100, completion_tokens: 920, cache_tokens: 800, channel_id: 51, channel_name: 'OpenAI 主线路', merchant_income_quota: 630000, request_id: 'req-merchant-9001' }] } } });
     if (url.pathname === '/api/merchant/withdrawals') return fulfill({ success: true, data: { page: 1, page_size: 20, total: 1, items: [{ id: 8, withdrawal_no: 'MW202607220001', merchant_id: 31, amount_quota: 50000000, withdrawal_tax_bps: 750, tax_quota: 3750000, net_payout_quota: 46250000, available_before_quota: 90000000, recipient_type: 'alipay', recipient_account_masked: '138****2621', status: 'pending', created_at: '2026-07-22T14:00:00Z' }] } });
-     if (url.pathname === '/api/admin/channel-reviews') return fulfill({ success: true, data: { page: 1, page_size: 100, total: 1, items: [{ id: 22, user_id: 8, channel_name: 'Anthropic 备用线路', canonical_model_id: 107, model: 'claude-sonnet-5', provider: 'Anthropic', adapter_type: 'anthropic', base_url: 'https://api.anthropic.example', status: 'pending', credential_configured: true, created_at: '2026-07-22T15:00:00Z' }] } });
+     if (url.pathname === '/api/admin/channel-reviews') return fulfill({ success: true, data: { page: 1, page_size: 100, total: 1, items: [{ id: 22, user_id: 8, channel_name: 'Anthropic 备用线路', canonical_model_id: 107, model: 'claude-sonnet-5', provider: 'Anthropic', adapter_type: 'anthropic', base_url: 'https://api.anthropic.example', status: 'verified', credential_configured: true, models: [{ id: 221, upstream_model_name: 'claude-sonnet-5', canonical_model_id: 107, match_status: 'matched', test_status: 'passed', test_latency_ms: 286, test_error: '' }], created_at: '2026-07-22T15:00:00Z' }] } });
     if (url.pathname === '/api/admin/channels') return fulfill({ success: true, data: { page: 1, page_size: 100, total: 1, items: [{ id: 51, user_id: 1, merchant_name: 'ModelRoute 官方', review_id: 21, channel_name: 'OpenAI 主线路', matched_models: ['gpt-4o-mini'], adapter_type: 'openai_compatible', base_url: 'https://api.merchant.example', credential_fingerprint: 'a1b2c3...d4e5f6', status: 'active', health_state: 'healthy', created_at: '2026-07-22T14:00:00Z' }] } });
     if (url.pathname === '/api/admin/overview') return fulfill({ success: true, data: {
       generated_at: '2026-07-22T16:00:00Z', sync_delay_seconds: 16,
@@ -169,6 +170,13 @@ async function captureSet(viewport, suffix) {
   path = `${outputDir}admin-channels-${suffix}.png`;
   await page.screenshot({ path, fullPage: true });
   if ((await stat(path)).size < 20_000) throw new Error(`admin-channels-${suffix} 截图文件过小`);
+  await page.getByRole('row').filter({ hasText: 'Anthropic 备用线路' }).getByRole('button', { name: '查看模型（1）', exact: true }).click();
+  await page.getByRole('dialog', { name: '渠道模型' }).waitFor();
+  await verifyLayout(page, `admin-channel-models-${suffix}`);
+  path = `${outputDir}admin-channel-models-${suffix}.png`;
+  await page.screenshot({ path, fullPage: false });
+  if ((await stat(path)).size < 20_000) throw new Error(`admin-channel-models-${suffix} 截图文件过小`);
+  await page.getByRole('dialog', { name: '渠道模型' }).getByRole('button', { name: '关闭', exact: true }).click();
 
   await page.getByRole('button', { name: '模型与定价' }).click();
   await page.getByText('v2', { exact: true }).waitFor();
@@ -200,6 +208,14 @@ async function captureSet(viewport, suffix) {
 
   await openNavigation(page, '商户中心');
   const merchantSidebar = page.getByRole('complementary', { name: '商户功能' });
+  await merchantSidebar.getByRole('button', { name: '渠道管理', exact: true }).click();
+  await page.getByRole('row').filter({ hasText: 'OpenAI 测试渠道' }).getByRole('button', { name: '查看模型（1）', exact: true }).click();
+  await page.getByRole('dialog', { name: '渠道模型' }).waitFor();
+  await verifyLayout(page, `merchant-channel-models-${suffix}`);
+  path = `${outputDir}merchant-channel-models-${suffix}.png`;
+  await page.screenshot({ path, fullPage: false });
+  if ((await stat(path)).size < 20_000) throw new Error(`merchant-channel-models-${suffix} 截图文件过小`);
+  await page.getByRole('dialog', { name: '渠道模型' }).getByRole('button', { name: '关闭', exact: true }).click();
   await merchantSidebar.getByRole('button', { name: '上架模型', exact: true }).click();
   for (const label of ['调用次数', 'Token 用量', '最后调用']) await page.getByRole('columnheader', { name: label, exact: true }).waitFor();
   await page.getByText('32.4K', { exact: true }).waitFor();

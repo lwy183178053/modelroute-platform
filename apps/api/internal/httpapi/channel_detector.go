@@ -77,9 +77,11 @@ func (d *NewAPIChannelDetector) testAdapter(ctx context.Context, request Channel
 	}
 	channelID := result.Items[0].ID
 	started := time.Now()
-	_, testErr := d.admin.Do(ctx, http.MethodGet, fmt.Sprintf("/api/channel/test/%d?%s", channelID, url.Values{
-		"model": {request.Model.PublicName},
-	}.Encode()), nil)
+	testQuery := url.Values{"model": {request.Model.PublicName}}
+	if request.Model.Price.PriceKind == "image" {
+		testQuery.Set("endpoint_type", "image-generation")
+	}
+	_, testErr := d.admin.Do(ctx, http.MethodGet, fmt.Sprintf("/api/channel/test/%d?%s", channelID, testQuery.Encode()), nil)
 	latency := int(time.Since(started).Milliseconds())
 	if latency < 1 {
 		latency = 1

@@ -6,9 +6,10 @@ import {
 import { apiRequest, formatCompactCount, formatLastCalled, formatQuota, getQuotaPerUnit } from '../api';
 import { ActionMenu, Button, Field, InlineNotice, Metric, PageHeader, Pagination, Section, Select, Status, TextInput } from '../ui';
 import { UsageLogTable, useUsage } from './UsagePanels';
+import ChannelModelsModal, { ChannelModelsButton } from '../ChannelModelsModal';
 
 const statusNames = {
-  pending: '审核中', verifying: '审核中', verified: '审核中', approving: '审核中',
+  pending: '审核中', verifying: '审核中', verified: '已验证', approving: '审核中',
   approved: '已审核', rejected: '不通过', active: '已审核', archived: '已删除',
   syncing: '同步中', sync_failed: '同步失败', disabled: '已下架', inactive: '已下架', deleted: '已删除',
 };
@@ -83,6 +84,7 @@ export default function MerchantView({ account, openModal }) {
   const [businessDescription, setBusinessDescription] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMessage, setProfileMessage] = useState('');
+  const [modelTarget, setModelTarget] = useState(null);
 
   const usageEndpoint = useMemo(() => {
     const query = new URLSearchParams({ p: String(usagePage), page_size: String(usagePageSize) });
@@ -183,6 +185,7 @@ export default function MerchantView({ account, openModal }) {
   const healthyChannels = offers.flatMap((offer) => offer.channels || []).filter((channel) => channel.health_state === 'healthy').length;
   const canSubmit = Boolean(account?.is_merchant || Number(account?.role) >= 10);
   const lifecycleRows = channelLifecycleRows(reviews, channels);
+  const selectedModelRow = modelTarget ? lifecycleRows.find((item) => item.kind === modelTarget.kind && item.id === modelTarget.id) : null;
   const merchantName = merchant?.display_name || merchant?.merchant_name || '';
 
   return (
@@ -214,11 +217,12 @@ export default function MerchantView({ account, openModal }) {
 
           {section === 'channels' && <Section title="渠道管理" description="审核中、已审核、不通过和已下架渠道统一展示" actions={canSubmit && <Button icon={Plus} variant="primary" onClick={() => openModal({ type: 'channel', onSaved: load })}>提交新渠道</Button>}>
             <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>渠道</th><th>厂商</th><th>模型</th><th>基础地址</th><th>状态</th><th>结果</th><th>操作</th></tr></thead><tbody>
-              {lifecycleRows.map((item) => <tr key={`${item.kind}-${item.id}`}><td><code>{item.id}</code></td><td><strong>{item.channel_name}</strong>{item.kind === 'channel' && <small>密钥 {item.credential_fingerprint || '-'}</small>}</td><td>{item.provider || '-'}</td><td>{item.kind === 'review' && item.models?.length ? item.models.map((binding) => <span className="tag" key={binding.id}>{binding.upstream_model_name}</span>) : item.matched_models?.length ? item.matched_models.map((model) => <span className="tag" key={model}>{model}</span>) : (item.model || '-')}</td><td><code>{item.base_url}</code></td><td><Status>{item.kind === 'channel' && item.status === 'disabled' ? '已下架' : statusNames[item.status] || item.status}</Status></td><td>{item.verification_error || item.review_reason || '-'}</td><td>{item.kind === 'channel' ? <ActionMenu items={[{ label: '同步模型', disabled: busyChannel === item.id, onClick: () => syncChannel(item) }, { label: item.status === 'active' ? '下架' : '重新启用', disabled: busyChannel === item.id || item.status === 'archived', onClick: () => toggleChannel(item) }, { label: '删除', danger: true, disabled: busyChannel === item.id, onClick: () => deleteChannel(item) }]} /> : <ActionMenu items={[['pending', 'verified'].includes(item.status) && { label: '撤销审核', onClick: () => deleteReview(item) }, item.status === 'rejected' && { label: '删除记录', danger: true, onClick: () => deleteReview(item) }]} />}</td></tr>)}
+              {lifecycleRows.map((item) => <tr key={`${item.kind}-${item.id}`}><td><code>{item.id}</code></td><td><strong>{item.channel_name}</strong>{item.kind === 'channel' && <small>密钥 {item.credential_fingerprint || '-'}</small>}</td><td>{item.provider || '-'}</td><td><ChannelModelsButton item={item} onClick={() => setModelTarget({ kind: item.kind, id: item.id })} /></td><td><code>{item.base_url}</code></td><td><Status>{item.kind === 'channel' && item.status === 'disabled' ? '已下架' : statusNames[item.status] || item.status}</Status></td><td>{item.verification_error || item.review_reason || '-'}</td><td>{item.kind === 'channel' ? <ActionMenu items={[{ label: '同步模型', disabled: busyChannel === item.id, onClick: () => syncChannel(item) }, { label: item.status === 'active' ? '下架' : '重新启用', disabled: busyChannel === item.id || item.status === 'archived', onClick: () => toggleChannel(item) }, { label: '删除', danger: true, disabled: busyChannel === item.id, onClick: () => deleteChannel(item) }]} /> : <ActionMenu items={[['pending', 'verified'].includes(item.status) && { label: '撤销审核', onClick: () => deleteReview(item) }, item.status === 'rejected' && { label: '删除记录', danger: true, onClick: () => deleteReview(item) }]} />}</td></tr>)}
               {!loading && lifecycleRows.length === 0 && <tr><td className="table-message" colSpan="8">暂无渠道</td></tr>}
               {loading && <tr><td className="table-message" colSpan="8">正在读取渠道</td></tr>}
             </tbody></table></div>
           </Section>}
+          {selectedModelRow && <ChannelModelsModal item={selectedModelRow} onClose={() => setModelTarget(null)} />}
 
           {section === 'offers' && <Section title="上架模型" description="一个模型统一设置价格，可由多个已审核渠道承载" actions={canSubmit && <Button disabled={!channels.length || !models.length} icon={BadgeDollarSign} variant="primary" onClick={() => openModal({ type: 'quote', models: models.filter((model) => model.status === 'active'), onSaved: load })}>设置模型价格</Button>}>
             <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>模型</th><th>价格倍率</th><th>调用次数</th><th>Token 用量</th><th>缓存命中率</th><th>最后调用</th><th>可用渠道</th><th>状态</th><th>健康</th><th>操作</th></tr></thead><tbody>

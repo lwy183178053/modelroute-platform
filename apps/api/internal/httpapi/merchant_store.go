@@ -468,7 +468,7 @@ INSERT INTO merchant_channel_model_bindings
     (merchant_channel_id, upstream_model_name, canonical_model_id, match_status)
 SELECT $1, upstream_model_name, canonical_model_id, match_status
 FROM merchant_review_model_bindings
-WHERE review_id = $2
+WHERE review_id = $2 AND match_status = 'matched' AND test_status = 'passed'
 ON CONFLICT (merchant_channel_id, upstream_model_name) DO UPDATE
 SET canonical_model_id = EXCLUDED.canonical_model_id, match_status = EXCLUDED.match_status,
     last_synced_at = now(), updated_at = now()

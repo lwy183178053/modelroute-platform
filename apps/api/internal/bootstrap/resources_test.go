@@ -21,6 +21,32 @@ func (s adminAccountStub) Do(context.Context, string, string, any) ([]byte, erro
 	return s.body, nil
 }
 
+type administratorSettingStub struct {
+	calls   []string
+	body    map[string]any
+	setting string
+}
+
+func (s *administratorSettingStub) Do(_ context.Context, method string, path string, body any) ([]byte, error) {
+	s.calls = append(s.calls, method+" "+path)
+	if method == "GET" && path == "/api/user/self" {
+		setting := s.setting
+		if setting == "" {
+			setting = `{"notify_type":"email","quota_warning_threshold":700000,"notification_email":"ops@example.com","record_ip_log":true}`
+		}
+		return json.Marshal(map[string]any{
+			"id": 1, "username": "3180615598@qq.com", "role": 100, "status": 1,
+			"setting": setting,
+		})
+	}
+	if method == "PUT" && path == "/api/user/setting" {
+		encoded, _ := json.Marshal(body)
+		_ = json.Unmarshal(encoded, &s.body)
+		return []byte(`null`), nil
+	}
+	return nil, nil
+}
+
 type platformMerchantStoreStub struct {
 	userID       int
 	publicOrigin string
@@ -89,5 +115,30 @@ func TestEnsureAdministratorMerchantUsesConfiguredSingleAdministrator(t *testing
 	}
 	if store.userID != 1 || store.publicOrigin != "https://aggregate.lwylink.xyz" {
 		t.Fatalf("平台商户引导参数 user=%d origin=%s", store.userID, store.publicOrigin)
+	}
+}
+
+func TestEnsureAdministratorMerchantEnablesUnpricedModelTestsAndPreservesSettings(t *testing.T) {
+	admin := &administratorSettingStub{}
+	store := &platformMerchantStoreStub{}
+	if err := ensureAdministratorMerchant(context.Background(), admin, store, "3180615598@qq.com", "https://aggregate.lwylink.xyz"); err != nil {
+		t.Fatalf("初始化管理员测试设置失败：%v", err)
+	}
+	if len(admin.calls) != 2 || admin.calls[0] != "GET /api/user/self" || admin.calls[1] != "PUT /api/user/setting" {
+		t.Fatalf("管理员设置调用=%v", admin.calls)
+	}
+	if admin.body["accept_unset_model_ratio_model"] != true || admin.body["notify_type"] != "email" || admin.body["quota_warning_threshold"] != float64(700000) || admin.body["notification_email"] != "ops@example.com" || admin.body["record_ip_log"] != true {
+		t.Fatalf("管理员设置未保留：%v", admin.body)
+	}
+}
+
+func TestEnsureAdministratorMerchantKeepsEnabledTestPermissionIdempotently(t *testing.T) {
+	admin := &administratorSettingStub{setting: `{"notify_type":"email","accept_unset_model_ratio_model":true}`}
+	store := &platformMerchantStoreStub{}
+	if err := ensureAdministratorMerchant(context.Background(), admin, store, "3180615598@qq.com", "https://aggregate.lwylink.xyz"); err != nil {
+		t.Fatalf("重复初始化管理员测试设置失败：%v", err)
+	}
+	if len(admin.calls) != 1 || admin.calls[0] != "GET /api/user/self" {
+		t.Fatalf("已开启权限时不应重复写设置：%v", admin.calls)
 	}
 }

@@ -290,6 +290,24 @@ func TestSQLMerchantStoreFinalApprovalClearsCredentialAndCreatesOwnership(t *tes
 	}
 }
 
+func TestSQLMerchantStorePromotesOnlyPassedMatchedModels(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewSQLMerchantStore(database)
+	mock.ExpectExec("(?s)INSERT INTO merchant_channel_model_bindings.*WHERE review_id = \\$2.*match_status = 'matched'.*test_status = 'passed'").
+		WithArgs(int64(51), int64(21)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := store.PromoteReviewModels(context.Background(), 21, 51); err != nil {
+		t.Fatalf("提升审核模型失败：%v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSQLMerchantStoreRejectsApplicationAndReleasesReservedName(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {

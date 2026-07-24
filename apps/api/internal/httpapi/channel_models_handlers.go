@@ -273,7 +273,7 @@ func (s *server) adminTestReviewModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if testErr != nil {
-		writeAPIError(w, http.StatusUnprocessableEntity, "channel_model_test_failed", "模型 hi 检查失败")
+		writeAPIError(w, http.StatusUnprocessableEntity, "channel_model_test_failed", sanitizedChannelError(testErr, string(credential)))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"binding_id": binding.ID, "status": status, "latency_ms": outcome.LatencyMS}})

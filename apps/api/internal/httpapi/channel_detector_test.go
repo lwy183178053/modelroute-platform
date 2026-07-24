@@ -68,3 +68,41 @@ func TestNewAPIChannelDetectorFallsBackAndAlwaysDeletesTemporaryChannels(t *test
 		t.Fatalf("临时渠道调用=%v", admin.calls)
 	}
 }
+
+type imageChannelDetectorAdminStub struct {
+	testPath string
+}
+
+func (s *imageChannelDetectorAdminStub) Do(_ context.Context, method string, path string, _ any) ([]byte, error) {
+	switch {
+	case method == http.MethodPost && path == "/api/channel/":
+		return []byte(`null`), nil
+	case method == http.MethodGet && strings.HasPrefix(path, "/api/channel/search?"):
+		return []byte(`{"items":[{"id":51}]}`), nil
+	case method == http.MethodGet && strings.HasPrefix(path, "/api/channel/test/51?"):
+		s.testPath = path
+		if !strings.Contains(path, "endpoint_type=image-generation") {
+			return nil, fmt.Errorf("图片检测入口缺失：%s", path)
+		}
+		return []byte(`null`), nil
+	case method == http.MethodDelete && path == "/api/channel/51":
+		return []byte(`null`), nil
+	default:
+		return nil, fmt.Errorf("未知调用 %s %s", method, path)
+	}
+}
+
+func TestNewAPIChannelDetectorUsesImageEndpointForImageModels(t *testing.T) {
+	admin := &imageChannelDetectorAdminStub{}
+	detector := NewNewAPIChannelDetector(admin)
+	_, err := detector.Test(context.Background(), ChannelTestRequest{
+		Model:   CanonicalModel{ID: 71, PublicName: "gpt-image-1", Provider: "OpenAI", Price: OfficialPrice{PriceKind: "image"}},
+		BaseURL: "https://api.merchant.example", APIKey: "sk-upstream-secret",
+	})
+	if err != nil {
+		t.Fatalf("图片模型检测失败：%v", err)
+	}
+	if admin.testPath == "" {
+		t.Fatal("图片模型未调用渠道检测")
+	}
+}

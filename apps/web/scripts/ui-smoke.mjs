@@ -317,7 +317,7 @@ async function mockAdminAPI(targetPage, state, account = null) {
       return json({ success: true, data: { id: 32, user_id: 7, display_name: '东海模型服务', status: 'active' } });
     }
     if (url.pathname === '/api/admin/channel-reviews' && request.method() === 'GET') {
-      return json({ success: true, data: { page: 1, page_size: 100, total: 1, items: [{ id: 22, user_id: 8, canonical_model_id: 102, model: 'claude-sonnet-4-5', adapter_type: 'anthropic', channel_name: 'Anthropic 备用线路', base_url: 'https://api.anthropic.example', status: 'pending', credential_configured: true, models: [{ id: 221, upstream_model_name: 'claude-sonnet-4-5', match_status: 'matched', test_status: 'pending' }], created_at: '2026-07-22T15:00:00Z' }] } });
+      return json({ success: true, data: { page: 1, page_size: 100, total: 1, items: [{ id: 22, user_id: 8, canonical_model_id: 102, model: 'claude-sonnet-4-5', adapter_type: 'anthropic', channel_name: 'Anthropic 备用线路', base_url: 'https://api.anthropic.example', status: state.channelReviewStatus || 'pending', credential_configured: true, models: [{ id: 221, upstream_model_name: 'claude-sonnet-4-5', match_status: 'matched', test_status: state.modelTestStatus || 'untested', test_latency_ms: state.modelTestStatus ? 286 : 0, test_error: '' }], created_at: '2026-07-22T15:00:00Z' }] } });
     }
     if (url.pathname === '/api/admin/channels' && request.method() === 'GET') {
       return json({ success: true, data: { page: 1, page_size: 100, total: 2, items: [
@@ -365,7 +365,14 @@ async function mockAdminAPI(targetPage, state, account = null) {
     }
     if (url.pathname === '/api/admin/channel-reviews/22/verify' && request.method() === 'POST') {
       state.channelVerifyCalls += 1;
-      return json({ success: true, data: { review_id: 22, adapter_type: 'anthropic', capabilities: ['chat_completions'], latency_ms: 315 } });
+      state.channelReviewStatus = 'verified';
+      state.modelTestStatus = 'passed';
+      return json({ success: true, data: { review_id: 22, adapter_type: 'anthropic', passed: 1, failed: 0 } });
+    }
+    if (url.pathname === '/api/admin/channel-reviews/22/model-tests' && request.method() === 'POST') {
+      state.modelTestCalls += 1;
+      state.modelTestStatus = 'passed';
+      return json({ success: true, data: { binding_id: 221, status: 'passed', latency_ms: 286 } });
     }
     if (url.pathname.startsWith('/api/admin/users/') || url.pathname.startsWith('/api/keys')) {
       return json({ success: true, data: null });
@@ -376,7 +383,7 @@ async function mockAdminAPI(targetPage, state, account = null) {
 
 try {
   const adminMockState = {
-    merchantApproveCalls: 0, channelVerifyCalls: 0,
+    merchantApproveCalls: 0, channelVerifyCalls: 0, modelTestCalls: 0, channelReviewStatus: 'pending', modelTestStatus: 'untested',
     routeSaveCalls: 0, routeSaveBody: null, routingPreviewCalls: 0, routingPreviewBody: null,
     offerCreateCalls: 0, offerCreateBody: null,
     offerStatusCalls: 0, offerStatusBody: null, offerDeleteCalls: 0, offerEnabled: true,
@@ -510,6 +517,13 @@ try {
   await page.getByText('已审核', { exact: true }).waitFor();
   await page.getByText('待审测试线路').waitFor();
   await page.getByText('Gemini 测试线路').waitFor();
+  const merchantChannelRow = page.getByRole('row').filter({ hasText: 'OpenAI 测试渠道' }).first();
+  assert(!(await merchantChannelRow.innerText()).includes('gpt-4o-mini'), '商户渠道列表仍直接展开模型名称');
+  await merchantChannelRow.getByRole('button', { name: '查看模型（1）', exact: true }).click();
+  const merchantModelsDialog = page.getByRole('dialog', { name: '渠道模型' });
+  await merchantModelsDialog.getByText('gpt-4o-mini', { exact: true }).waitFor();
+  assert(await merchantModelsDialog.getByRole('button', { name: 'hi 检查', exact: true }).count() === 0, '商户模型弹窗不应提供检查操作');
+  await merchantModelsDialog.getByRole('button', { name: '关闭', exact: true }).click();
   page.once('dialog', (dialog) => dialog.accept());
   await clickActionInRow(page, '待审测试线路', '撤销审核');
   page.once('dialog', (dialog) => dialog.accept());
@@ -682,12 +696,22 @@ try {
   assert(!(await page.locator('body').innerText()).includes('¥12.50'), '渠道管理仍显示上游运行余额');
   assert(await page.getByRole('button', { name: '测试渠道' }).count() === 0, '渠道管理仍显示行内测试按钮');
   assert(await page.getByRole('button', { name: '刷新余额' }).count() === 0, '渠道管理仍显示刷新余额按钮');
+  const adminReviewRow = page.getByRole('row').filter({ hasText: 'Anthropic 备用线路' }).first();
+  assert(!(await adminReviewRow.innerText()).includes('claude-sonnet-4-5'), '管理后台渠道列表仍直接展开模型名称');
+  await adminReviewRow.getByRole('button', { name: '查看模型（1）', exact: true }).click();
+  const adminModelsDialog = page.getByRole('dialog', { name: '渠道模型' });
+  await adminModelsDialog.getByText('claude-sonnet-4-5', { exact: true }).waitFor();
+  await adminModelsDialog.getByRole('button', { name: 'hi 检查', exact: true }).click();
+  await page.getByText('模型 hi 检查完成').waitFor();
+  assert(adminMockState.modelTestCalls === 1, '管理员模型弹窗没有调用单模型检查接口');
+  await adminModelsDialog.getByRole('button', { name: '关闭', exact: true }).click();
   await clickRowAction(page, '恢复渠道', 1);
   await page.getByText('渠道已进入恢复检测').waitFor();
   assert(adminMockState.healthResetCalls === 1, '恢复渠道没有调用真实健康接口');
   await clickRowAction(page, '验证');
-  await page.getByText('渠道验证完成').waitFor();
+  await page.getByText('渠道验证完成：成功 1 个，失败 0 个').waitFor();
   assert(adminMockState.channelVerifyCalls === 1, '管理员渠道页验证没有调用真实渠道审核接口');
+  await page.getByText('已验证', { exact: true }).waitFor();
   await page.getByRole('button', { name: '平台设置' }).click();
   await page.getByRole('heading', { name: '邮件与注册' }).waitFor();
   assert(await page.getByLabel('SMTP 服务器').inputValue() === 'smtp.example.com', '平台设置未加载 SMTP 配置');

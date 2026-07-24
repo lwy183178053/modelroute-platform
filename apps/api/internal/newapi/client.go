@@ -36,6 +36,7 @@ type User struct {
 	Quota        int    `json:"quota,omitempty"`
 	UsedQuota    int    `json:"used_quota,omitempty"`
 	RequestCount int    `json:"request_count,omitempty"`
+	Setting      string `json:"setting,omitempty"`
 }
 
 type Auth struct {

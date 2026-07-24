@@ -2974,3 +2974,48 @@
 - `data/ui-preview/vite.config.mjs`：校准本地预览的新接口和数据；该文件被 Git 忽略，仅服务当前 `57723` 验收。
 - `progress.md`：追加本轮实现、验证、文件清单和回滚边界。
 - 回滚方式：执行 `git revert <本轮提交哈希>` 恢复代码、迁移、页面、测试和文档；若本地开发库已经执行 `000010`，旧渠道数据已按约定清理，需切回上一提交后通过开发数据重置流程重建。本地预览夹具可恢复当前提交对应的预览配置。本轮未发布服务器。
+
+## 2026-07-24 - Task: 修复渠道审核并改用模型详情弹窗
+
+### What was done
+
+- 修复管理员渠道“验证”与“通过”链路：验证按顺序检查全部已匹配模型，允许部分成功；通过时只导入检查成功的型号，并取消正式渠道创建后的重复测试。
+- 文本模型继续发送 `hi`，图片模型使用图片检测入口；全部模型失败时审核恢复为待审核，审批和单模型检查返回脱敏后的实际原因。
+- 平台启动时幂等开启唯一管理员的未定价模型测试权限，同时保留其原有通知、额度阈值和 IP 日志设置，不影响普通用户与正式计费。
+- 管理后台和商户中心的渠道列表统一改为“查看模型（数量）”按钮；共用弹窗展示模型、匹配状态、检查状态、耗时和错误，管理员可单模型复检，商户只读。
+- 管理员正式渠道接口补齐实际导入模型清单；`verified` 状态明确显示为“已验证”，批量验证提示成功和失败数量。
+
+### Testing
+
+- 后端目标红灯覆盖图片检测入口、部分成功、全部失败、只导入成功型号、无成功型号禁止通过、模型提升 SQL 过滤和管理员设置保留；实现后全部通过。
+- `go test ./...`：通过，全部 Go 单元与契约测试无失败。
+- `go vet ./...`、`go build ./cmd/api ./cmd/worker`：通过。
+- `npm.cmd run test:quota`、`npm.cmd run test:ui`、`npm.cmd run build`：通过；UI 烟雾覆盖模型名称默认隐藏、两类弹窗、单模型检查、状态文案和验证数量提示。
+- `npm.cmd run capture`：通过，管理后台与商户中心的模型弹窗均生成桌面和移动端截图，根页面无横向溢出；人工检查无文字重叠或列表异常增高。
+- `python -m unittest discover -s deploy/tests -p "test_*.py"`：27 项通过。
+- `docker compose --env-file .env.example --profile tools config --quiet`、`git diff --check`：通过。
+
+### Notes
+
+- `apps/api/internal/bootstrap/resources.go`：管理员商户初始化时合并并幂等开启未定价模型测试权限。
+- `apps/api/internal/bootstrap/resources_test.go`：覆盖设置保留和重复启动不重复写入。
+- `apps/api/internal/httpapi/channel_detector.go`：图片模型检测增加图片入口参数。
+- `apps/api/internal/httpapi/channel_detector_test.go`：覆盖图片检测入口。
+- `apps/api/internal/httpapi/channel_models_handlers.go`：单模型检查失败返回脱敏后的真实原因。
+- `apps/api/internal/httpapi/merchant_handlers.go`：实现批量验证、成功型号审批、正式渠道模型响应和错误脱敏。
+- `apps/api/internal/httpapi/merchant_handlers_test.go`：覆盖部分成功、全部失败、审批过滤、无成功型号阻止、错误脱敏和管理员正式渠道模型清单。
+- `apps/api/internal/httpapi/merchant_store.go`：正式渠道只提升已匹配且检查成功的模型绑定。
+- `apps/api/internal/httpapi/merchant_store_test.go`：锁定成功模型提升 SQL 条件。
+- `apps/api/internal/newapi/client.go`：读取唯一管理员现有设置。
+- `apps/web/src/ChannelModelsModal.jsx`：新增管理端与商户端共用的渠道模型弹窗。
+- `apps/web/src/views/admin/AdminChannels.jsx`：模型列改为数量按钮，接入弹窗、复检、已验证文案和验证统计提示。
+- `apps/web/src/views/MerchantView.jsx`：模型列改为数量按钮并接入只读弹窗。
+- `apps/web/src/styles.css`：增加弹窗内部滚动和错误换行样式。
+- `apps/web/scripts/ui-smoke.mjs`：增加渠道模型隐藏、弹窗、复检和状态回归测试。
+- `apps/web/scripts/capture.mjs`：增加管理端与商户端模型弹窗桌面和移动截图。
+- `apps/web/artifacts/admin-channels-desktop.png`、`apps/web/artifacts/admin-channels-mobile.png`：更新管理员渠道列表验收图。
+- `apps/web/artifacts/admin-channel-models-desktop.png`、`apps/web/artifacts/admin-channel-models-mobile.png`：新增管理员模型弹窗验收图。
+- `apps/web/artifacts/merchant-channel-models-desktop.png`、`apps/web/artifacts/merchant-channel-models-mobile.png`：新增商户模型弹窗验收图。
+- `docs/商户与渠道审核接口.md`：同步批量验证、成功型号审批、弹窗和管理员内部测试设置。
+- `progress.md`：追加本轮实现、验证、文件清单和回滚点。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可回退本轮代码、界面、测试、文档和验收图；本轮没有数据库迁移，不需要恢复或重置现有渠道数据。

@@ -75,6 +75,16 @@ func (s *filteredMerchantRepositoryStub) ListChannelsFiltered(ctx context.Contex
 	return s.listChannelsFiltered(ctx, page, pageSize, status, keyword, userID)
 }
 
+type filteredMultiModelMerchantRepositoryStub struct {
+	*filteredMerchantRepositoryStub
+	MultiModelMerchantRepository
+	channelModels func(context.Context, int64) ([]ChannelModelBinding, error)
+}
+
+func (s *filteredMultiModelMerchantRepositoryStub) ChannelModels(ctx context.Context, channelID int64) ([]ChannelModelBinding, error) {
+	return s.channelModels(ctx, channelID)
+}
+
 type merchantRepositoryStub struct {
 	MerchantRepository
 	identity           func(context.Context, int) (MerchantIdentity, error)
@@ -91,6 +101,29 @@ type merchantRepositoryStub struct {
 	merchant           func(context.Context, int64) (MerchantProfile, error)
 	updateDescription  func(context.Context, int64, string) (MerchantProfile, error)
 	setMerchantStatus  func(context.Context, int64, bool, int, string) (MerchantStatusChange, error)
+}
+
+type multiModelMerchantRepositoryStub struct {
+	*merchantRepositoryStub
+	MultiModelMerchantRepository
+	reviewModels  func(context.Context, int64) ([]ReviewModelBinding, error)
+	setModelTest  func(context.Context, int64, int64, int, string, int, string) error
+	promoteModels func(context.Context, int64, int64) error
+}
+
+func (s *multiModelMerchantRepositoryStub) ReviewModels(ctx context.Context, reviewID int64) ([]ReviewModelBinding, error) {
+	return s.reviewModels(ctx, reviewID)
+}
+
+func (s *multiModelMerchantRepositoryStub) SetReviewModelTest(ctx context.Context, reviewID int64, bindingID int64, adminID int, status string, latency int, testError string) error {
+	return s.setModelTest(ctx, reviewID, bindingID, adminID, status, latency, testError)
+}
+
+func (s *multiModelMerchantRepositoryStub) PromoteReviewModels(ctx context.Context, reviewID int64, channelID int64) error {
+	if s.promoteModels == nil {
+		return nil
+	}
+	return s.promoteModels(ctx, reviewID, channelID)
 }
 
 func (s *merchantRepositoryStub) SaveChannelTest(ctx context.Context, command CreateChannelTest) (ChannelTest, error) {
@@ -362,7 +395,7 @@ func TestMerchantChannelTestReturnsBoundReceiptWithoutPersistingCredential(t *te
 	}
 }
 
-func TestAdminVerifiesMerchantCredentialThroughNewAPI(t *testing.T) {
+func TestAdminVerifiesEveryMatchedModelAndAllowsPartialSuccess(t *testing.T) {
 	box := testCredentialBox(t)
 	encrypted, err := box.Encrypt([]byte("sk-upstream-secret"))
 	if err != nil {
@@ -371,27 +404,63 @@ func TestAdminVerifiesMerchantCredentialThroughNewAPI(t *testing.T) {
 	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("管理员复检应使用隔离检测器")
 	}))
+	testedModels := make([]string, 0, 2)
 	services.ChannelTests = channelTesterStub{test: func(_ context.Context, request ChannelTestRequest) (ChannelTestOutcome, error) {
-		if request.Model.PublicName != "gpt-5.6" || request.APIKey != "sk-upstream-secret" {
-			t.Fatalf("管理员复检参数=%+v", request)
+		if request.APIKey != "sk-upstream-secret" {
+			t.Fatalf("管理员复检密钥=%q", request.APIKey)
 		}
-		return ChannelTestOutcome{AdapterType: "openai_compatible", Capabilities: []string{"responses"}, LatencyMS: 88}, nil
+		testedModels = append(testedModels, request.Model.PublicName)
+		if request.Model.PublicName == "gpt-5.5" {
+			return ChannelTestOutcome{}, errors.New("上游未开放该型号")
+		}
+		return ChannelTestOutcome{AdapterType: "openai_compatible", Capabilities: []string{"text"}, LatencyMS: 88}, nil
 	}}
-	repository := &merchantRepositoryStub{}
-	repository.claimReview = func(_ context.Context, reviewID int64, status string) (MerchantChannelReview, error) {
+	baseRepository := &merchantRepositoryStub{}
+	baseRepository.claimReview = func(_ context.Context, reviewID int64, status string) (MerchantChannelReview, error) {
 		if reviewID != 21 || status != "verifying" {
 			t.Fatalf("认领审核参数=%d %s", reviewID, status)
 		}
-		return MerchantChannelReview{ID: 21, UserID: 7, CanonicalModelID: 61, Model: "gpt-5.6", Provider: "OpenAI", PriceKind: "text", AdapterType: "openai_compatible", BaseURL: "https://api.merchant.example", EncryptedCredential: encrypted}, nil
+		return MerchantChannelReview{ID: 21, UserID: 7, Provider: "OpenAI", AdapterType: "openai_compatible", BaseURL: "https://api.merchant.example", EncryptedCredential: encrypted}, nil
 	}
-	repository.finishVerify = func(_ context.Context, reviewID int64, adminID int, adapterType string, failure string) error {
+	baseRepository.finishVerify = func(_ context.Context, reviewID int64, adminID int, adapterType string, failure string) error {
 		if reviewID != 21 || adminID != 1 || failure != "" || adapterType != "openai_compatible" {
 			t.Fatalf("验证结果=%d %d %s %q", reviewID, adminID, adapterType, failure)
 		}
 		return nil
 	}
+	modelResults := map[int64]string{}
+	repository := &multiModelMerchantRepositoryStub{merchantRepositoryStub: baseRepository}
+	repository.reviewModels = func(_ context.Context, reviewID int64) ([]ReviewModelBinding, error) {
+		if reviewID != 21 {
+			t.Fatalf("读取审核模型编号=%d", reviewID)
+		}
+		return []ReviewModelBinding{
+			{ID: 101, CanonicalModelID: 61, UpstreamModelName: "gpt-5.6", MatchStatus: "matched", TestStatus: "untested"},
+			{ID: 102, CanonicalModelID: 62, UpstreamModelName: "gpt-5.5", MatchStatus: "matched", TestStatus: "untested"},
+			{ID: 103, UpstreamModelName: "gpt-unknown", MatchStatus: "unmatched", TestStatus: "untested"},
+		}, nil
+	}
+	repository.setModelTest = func(_ context.Context, reviewID int64, bindingID int64, adminID int, status string, _ int, testError string) error {
+		if reviewID != 21 || adminID != 1 {
+			t.Fatalf("保存模型验证归属=%d %d", reviewID, adminID)
+		}
+		modelResults[bindingID] = status
+		if bindingID == 101 && (status != "passed" || testError != "") {
+			t.Fatalf("成功模型结果=%s %q", status, testError)
+		}
+		if bindingID == 102 && (status != "failed" || !strings.Contains(testError, "上游未开放")) {
+			t.Fatalf("失败模型结果=%s %q", status, testError)
+		}
+		return nil
+	}
 	services.Merchants = repository
 	services.Credentials = box
+	services.Routing = &routingRepositoryStub{listModels: func(context.Context) ([]CanonicalModel, error) {
+		return []CanonicalModel{
+			{ID: 61, PublicName: "gpt-5.6", Provider: "OpenAI", Price: OfficialPrice{PriceKind: "text"}},
+			{ID: 62, PublicName: "gpt-5.5", Provider: "OpenAI", Price: OfficialPrice{PriceKind: "text"}},
+		}, nil
+	}}
 	token := createPlatformSession(t, services, 1, 100)
 	handler := NewServerWithServices("test", Dependencies{}, services)
 	request := httptest.NewRequest(http.MethodPost, "/api/admin/channel-reviews/21/verify", nil)
@@ -399,12 +468,64 @@ func TestAdminVerifiesMerchantCredentialThroughNewAPI(t *testing.T) {
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"adapter_type":"openai_compatible"`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"passed":1`) || !strings.Contains(response.Body.String(), `"failed":1`) {
 		t.Fatalf("验证响应=%d %s", response.Code, response.Body.String())
+	}
+	if strings.Join(testedModels, ",") != "gpt-5.6,gpt-5.5" || modelResults[101] != "passed" || modelResults[102] != "failed" {
+		t.Fatalf("检测顺序=%v，结果=%v", testedModels, modelResults)
 	}
 }
 
-func TestAdminApprovalCreatesAndTestsNewAPIChannelBeforeFinalizing(t *testing.T) {
+func TestAdminVerificationRestoresPendingWhenEveryMatchedModelFails(t *testing.T) {
+	box := testCredentialBox(t)
+	encrypted, _ := box.Encrypt([]byte("sk-upstream-secret"))
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	services.ChannelTests = channelTesterStub{test: func(context.Context, ChannelTestRequest) (ChannelTestOutcome, error) {
+		return ChannelTestOutcome{}, errors.New("上游拒绝该模型")
+	}}
+	baseRepository := &merchantRepositoryStub{}
+	baseRepository.claimReview = func(context.Context, int64, string) (MerchantChannelReview, error) {
+		return MerchantChannelReview{ID: 21, UserID: 7, Provider: "OpenAI", AdapterType: "openai_compatible", BaseURL: "https://api.merchant.example", EncryptedCredential: encrypted}, nil
+	}
+	failure := ""
+	baseRepository.finishVerify = func(_ context.Context, _ int64, _ int, _ string, value string) error {
+		failure = value
+		return nil
+	}
+	repository := &multiModelMerchantRepositoryStub{merchantRepositoryStub: baseRepository}
+	repository.reviewModels = func(context.Context, int64) ([]ReviewModelBinding, error) {
+		return []ReviewModelBinding{{ID: 101, CanonicalModelID: 61, UpstreamModelName: "gpt-5.6", MatchStatus: "matched", TestStatus: "untested"}}, nil
+	}
+	repository.setModelTest = func(_ context.Context, _ int64, _ int64, _ int, status string, _ int, message string) error {
+		if status != "failed" || !strings.Contains(message, "上游拒绝") {
+			t.Fatalf("失败模型结果=%s %q", status, message)
+		}
+		return nil
+	}
+	services.Merchants = repository
+	services.Credentials = box
+	services.Routing = &routingRepositoryStub{listModels: func(context.Context) ([]CanonicalModel, error) {
+		return []CanonicalModel{{ID: 61, PublicName: "gpt-5.6", Provider: "OpenAI", Price: OfficialPrice{PriceKind: "text"}}}, nil
+	}}
+	token := createPlatformSession(t, services, 1, 100)
+	request := httptest.NewRequest(http.MethodPost, "/api/admin/channel-reviews/21/verify", nil)
+	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
+	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
+	response := httptest.NewRecorder()
+	NewServerWithServices("test", Dependencies{}, services).ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "所有已匹配模型验证失败") || !strings.Contains(failure, "上游拒绝") {
+		t.Fatalf("全部失败响应=%d %s，恢复原因=%q", response.Code, response.Body.String(), failure)
+	}
+}
+
+func TestSanitizedChannelErrorHidesCredential(t *testing.T) {
+	message := sanitizedChannelError(errors.New("上游拒绝 sk-upstream-secret"), "sk-upstream-secret")
+	if strings.Contains(message, "sk-upstream-secret") || !strings.Contains(message, "上游拒绝") {
+		t.Fatalf("渠道错误脱敏结果=%q", message)
+	}
+}
+
+func TestAdminApprovalCreatesChannelWithPassedModelsWithoutRetesting(t *testing.T) {
 	box := testCredentialBox(t)
 	encrypted, _ := box.Encrypt([]byte("sk-upstream-secret"))
 	var calls []string
@@ -426,27 +547,37 @@ func TestAdminApprovalCreatesAndTestsNewAPIChannelBeforeFinalizing(t *testing.T)
 			_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/channel/search":
 			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{"items": []map[string]any{{"id": 41, "name": "ModelRoute-R21-U7", "models": "gpt-5.6"}}, "total": 1}})
-		case r.Method == http.MethodGet && r.URL.Path == "/api/channel/test/41":
-			if r.URL.Query().Get("model") != "gpt-5.6" {
-				t.Fatalf("测试模型=%q", r.URL.Query().Get("model"))
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": nil})
 		default:
 			t.Fatalf("未知 New API 请求=%s %s", r.Method, r.URL.RequestURI())
 		}
 	}))
-	repository := &merchantRepositoryStub{}
-	repository.claimReview = func(_ context.Context, _ int64, status string) (MerchantChannelReview, error) {
+	baseRepository := &merchantRepositoryStub{}
+	baseRepository.claimReview = func(_ context.Context, _ int64, status string) (MerchantChannelReview, error) {
 		if status != "approving" {
 			t.Fatalf("审批状态=%s", status)
 		}
 		return MerchantChannelReview{ID: 21, UserID: 7, ApplicationID: 11, CanonicalModelID: 61, Model: "gpt-5.6", Provider: "OpenAI", PriceKind: "text", ChannelName: "主线路", AdapterType: "openai_compatible", BaseURL: "https://api.merchant.example", EncryptedCredential: encrypted, Status: "approving"}, nil
 	}
-	repository.finishApproval = func(_ context.Context, reviewID int64, adminID int, channelID int) (MerchantApproval, error) {
+	baseRepository.finishApproval = func(_ context.Context, reviewID int64, adminID int, channelID int) (MerchantApproval, error) {
 		if reviewID != 21 || adminID != 1 || channelID != 41 {
 			t.Fatalf("完成审批参数=%d %d %d", reviewID, adminID, channelID)
 		}
 		return MerchantApproval{MerchantID: 31, UserID: 7, ChannelID: 51, NewAPIChannelID: 41}, nil
+	}
+	repository := &multiModelMerchantRepositoryStub{merchantRepositoryStub: baseRepository}
+	repository.reviewModels = func(context.Context, int64) ([]ReviewModelBinding, error) {
+		return []ReviewModelBinding{
+			{ID: 101, CanonicalModelID: 61, UpstreamModelName: "gpt-5.6", MatchStatus: "matched", TestStatus: "passed"},
+			{ID: 102, CanonicalModelID: 62, UpstreamModelName: "gpt-5.5", MatchStatus: "matched", TestStatus: "failed"},
+			{ID: 103, UpstreamModelName: "gpt-unknown", MatchStatus: "unmatched", TestStatus: "untested"},
+		}, nil
+	}
+	repository.setModelTest = func(context.Context, int64, int64, int, string, int, string) error { return nil }
+	repository.promoteModels = func(_ context.Context, reviewID int64, channelID int64) error {
+		if reviewID != 21 || channelID != 51 {
+			t.Fatalf("提升模型参数=%d %d", reviewID, channelID)
+		}
+		return nil
 	}
 	services.Merchants = repository
 	services.Credentials = box
@@ -460,8 +591,43 @@ func TestAdminApprovalCreatesAndTestsNewAPIChannelBeforeFinalizing(t *testing.T)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"channel_id":51`) || strings.Contains(response.Body.String(), `"newapi_channel_id"`) {
 		t.Fatalf("审批响应=%d %s", response.Code, response.Body.String())
 	}
-	if strings.Join(calls, "|") != "POST /api/channel/|GET /api/channel/search|GET /api/channel/test/41" {
+	if strings.Join(calls, "|") != "POST /api/channel/|GET /api/channel/search" {
 		t.Fatalf("New API 调用顺序=%v", calls)
+	}
+}
+
+func TestAdminApprovalRejectsReviewWithoutPassedModels(t *testing.T) {
+	box := testCredentialBox(t)
+	encrypted, _ := box.Encrypt([]byte("sk-upstream-secret"))
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("没有验证成功模型时不应创建正式渠道")
+	}))
+	baseRepository := &merchantRepositoryStub{
+		claimReview: func(context.Context, int64, string) (MerchantChannelReview, error) {
+			return MerchantChannelReview{ID: 21, UserID: 7, Provider: "OpenAI", AdapterType: "openai_compatible", EncryptedCredential: encrypted}, nil
+		},
+	}
+	restored := ""
+	baseRepository.cancelApproval = func(_ context.Context, _ int64, failure string) error {
+		restored = failure
+		return nil
+	}
+	repository := &multiModelMerchantRepositoryStub{merchantRepositoryStub: baseRepository}
+	repository.reviewModels = func(context.Context, int64) ([]ReviewModelBinding, error) {
+		return []ReviewModelBinding{{ID: 101, CanonicalModelID: 61, UpstreamModelName: "gpt-5.6", MatchStatus: "matched", TestStatus: "failed"}}, nil
+	}
+	repository.setModelTest = func(context.Context, int64, int64, int, string, int, string) error { return nil }
+	services.Merchants = repository
+	services.Credentials = box
+	token := createPlatformSession(t, services, 1, 100)
+	handler := NewServerWithServices("test", Dependencies{}, services)
+	request := httptest.NewRequest(http.MethodPost, "/api/admin/channel-reviews/21/approve", nil)
+	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
+	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "没有验证成功") || !strings.Contains(restored, "没有验证成功") {
+		t.Fatalf("无成功模型审批响应=%d %s，恢复原因=%q", response.Code, response.Body.String(), restored)
 	}
 }
 
@@ -519,12 +685,19 @@ func TestAdminChangesMerchantStatusByUserID(t *testing.T) {
 
 func TestAdminChannelsFiltersByMerchantUserID(t *testing.T) {
 	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	repository := &filteredMerchantRepositoryStub{merchantRepositoryStub: &merchantRepositoryStub{}}
-	repository.listChannelsFiltered = func(_ context.Context, page, pageSize int, status, keyword string, userID int) ([]MerchantChannel, int, error) {
+	filteredRepository := &filteredMerchantRepositoryStub{merchantRepositoryStub: &merchantRepositoryStub{}}
+	filteredRepository.listChannelsFiltered = func(_ context.Context, page, pageSize int, status, keyword string, userID int) ([]MerchantChannel, int, error) {
 		if page != 1 || pageSize != 50 || status != "active" || keyword != "主线路" || userID != 7 {
 			t.Fatalf("渠道筛选参数=%d %d %q %q %d", page, pageSize, status, keyword, userID)
 		}
 		return []MerchantChannel{{ID: 51, UserID: 7, MerchantName: "北辰云智", ChannelName: "主线路", NewAPIChannelID: 41}}, 1, nil
+	}
+	repository := &filteredMultiModelMerchantRepositoryStub{filteredMerchantRepositoryStub: filteredRepository}
+	repository.channelModels = func(_ context.Context, channelID int64) ([]ChannelModelBinding, error) {
+		if channelID != 51 {
+			t.Fatalf("渠道模型编号=%d", channelID)
+		}
+		return []ChannelModelBinding{{ID: 101, ChannelID: 51, UpstreamModelName: "gpt-5.6", CanonicalModelID: 61, MatchStatus: "matched"}}, nil
 	}
 	services.Merchants = repository
 	services.Credentials = testCredentialBox(t)
@@ -533,7 +706,7 @@ func TestAdminChannelsFiltersByMerchantUserID(t *testing.T) {
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()
 	NewServerWithServices("test", Dependencies{}, services).ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"user_id":7`) || !strings.Contains(response.Body.String(), `"merchant_name":"北辰云智"`) || strings.Contains(response.Body.String(), `"newapi_channel_id"`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"user_id":7`) || !strings.Contains(response.Body.String(), `"merchant_name":"北辰云智"`) || !strings.Contains(response.Body.String(), `"matched_models":["gpt-5.6"]`) || strings.Contains(response.Body.String(), `"newapi_channel_id"`) {
 		t.Fatalf("渠道筛选响应=%d %s", response.Code, response.Body.String())
 	}
 }
@@ -664,8 +837,6 @@ func TestApprovalFailureDeletesNewAPIChannelAndRestoresReview(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/channel/search":
 			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{"items": []map[string]any{{"id": 41, "name": "ModelRoute-R21-U7"}}}})
-		case r.Method == http.MethodGet && r.URL.Path == "/api/channel/test/41":
-			_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "message": "upstream failed"})
 		case r.Method == http.MethodDelete && r.URL.Path == "/api/channel/41":
 			_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
 		default:
@@ -673,14 +844,22 @@ func TestApprovalFailureDeletesNewAPIChannelAndRestoresReview(t *testing.T) {
 		}
 	}))
 	restored := false
-	repository := &merchantRepositoryStub{}
-	repository.claimReview = func(context.Context, int64, string) (MerchantChannelReview, error) {
+	baseRepository := &merchantRepositoryStub{}
+	baseRepository.claimReview = func(context.Context, int64, string) (MerchantChannelReview, error) {
 		return MerchantChannelReview{ID: 21, UserID: 7, CanonicalModelID: 61, Model: "gpt-5.6", Provider: "OpenAI", PriceKind: "text", ChannelName: "主线路", AdapterType: "openai_compatible", BaseURL: "https://api.merchant.example", EncryptedCredential: encrypted}, nil
 	}
-	repository.cancelApproval = func(_ context.Context, reviewID int64, _ string) error {
+	baseRepository.finishApproval = func(context.Context, int64, int, int) (MerchantApproval, error) {
+		return MerchantApproval{}, errors.New("模拟平台审批事务失败")
+	}
+	baseRepository.cancelApproval = func(_ context.Context, reviewID int64, _ string) error {
 		restored = reviewID == 21
 		return nil
 	}
+	repository := &multiModelMerchantRepositoryStub{merchantRepositoryStub: baseRepository}
+	repository.reviewModels = func(context.Context, int64) ([]ReviewModelBinding, error) {
+		return []ReviewModelBinding{{ID: 101, CanonicalModelID: 61, UpstreamModelName: "gpt-5.6", MatchStatus: "matched", TestStatus: "passed"}}, nil
+	}
+	repository.setModelTest = func(context.Context, int64, int64, int, string, int, string) error { return nil }
 	services.Merchants = repository
 	services.Credentials = box
 	token := createPlatformSession(t, services, 1, 100)
@@ -690,10 +869,10 @@ func TestApprovalFailureDeletesNewAPIChannelAndRestoresReview(t *testing.T) {
 	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusBadGateway || !restored {
+	if response.Code != http.StatusInternalServerError || !restored {
 		t.Fatalf("审批失败响应=%d %s，恢复=%v", response.Code, response.Body.String(), restored)
 	}
-	if strings.Join(calls, "|") != "POST /api/channel/|GET /api/channel/search|GET /api/channel/test/41|DELETE /api/channel/41" {
+	if strings.Join(calls, "|") != "POST /api/channel/|GET /api/channel/search|DELETE /api/channel/41" {
 		t.Fatalf("补偿调用=%v", calls)
 	}
 }

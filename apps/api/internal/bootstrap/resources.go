@@ -142,6 +142,24 @@ func ensureAdministratorMerchant(ctx context.Context, admin httpapi.AdminNewAPI,
 	if user.ID <= 0 || user.Status != 1 || user.Role < 10 || !strings.EqualFold(strings.TrimSpace(user.Username), strings.TrimSpace(administratorUsername)) {
 		return fmt.Errorf("模型核心服务账号不是配置的有效唯一管理员")
 	}
+	settings := map[string]any{}
+	if value := strings.TrimSpace(user.Setting); value != "" {
+		if err := json.Unmarshal([]byte(value), &settings); err != nil {
+			return fmt.Errorf("解析唯一管理员设置：%w", err)
+		}
+	}
+	if enabled, _ := settings["accept_unset_model_ratio_model"].(bool); !enabled {
+		if _, exists := settings["notify_type"]; !exists {
+			settings["notify_type"] = "email"
+		}
+		if _, exists := settings["quota_warning_threshold"]; !exists {
+			settings["quota_warning_threshold"] = 500000
+		}
+		settings["accept_unset_model_ratio_model"] = true
+		if _, err := admin.Do(ctx, http.MethodPut, "/api/user/setting", settings); err != nil {
+			return fmt.Errorf("开启管理员未定价模型测试权限：%w", err)
+		}
+	}
 	if _, err := merchants.EnsurePlatformMerchant(ctx, user.ID, publicOrigin); err != nil {
 		return fmt.Errorf("创建管理员直属商户：%w", err)
 	}

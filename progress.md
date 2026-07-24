@@ -3323,3 +3323,28 @@
 - `docs/账号与管理员接口.md`：补充额度接口和密钥导入流程。
 - `progress.md`：追加本轮实现、验证证据、文件清单和回滚点。
 - 回滚点：本轮前一提交为 `b9a1fc2`；执行 `git revert <本轮提交哈希>` 可回退额度接口、前端导入和六位显示。本轮没有数据库迁移，回滚不会改变现有账号、密钥、路由、余额或调用记录。
+
+## 2026-07-24 - Task: 发布调用记录高精度金额与 CC Switch 额度查询到 103
+
+### What was done
+
+- 将代码整理提交 `b9a1fc2` 与额度查询提交 `a26123dafcdf` 一并归档发布到 103；本地与服务器归档 SHA-256 一致，从独立目录重新构建六个服务。
+- 新版本基础验收通过后，将 `current` 从 `5774c931c8ef` 原子切换到 `/opt/modelroute-platform/releases/a26123dafcdf`；模型种子保持 21 个型号不变，没有新增或重复调价。
+- 使用一次性空路由密钥验证 `/v1/usage` 可读取实时人民币余额，返回整数额度、动态额度单位与 `CNY`，结果与核心账户整数额度一致；验收密钥及平台绑定已清理。
+- 公网前端资源确认包含调用记录六位金额格式器、CC Switch 导入协议和额度查询脚本；未修改数据库结构或核心模型服务源码。
+
+### Testing
+
+- 新发布目录 `deploy/scripts/verify.sh`：通过；内网版本接口返回 `a26123dafcdf` 和 `quota_per_unit=500000`。
+- 公网 `/v1/usage`：无密钥返回 `401 invalid_api_key` 且带 `Cache-Control: no-store`；有效空路由密钥返回 `200`、`unit=CNY`、`quota_per_unit=500000`，余额与账户整数额度一致。
+- `verify-routing.sh`：通过，临时单厂商密钥只返回已绑定的 `gpt-5.5`，密钥指纹、未绑定模型拒绝和删除路由解绑均符合契约，测试数据已清理。
+- `verify-operations.sh`：通过，全平台用量、运营总览、设置、兑换码、任务和渠道只读接口正常。
+- 公网 JavaScript 资源检查：包含 `minimumFractionDigits:6`、`maximumFractionDigits:6`、`ccswitch://v1/import`、`/v1/usage` 和 `usageEnabled`。
+- 只读压力测试：200 请求、10 并发全部成功，平均 `0.0722s`，P95 `0.088090s`。
+- 六个 ModelRoute 容器均为 `running`，重启次数均为 0；网关、API、核心服务、PostgreSQL 和 Redis 健康，最近 10 分钟 API、Worker 和核心服务 `panic/fatal` 为 0。
+
+### Notes
+
+- `progress.md`：追加本次生产发布、专项验收、稳定窗口和回滚证据。
+- 生产发布目录：`/opt/modelroute-platform/releases/a26123dafcdf`。
+- 回滚点：`/opt/modelroute-platform/releases/5774c931c8ef`；可创建指向该固定目录的临时软链接并使用 `mv -Tf` 原子切回，再执行旧目录的 `deploy/scripts/verify.sh`。本轮没有数据库迁移，回滚不需要恢复数据库。

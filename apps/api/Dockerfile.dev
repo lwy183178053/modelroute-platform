@@ -1,0 +1,12 @@
+ARG GO_DEV_IMAGE=golang:1.24-alpine@sha256:8bee1901f1e530bfb4a7850aa7a479d17ae3a18beb6e09064ed54cfd245b7191
+FROM ${GO_DEV_IMAGE}
+
+ENV GOPROXY=https://goproxy.cn
+
+RUN go install github.com/air-verse/air@v1.62.0
+
+WORKDIR /src
+COPY apps/api/go.mod apps/api/go.sum ./apps/api/
+RUN cd apps/api && go mod download
+
+CMD ["air", "-c", "apps/api/.air.api.toml"]

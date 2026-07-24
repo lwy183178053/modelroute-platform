@@ -3489,3 +3489,46 @@
 - `progress.md`：追加本次生产发布、专项契约、压力测试、稳定窗口和回滚点。
 - 生产发布目录：`/opt/modelroute-platform/releases/7767f69f428a`。
 - 回滚点：`/opt/modelroute-platform/releases/6772cc72c6ef`；可创建指向该目录的临时软链接并使用 `mv -Tf` 原子切回，再执行旧目录的 `deploy/scripts/deploy.sh` 和 `verify.sh`。本轮无数据库迁移，代码回滚不会改变账号、密钥、路由、渠道或调用记录。
+
+## 2026-07-25 - Task: 本地同构开发与不可变镜像发布工具链
+
+### What was done
+
+- 建立 `modelroute-dev` 独立本地开发环境：PostgreSQL、Redis 和固定版本核心服务运行于 Docker，平台 API/Worker 使用 Air 热重载，前端使用 Vite HMR 并固定在 `http://127.0.0.1:57723/`；开发数据使用独立持久卷，不连接或复制生产数据。
+- 增加统一开发入口，覆盖启动、停止、日志、验证、重建、显式重置及生产同构预检；预检使用生产 Dockerfile、Nginx 和固定摘要依赖镜像，结束后自动恢复热更新环境。
+- 将生产发布调整为两个不可变镜像：API、Worker 和模型种子共用平台镜像，前端与 Nginx 共用网关镜像；镜像标签固定为 12 位 Git 哈希，103 按镜像摘要拉取。
+- 增加本机一键发布流程及 103 安装器：校验干净且已推送的提交，执行完整测试和同构验收，生成 Git 发布归档与镜像清单，链接共享配置和数据，完成内外网验收后原子切换 `current`，失败时恢复上一发布。
+- 固定 PostgreSQL、Redis、核心服务及构建基础镜像摘要；本地下载可使用 DaoCloud 的同摘要镜像，下载入口变化不改变实际镜像内容。
+
+### Testing
+
+- `go test ./... -count=1`、`go vet ./...`、`go build ./...`：通过。
+- `npm.cmd test`、`npm.cmd run test:ui`、`npm.cmd run build`：通过，生产构建完成 1612 个模块转换。
+- 部署 Python 测试：35 项通过；`docker compose --env-file .env.example --profile tools config --quiet`：通过。
+- `deploy/scripts/dev.ps1 verify`：通过，页面、存活、就绪、模型鉴权及开发版本均符合预期。
+- `deploy/scripts/dev.ps1 preflight`：通过；生产同构环境在 `http://127.0.0.1:28100` 返回版本 `242694b65110`，验收后成功恢复 `http://127.0.0.1:57723/`。
+- 实际构建日志确认 Go、Alpine、Node 和 Nginx 基础镜像均按固定摘要拉取；预检只等待六个长期服务，不再把正常退出的模型种子一次性任务误判为失败。
+
+### Notes
+
+- `apps/api/Dockerfile`：支持固定摘要构建参数并复用同一平台镜像产出 API、Worker 和模型种子。
+- `apps/api/Dockerfile.dev`：新增带 Air 的 Go 热重载开发镜像。
+- `apps/api/.air.api.toml`：新增 API 热编译与重启配置。
+- `apps/api/.air.worker.toml`：新增 Worker 热编译与重启配置。
+- `apps/web/vite.config.js`：增加开发环境 `/api`、`/v1` 代理和固定 HMR 配置。
+- `compose.yaml`：支持平台与网关摘要镜像引用并固定依赖镜像摘要。
+- `compose.dev.yaml`：新增完整依赖加 API、Worker、前端热更新的开发编排。
+- `compose.local.yaml`：新增生产 Dockerfile 的本地同构预检覆盖配置。
+- `deploy/gateway/Dockerfile`：支持固定摘要的 Node 构建镜像与 Nginx 运行镜像。
+- `deploy/scripts/bootstrap-newapi.py`：支持本地幂等初始化和开发管理员配置。
+- `deploy/scripts/deploy.sh`：适配发布目录、共享数据链接和摘要镜像部署。
+- `deploy/scripts/dev.ps1`：新增本地开发环境的统一 PowerShell 入口。
+- `deploy/scripts/dev.cmd`：新增 PowerShell 开发入口的 CMD 包装。
+- `deploy/scripts/release.ps1`：新增测试、构建、推送、上传、103 部署和回滚的一键发布流程。
+- `deploy/scripts/release.cmd`：新增 PowerShell 发布入口的 CMD 包装。
+- `deploy/scripts/install-release.sh`：新增 103 的不可变发布安装、验收、原子切换和失败恢复逻辑。
+- `deploy/tests/test_deploy.py`：扩展共享目录、发布指针和失败恢复测试。
+- `deploy/tests/test_image_tooling.py`：新增固定摘要、开发编排和发布工具链契约测试。
+- `docs/部署运行手册.md`：补充本地同构开发、GHCR 凭据边界、不可变镜像发布和日常更新流程。
+- `progress.md`：追加本轮实现、验证证据、改动清单和回滚点。
+- 回滚点：本轮施工前提交为 `242694b65110`；提交后执行 `git revert <本轮提交哈希>` 可回退工具链与文档。本轮没有数据库结构或业务数据变更，不影响现有账号、渠道、模型、路由和调用记录。

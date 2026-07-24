@@ -1,0 +1,96 @@
+services:
+  postgres:
+    volumes:
+      - modelroute_dev_postgres:/var/lib/postgresql/data
+      - ./deploy/postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-databases.sh:ro
+
+  redis:
+    volumes:
+      - modelroute_dev_redis:/data
+
+  new-api:
+    ports:
+      - "127.0.0.1:28101:3000"
+    volumes:
+      - modelroute_dev_newapi:/data
+      - modelroute_dev_newapi_logs:/app/logs
+
+  platform-api:
+    image: modelroute-platform-api-dev
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile.dev
+      args: !override
+        GO_DEV_IMAGE: ${GO_DEV_IMAGE:-golang:1.24-alpine@sha256:8bee1901f1e530bfb4a7850aa7a479d17ae3a18beb6e09064ed54cfd245b7191}
+    command: ["air", "-c", "apps/api/.air.api.toml"]
+    read_only: false
+    tmpfs: !override
+      - /tmp:exec
+    volumes:
+      - ./:/src
+      - modelroute_dev_go_mod:/go/pkg/mod
+      - modelroute_dev_go_build:/root/.cache/go-build
+
+  platform-worker:
+    image: modelroute-platform-api-dev
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile.dev
+      args: !override
+        GO_DEV_IMAGE: ${GO_DEV_IMAGE:-golang:1.24-alpine@sha256:8bee1901f1e530bfb4a7850aa7a479d17ae3a18beb6e09064ed54cfd245b7191}
+    entrypoint: []
+    command: ["air", "-c", "apps/api/.air.worker.toml"]
+    read_only: false
+    tmpfs: !override
+      - /tmp:exec
+    volumes:
+      - ./:/src
+      - modelroute_dev_go_mod:/go/pkg/mod
+      - modelroute_dev_go_build:/root/.cache/go-build
+
+  model-seed:
+    image: modelroute-platform-api-dev
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile.dev
+      args: !override
+        GO_DEV_IMAGE: ${GO_DEV_IMAGE:-golang:1.24-alpine@sha256:8bee1901f1e530bfb4a7850aa7a479d17ae3a18beb6e09064ed54cfd245b7191}
+    working_dir: /src/apps/api
+    entrypoint: ["go", "run", "./cmd/seed-models"]
+    read_only: false
+    tmpfs: !override
+      - /tmp:exec
+    volumes:
+      - ./:/src
+      - modelroute_dev_go_mod:/go/pkg/mod
+      - modelroute_dev_go_build:/root/.cache/go-build
+
+  web-dev:
+    image: ${NODE_DEV_IMAGE:-node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd}
+    working_dir: /src/apps/web
+    command:
+      - sh
+      - -c
+      - lock=$$(sha256sum package-lock.json | cut -d' ' -f1); if [ "$$(cat node_modules/.modelroute-lock 2>/dev/null)" != "$$lock" ]; then npm ci --no-audit --no-fund && echo "$$lock" > node_modules/.modelroute-lock; fi; exec npm run dev -- --host 0.0.0.0 --port 57723
+    environment:
+      NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
+      VITE_API_PROXY_TARGET: http://platform-api:8080
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:57723:57723"
+    volumes:
+      - ./:/src
+      - modelroute_dev_node_modules:/src/apps/web/node_modules
+    depends_on:
+      platform-api:
+        condition: service_healthy
+    networks: [backend, edge]
+
+volumes:
+  modelroute_dev_postgres:
+  modelroute_dev_redis:
+  modelroute_dev_newapi:
+  modelroute_dev_newapi_logs:
+  modelroute_dev_go_mod:
+  modelroute_dev_go_build:
+  modelroute_dev_node_modules:

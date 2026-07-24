@@ -1,0 +1,22 @@
+services:
+  postgres:
+    volumes:
+      - modelroute_dev_postgres:/var/lib/postgresql/data
+      - ./deploy/postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-databases.sh:ro
+
+  redis:
+    volumes:
+      - modelroute_dev_redis:/data
+
+  new-api:
+    ports:
+      - "127.0.0.1:28101:3000"
+    volumes:
+      - modelroute_dev_newapi:/data
+      - modelroute_dev_newapi_logs:/app/logs
+
+volumes:
+  modelroute_dev_postgres:
+  modelroute_dev_redis:
+  modelroute_dev_newapi:
+  modelroute_dev_newapi_logs:

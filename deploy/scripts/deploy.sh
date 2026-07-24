@@ -13,7 +13,20 @@ APP_VERSION=$(basename "$ROOT_DIR")
 export APP_VERSION
 
 docker compose --env-file .env --profile tools config --quiet
-docker compose --env-file .env --profile tools build
+
+if [ -f release-images.env ]; then
+  test "$(wc -l < release-images.env | tr -d ' ')" = "3"
+  grep -Eq '^RELEASE_VERSION=[0-9a-f]{12}$' release-images.env
+  grep -Eq '^PLATFORM_IMAGE=ghcr\.io/lwy183178053/modelroute-platform-api@sha256:[0-9a-f]{64}$' release-images.env
+  grep -Eq '^GATEWAY_IMAGE=ghcr\.io/lwy183178053/modelroute-platform-gateway@sha256:[0-9a-f]{64}$' release-images.env
+  . ./release-images.env
+  test "$RELEASE_VERSION" = "$APP_VERSION"
+  export PLATFORM_IMAGE GATEWAY_IMAGE
+  docker compose --env-file .env --profile tools config --quiet
+  docker compose --env-file .env --profile tools pull platform-api platform-worker model-seed gateway
+else
+  docker compose --env-file .env --profile tools build
+fi
 docker compose --env-file .env up -d postgres redis new-api
 
 HAS_PLATFORM_MIGRATIONS=$(docker compose --env-file .env exec -T postgres sh -c "psql -At -U \"\$POSTGRES_USER\" -d \"\$PLATFORM_DB_NAME\" -c \"SELECT CASE WHEN to_regclass('public.platform_schema_migrations') IS NULL THEN 0 ELSE 1 END\"")

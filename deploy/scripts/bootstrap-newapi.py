@@ -98,14 +98,15 @@ def rename_bootstrap_admin(opener, base_url, username, password):
 
 
 def main():
-    if len(sys.argv) != 3:
-        raise SystemExit("用法：bootstrap-newapi.py <New API 地址> <SMTP 设置备份>")
+    if len(sys.argv) not in {2, 3}:
+        raise SystemExit("用法：bootstrap-newapi.py <New API 地址> [SMTP 设置备份]")
     username = os.environ.get("NEW_API_ADMIN_USERNAME", "").strip()
     password = os.environ.get("NEW_API_ADMIN_PASSWORD", "")
     if not username or not password:
         raise SystemExit("缺少 New API 管理员环境变量")
 
-    base_url, smtp_path = sys.argv[1], sys.argv[2]
+    base_url = sys.argv[1]
+    smtp_path = sys.argv[2] if len(sys.argv) == 3 else ""
     opener = urllib.request.build_opener(
         urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
     )
@@ -147,17 +148,20 @@ def main():
         {"username": username, "password": password},
     )
     validate_root(login)
-    headers = {"New-Api-User": str(login["id"])}
-    for key, value in load_smtp_options(smtp_path).items():
-        request(
-            opener,
-            base_url,
-            "PUT",
-            "/api/option/",
-            {"key": key, "value": value},
-            headers,
-        )
-    print("New API 唯一管理员与 SMTP 设置恢复完成。")
+    if smtp_path:
+        headers = {"New-Api-User": str(login["id"])}
+        for key, value in load_smtp_options(smtp_path).items():
+            request(
+                opener,
+                base_url,
+                "PUT",
+                "/api/option/",
+                {"key": key, "value": value},
+                headers,
+            )
+        print("New API 唯一管理员与 SMTP 设置恢复完成。")
+    else:
+        print("New API 唯一管理员初始化完成。")
 
 
 if __name__ == "__main__":

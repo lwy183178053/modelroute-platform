@@ -149,6 +149,7 @@ func NewServerWithServices(version string, dependencies Dependencies, services S
 	mux.HandleFunc("POST /v1/responses", s.modelProxy)
 	mux.HandleFunc("POST /v1/images/generations", s.modelProxy)
 	mux.HandleFunc("GET /v1/models", s.modelListProxy)
+	mux.HandleFunc("GET /v1/usage", s.usageBalance)
 	return requestID(clientMetadata(mux))
 }
 

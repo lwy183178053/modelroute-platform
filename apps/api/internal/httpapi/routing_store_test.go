@@ -176,6 +176,55 @@ func TestRevokeTokenBindingDeletesPlatformBinding(t *testing.T) {
 	}
 }
 
+func TestTokenAccountIDOnlyAcceptsActiveFingerprint(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		row     *int
+		wantID  int
+		wantErr error
+	}{
+		{name: "有效密钥", row: func() *int { value := 7; return &value }(), wantID: 7},
+		{name: "停用删除或未知密钥", wantErr: ErrTokenNotFound},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			database, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer database.Close()
+			expectation := mock.ExpectQuery(regexp.QuoteMeta("SELECT newapi_user_id FROM token_bindings")).
+				WithArgs("fingerprint")
+			if testCase.row == nil {
+				expectation.WillReturnError(sql.ErrNoRows)
+			} else {
+				expectation.WillReturnRows(sqlmock.NewRows([]string{"newapi_user_id"}).AddRow(*testCase.row))
+			}
+			userID, err := NewSQLRoutingStore(database).TokenAccountID(context.Background(), "fingerprint")
+			if userID != testCase.wantID || !errors.Is(err, testCase.wantErr) {
+				t.Fatalf("用户编号=%d err=%v", userID, err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestTokenAccountIDPreservesDatabaseFailure(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	databaseErr := errors.New("database unavailable")
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT newapi_user_id FROM token_bindings")).
+		WithArgs("fingerprint").WillReturnError(databaseErr)
+	_, err = NewSQLRoutingStore(database).TokenAccountID(context.Background(), "fingerprint")
+	if !errors.Is(err, databaseErr) || errors.Is(err, ErrTokenNotFound) {
+		t.Fatalf("数据库错误被错误映射：%v", err)
+	}
+}
+
 func TestRoutingStoreErrorMapsUniquePolicyNameToConflict(t *testing.T) {
 	err := routingStoreError(&pgconn.PgError{Code: "23505", ConstraintName: "routing_policies_user_name_idx"})
 	if !errors.Is(err, ErrRoutingInvalidState) {

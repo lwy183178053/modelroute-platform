@@ -58,6 +58,13 @@ export function formatQuota(value) {
   }).format(quota / getQuotaPerUnit());
 }
 
+export function formatUsageQuota(value) {
+  const quota = Number(value || 0);
+  return new Intl.NumberFormat('zh-CN', {
+    style: 'currency', currency: 'CNY', minimumFractionDigits: 6, maximumFractionDigits: 6,
+  }).format(quota / getQuotaPerUnit());
+}
+
 export function formatPriceMicros(value) {
   if (value == null) return '-';
   return new Intl.NumberFormat('zh-CN', {

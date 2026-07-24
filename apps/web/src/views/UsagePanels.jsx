@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, Coins, Gauge, RefreshCw } from 'lucide-react';
-import { apiRequest, formatQuota } from '../api';
+import { apiRequest, formatQuota, formatUsageQuota } from '../api';
 import { Button, EmptyNotice, InlineNotice, Pagination, Section } from '../ui';
 
 const numberFormatter = new Intl.NumberFormat('zh-CN');
@@ -115,7 +115,7 @@ export function UsageLogTable({ data, loading, error, view = 'user', title = '�
           {!isAdmin && !isMerchant && <td>{log.token_id ? `密钥 ID ${log.token_id}` : '-'}</td>}
           <td>{tokenDetail(log)}</td>
           <td>{numberFormatter.format(Number(log.cache_tokens || 0))}</td>
-          <td>{formatQuota(isMerchant ? log.merchant_income_quota : log.quota)}</td>
+          <td>{formatUsageQuota(isMerchant ? log.merchant_income_quota : log.quota)}</td>
         </tr>)}
         {!loading && logs.length === 0 && <tr><td className="table-message" colSpan={columnCount}>{error || '暂无调用记录'}</td></tr>}
         {loading && <tr><td className="table-message" colSpan={columnCount}>正在读取调用记录</td></tr>}

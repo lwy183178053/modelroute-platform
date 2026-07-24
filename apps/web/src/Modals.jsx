@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Check, CreditCard, KeyRound, Landmark, LockKeyhole, Plus, RotateCcw, Send, ShieldCheck } from 'lucide-react';
 import AuthModal from './AuthModal';
 import { apiRequest, formatPriceMicros, formatQuota, getQuotaPerUnit } from './api';
+import { buildCCSwitchImportURL } from './ccswitch';
 import { Button, Field, InlineNotice, Modal, Select, Status, TextInput } from './ui';
 
 const providerOptions = ['OpenAI', 'Anthropic', 'Gemini', 'DeepSeek', 'Qwen', 'Moonshot'];
@@ -618,6 +619,47 @@ function KeyModal({ config, close, notify }) {
   );
 }
 
+function CCSwitchModal({ config, close, notify }) {
+  const key = config.key;
+  const routes = key.routing_policies || [];
+  const [model, setModel] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async () => {
+    if (!model) {
+      setError('请选择该密钥已绑定的模型');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const revealed = await apiRequest(`/api/keys/${key.id}/reveal`, { method: 'POST' });
+      const url = buildCCSwitchImportURL({
+        baseUrl: window.location.origin,
+        apiKey: revealed.key,
+        model,
+        provider: key.provider,
+        keyName: key.name,
+      });
+      window.open(url, '_self');
+      notify('已唤起 CC Switch');
+      close();
+    } catch (requestError) {
+      setError(requestError.message || '导入 CC Switch 失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title="导入 CC Switch" description={`${key.name} · ${key.provider}`} onClose={close} footer={<><Button onClick={close}>取消</Button><Button disabled={busy || !model} icon={Send} onClick={submit} variant="primary">{busy ? '正在导入' : '确认导入'}</Button></>}>
+      {error && <InlineNotice tone="danger">{error}</InlineNotice>}
+      <Field label="默认模型" hint="仅显示该密钥已配置路由的模型"><Select aria-label="默认模型" onChange={(event) => setModel(event.target.value)} value={model}><option value="">请选择默认模型</option>{routes.map((route) => <option key={route.model_id} value={route.model_name}>{route.model_name}</option>)}</Select></Field>
+    </Modal>
+  );
+}
+
 function AdminUserModal({ config, close, notify }) {
   const quotaMode = config.type === 'adminQuota';
   const [mode, setMode] = useState('add');
@@ -658,6 +700,7 @@ export default function Modals({ modal, close, notify, onAuthenticated, setModal
   const type = typeof modal === 'string' ? modal : modal.type;
   if (['login', 'register', 'forgot', 'twoFactor', 'resetPassword'].includes(type)) return <AuthModal close={close} mode={type} notify={notify} onAuthenticated={onAuthenticated} reset={typeof modal === 'object' ? modal : null} setModal={setModal} />;
   if (type === 'key') return <KeyModal close={close} config={modal} notify={notify} />;
+  if (type === 'ccSwitch') return <CCSwitchModal close={close} config={modal} notify={notify} />;
   if (type === 'adminQuota' || type === 'adminPassword') return <AdminUserModal close={close} config={modal} notify={notify} />;
   if (type === 'route') return <RouteModal close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;
   if (type === 'quote') return <QuoteModal close={close} config={typeof modal === 'object' ? modal : {}} notify={notify} />;

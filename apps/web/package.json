@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test": "npm run test:quota && npm run test:ccswitch",
     "test:quota": "node scripts/quota-unit-test.mjs",
+    "test:ccswitch": "node scripts/ccswitch-import-test.mjs",
     "test:ui": "vite build && node scripts/ui-smoke.mjs",
     "test:production": "node scripts/production-smoke.mjs",
     "capture": "vite build && node scripts/capture.mjs"

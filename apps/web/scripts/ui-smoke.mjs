@@ -133,7 +133,7 @@ async function mockAdminAPI(targetPage, state, account = null) {
         ],
         filters: { models: ['gpt-4o-mini'], merchants: [{ user_id: 8, name: '北辰云智' }] },
         logs: { page: Number(url.searchParams.get('p') || 1), page_size: Number(url.searchParams.get('page_size') || 20), total: 1, items: [
-          { id: 901, user_id: 7, created_at: 1784692800, model_name: 'gpt-4o-mini', quota: 500000, prompt_tokens: 2400, completion_tokens: 680, cache_tokens: 1200, token_id: 9, merchant_user_id: 8, merchant_name: '北辰云智', channel_id: 51, channel_name: 'OpenAI 主线路', request_id: 'req-user-1001' },
+          { id: 901, user_id: 7, created_at: 1784692800, model_name: 'gpt-4o-mini', quota: 257, prompt_tokens: 2400, completion_tokens: 680, cache_tokens: 1200, token_id: 9, merchant_user_id: 8, merchant_name: '北辰云智', channel_id: 51, channel_name: 'OpenAI 主线路', request_id: 'req-user-1001' },
         ] },
       } });
     }
@@ -479,6 +479,7 @@ try {
   await consoleSidebar.getByRole('button', { name: '调用记录', exact: true }).click();
   assert(!(await page.locator('body').innerText()).includes('req-user-1001'), '用户调用记录仍显示请求编号');
   await page.getByText('1,200', { exact: true }).waitFor();
+  await page.getByText('¥0.000343', { exact: true }).waitFor();
   await assertPagination(page);
   assert(await page.locator('[aria-label="最近 7 天用量趋势"]').count() === 0, '调用记录页仍重复渲染用量趋势');
   assert(!(await page.locator('body').innerText()).includes('mkt-ov-'), '控制台泄露了内部报价别名');
@@ -524,6 +525,12 @@ try {
   await page.getByText('密钥已复制', { exact: true }).waitFor();
   assert(adminMockState.keyRevealCalls === 1, '复制密钥没有按需读取真实密钥');
   assert(await page.evaluate(() => navigator.clipboard.readText()) === 'sk-real-public-key-for-copy-test', '复制按钮没有写入真实公开密钥');
+  await clickActionInRow(page, '真实主密钥', '导入 CC Switch');
+  const ccSwitchDialog = page.getByRole('dialog', { name: '导入 CC Switch' });
+  assert(await ccSwitchDialog.getByLabel('默认模型').inputValue() === '', 'CC Switch 导入没有要求用户明确选择默认模型');
+  await ccSwitchDialog.getByLabel('默认模型').selectOption('gpt-4o-mini');
+  assert(adminMockState.keyRevealCalls === 1, 'CC Switch 弹窗确认前读取了完整密钥');
+  await ccSwitchDialog.getByRole('button', { name: '取消' }).click();
   await clickActionInRow(page, '真实主密钥', '配置模型路由');
   const keyRoutesDialog = page.getByRole('dialog', { name: '配置模型路由' });
   await keyRoutesDialog.getByLabel('gpt-4o-mini 路由').selectOption('');
@@ -596,6 +603,7 @@ try {
   await merchantSidebar.getByRole('button', { name: '调用记录', exact: true }).click();
   assert(!(await page.locator('body').innerText()).includes('req-merchant-9001'), '商户调用记录仍显示请求编号');
   await page.getByText('OpenAI 主线路').waitFor();
+  await page.getByText('¥0.840000', { exact: true }).waitFor();
   await page.getByLabel('筛选模型').selectOption('gpt-4o-mini');
   await page.waitForTimeout(100);
   assert(adminMockState.merchantUsageQuery.model_name === 'gpt-4o-mini', '商户调用记录模型筛选参数不正确');
@@ -662,6 +670,7 @@ try {
   await page.getByRole('button', { name: '渠道调用日志' }).click();
   assert(!(await page.locator('body').innerText()).includes('req-admin-9001'), '管理员调用记录仍显示请求编号');
   await page.getByText('北辰云智', { exact: true }).waitFor();
+  await page.getByText('¥0.933333', { exact: true }).waitFor();
   await assertPagination(page);
   await page.getByLabel('筛选商户').selectOption('8');
   await page.getByLabel('筛选渠道').selectOption('51');

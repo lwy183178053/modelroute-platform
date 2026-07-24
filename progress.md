@@ -3284,3 +3284,42 @@
 - `docs/部署运行手册.md`：更新生产 UI 验收命令与截图生成物规则。
 - `progress.md`：追加代码整理范围、验证证据、残余依赖风险和回滚点。
 - 回滚点：本轮前一提交为 `b5c35ba`；执行 `git revert <本轮提交哈希>` 可恢复代码、脚本和历史截图。本轮没有数据库迁移，物理清理仅匹配验收脚本生成的 `contract-*` 测试 Token。
+
+## 2026-07-24 - Task: 增加调用记录高精度金额与 CC Switch 额度查询
+
+### What was done
+
+- 用户、商户和管理员共用的调用记录金额改用专用格式器，按运行时额度单位换算并固定显示 6 位小数；余额、充值、提现、支付订单和汇总卡片继续显示 2 位。
+- 新增 `GET /v1/usage`：使用现有 Bearer 密钥指纹查找所属账户，再通过内部管理服务读取实时可用额度；空路由密钥可以查询，停用或删除密钥、停用账号和内部查询异常返回不同错误，不把查询异常伪装成零余额。
+- API 密钥操作菜单增加“导入 CC Switch”。只有已绑定模型的密钥可以进入，用户必须明确选择一个授权模型；确认后才按需读取一次完整密钥并生成 Codex/Responses 深链，附带人民币 Usage Script 和 30 分钟查询间隔。
+- 密钥正文仍只在浏览器确认动作中短暂传递，不写入平台数据库、日志、文档或进度记录；本轮不修改数据库结构和核心模型服务源码。
+
+### Testing
+
+- 先运行目标用例，确认后端因缺少 `TokenAccountID`、前端因缺少 `formatUsageQuota` 和 CC Switch 生成器而失败；实现后 `go test ./internal/httpapi -run 'Test(UsageBalance|TokenAccountID)' -count=1` 与 `npm.cmd test` 通过。
+- `go test ./... -count=1`、`go vet ./...`、`go build ./cmd/api`、`go build ./cmd/worker`、`go build ./cmd/seed-models`：通过。
+- `npm.cmd test`、`npm.cmd run test:ui`：通过；桌面和移动烟雾覆盖三类调用记录六位金额、默认模型显式选择、确认前不读取完整密钥和现有密钥路由交互。
+- `python -m unittest discover -s deploy/tests -p "test_*.py" -v`：28 项通过。
+- `docker compose --env-file .env.example --profile tools config --quiet`：通过。
+
+### Notes
+
+- `apps/api/internal/httpapi/routing_store.go`：增加只接受有效密钥指纹的账户编号查询，并保留数据库故障语义。
+- `apps/api/internal/httpapi/routing_store_test.go`：覆盖有效、停用、删除、未知密钥和数据库异常。
+- `apps/api/internal/httpapi/usage_balance.go`：实现 CC Switch 兼容的实时人民币余额响应和错误边界。
+- `apps/api/internal/httpapi/usage_balance_test.go`：覆盖有效密钥、空路由、账号停用、账户不匹配和内部服务异常。
+- `apps/api/internal/httpapi/server.go`：注册 `GET /v1/usage`。
+- `apps/web/src/api.js`：增加调用记录专用六位人民币金额格式器。
+- `apps/web/src/ccswitch.js`：集中生成 Usage Script 和 `ccswitch://v1/import` 链接。
+- `apps/web/src/views/UsagePanels.jsx`：用户、商户和管理员调用记录统一使用六位金额。
+- `apps/web/src/views/ConsoleView.jsx`：密钥操作菜单增加 CC Switch 导入及空路由禁用提示。
+- `apps/web/src/Modals.jsx`：增加授权模型选择和确认后按需读取密钥的导入弹窗。
+- `apps/web/scripts/quota-unit-test.mjs`：锁定 `257`、`500000` 和零额度的六位显示。
+- `apps/web/scripts/ccswitch-import-test.mjs`：解码并核对深链地址、模型、脚本和查询间隔。
+- `apps/web/scripts/ui-smoke.mjs`：覆盖三种调用记录视角和 CC Switch 导入交互。
+- `apps/web/package.json`：登记前端逻辑测试和 CC Switch 专项命令。
+- `docs/CC Switch接入.md`：记录导入、额度查询、错误码和模型检测约束。
+- `docs/统一调用记录.md`：记录调用金额六位、其他金额两位的展示口径。
+- `docs/账号与管理员接口.md`：补充额度接口和密钥导入流程。
+- `progress.md`：追加本轮实现、验证证据、文件清单和回滚点。
+- 回滚点：本轮前一提交为 `b9a1fc2`；执行 `git revert <本轮提交哈希>` 可回退额度接口、前端导入和六位显示。本轮没有数据库迁移，回滚不会改变现有账号、密钥、路由、余额或调用记录。

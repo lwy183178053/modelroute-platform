@@ -80,6 +80,10 @@ type RoutingRepository interface {
 	ImagePriceItems(context.Context, int64) ([]ImagePriceItem, error)
 }
 
+type TokenAccountResolver interface {
+	TokenAccountID(context.Context, string) (int, error)
+}
+
 type MerchantOfferState struct {
 	MultiplierBPS int    `json:"multiplier_bps"`
 	Status        string `json:"status"`
@@ -583,6 +587,28 @@ ORDER BY binding.newapi_token_id DESC, model.public_name, policy.id
 		return nil, fmt.Errorf("遍历密钥路由绑定：%w", err)
 	}
 	return items, nil
+}
+
+func (s *SQLRoutingStore) TokenAccountID(ctx context.Context, fingerprint string) (int, error) {
+	fingerprint = strings.TrimSpace(fingerprint)
+	if fingerprint == "" {
+		return 0, ErrTokenNotFound
+	}
+	var userID int
+	err := s.database.QueryRowContext(ctx, `
+SELECT newapi_user_id FROM token_bindings
+WHERE token_fingerprint = $1 AND status = 'active'
+`, fingerprint).Scan(&userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrTokenNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("读取密钥所属账户：%w", err)
+	}
+	if userID <= 0 {
+		return 0, ErrTokenNotFound
+	}
+	return userID, nil
 }
 
 func (s *SQLRoutingStore) DeleteRoutingPolicy(ctx context.Context, userID int, policyID int64) (int, error) {

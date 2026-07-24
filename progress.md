@@ -3372,3 +3372,25 @@
 - `docs/模型报价路由与健康.md`：记录模型市场两级筛选口径。
 - `progress.md`：追加本轮实现、测试证据、文件清单和回滚点。
 - 回滚点：本轮前一提交为 `2287582e2ca0`；执行 `git revert <本轮提交哈希>` 可回退模型筛选。该改动只有前端与文档，不涉及数据库和后端接口。
+
+## 2026-07-24 - Task: 发布模型市场具体模型筛选到 103
+
+### What was done
+
+- 将 `6772cc72c6ef` 归档发布到 103，原子切换 `current` 至 `/opt/modelroute-platform/releases/6772cc72c6ef`；前一稳定发布目录 `a26123dafcdf` 保留。
+- 新版本从独立发布目录构建六个服务，模型种子重复执行结果为新增 0、调价 0、未变化 21；本轮没有数据库迁移或数据重置。
+- 生产模型市场确认显示“全部模型”和 4 个可用 OpenAI 模型；选择 `gpt-5.5` 后市场表只保留对应报价，390px 页面模型按钮自动换行且无横向溢出。
+
+### Testing
+
+- 本地归档与服务器归档 SHA-256 一致；新目录 `deploy/scripts/verify.sh` 通过，内部版本接口返回 `6772cc72c6ef`。
+- `verify-routing.sh` 与 `verify-operations.sh`：通过，临时密钥和路由验收数据已清理。
+- 真实无登录浏览器：具体模型按钮共 5 个（含“全部模型”），选择 `gpt-5.5` 后报价行数为 1，移动端 `flex-wrap=wrap`、无页面级横向溢出、页面错误数为 0。
+- 只读压力测试：200 请求、10 并发全部成功，平均 `0.0716s`，P95 `0.088794s`。
+- 六个 ModelRoute 容器均为 `running`，重启次数均为 0；近 10 分钟 API、Worker 和核心服务 `panic/fatal` 为 0。
+
+### Notes
+
+- `progress.md`：追加本次发布、浏览器筛选验收、容器与稳定窗口证据。
+- 生产发布目录：`/opt/modelroute-platform/releases/6772cc72c6ef`。
+- 回滚点：`/opt/modelroute-platform/releases/a26123dafcdf`；可创建指向该固定目录的临时软链接并使用 `mv -Tf` 原子切回，再执行该目录的 `deploy/scripts/verify.sh`。本轮没有数据库迁移，回滚不需要恢复数据库。

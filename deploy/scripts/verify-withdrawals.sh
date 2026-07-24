@@ -43,18 +43,16 @@ PY
 curl -fsS -c "$COOKIE_JAR" -H 'Content-Type: application/json' --data-binary @- "$BASE_URL/api/auth/login" >"$WORK_DIR/login.json"
 
 curl -fsS -b "$COOKIE_JAR" "$BASE_URL/api/admin/withdrawals?page_size=10" >"$WORK_DIR/withdrawals.json"
-curl -fsS -b "$COOKIE_JAR" "$BASE_URL/api/admin/settlement-reconciliation?status=open&page_size=10" >"$WORK_DIR/reconciliation.json"
 
-python3 - "$WORK_DIR/withdrawals.json" "$WORK_DIR/reconciliation.json" <<'PY'
+python3 - "$WORK_DIR/withdrawals.json" <<'PY'
 import json
 import sys
 
-for path in sys.argv[1:]:
-    payload = json.load(open(path, encoding="utf-8"))
-    assert payload.get("success") is True
-    data = payload.get("data")
-    assert isinstance(data, dict) and isinstance(data.get("items"), list)
-    assert "encrypted_recipient_account" not in json.dumps(payload, ensure_ascii=False)
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+assert payload.get("success") is True
+data = payload.get("data")
+assert isinstance(data, dict) and isinstance(data.get("items"), list)
+assert "encrypted_recipient_account" not in json.dumps(payload, ensure_ascii=False)
 PY
 
 status="$(curl -sS -o "$WORK_DIR/balance.json" -w '%{http_code}' -b "$COOKIE_JAR" "$BASE_URL/api/merchant/balance")"
@@ -67,4 +65,4 @@ status="$(printf '{"reason":"contract csrf check"}' |
   curl -sS -o "$WORK_DIR/csrf.json" -w '%{http_code}' -b "$COOKIE_JAR" -H 'Content-Type: application/json' --data-binary @- -X POST "$BASE_URL/api/admin/withdrawals/1/approve")"
 test "$status" = "403"
 
-echo "结算与人工提现契约验证通过：权限、只读列表、敏感字段和同源拦截正常。"
+echo "人工提现契约验证通过：权限、只读列表、敏感字段和同源拦截正常。"

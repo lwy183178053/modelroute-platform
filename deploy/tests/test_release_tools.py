@@ -61,7 +61,7 @@ class ReleaseToolContractTest(unittest.TestCase):
             "verify-merchants.sh",
             "verify-routing.sh",
             "verify-payments.sh",
-            "verify-settlement.sh",
+            "verify-withdrawals.sh",
             "verify-operations.sh",
         ):
             self.assertIn(

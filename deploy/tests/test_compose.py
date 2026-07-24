@@ -102,13 +102,13 @@ class ComposeIsolationTest(unittest.TestCase):
         self.assertIn('test "$status" = "400"', verifier)
         self.assertNotIn("merchant_key", verifier)
 
-    def test_settlement_verifier_is_read_only_and_covers_permissions(self):
-        verifier = (ROOT / "deploy" / "scripts" / "verify-settlement.sh").read_text(encoding="utf-8")
+    def test_withdrawal_verifier_is_read_only_and_covers_permissions(self):
+        verifier = (ROOT / "deploy" / "scripts" / "verify-withdrawals.sh").read_text(encoding="utf-8")
         self.assertIn("/api/admin/withdrawals", verifier)
-        self.assertIn("/api/admin/settlement-reconciliation", verifier)
         self.assertIn("/api/merchant/balance", verifier)
         self.assertIn('test "$status" = "401"', verifier)
         self.assertIn('test "$status" = "403"', verifier)
+        self.assertNotIn("settlement-reconciliation", verifier)
         self.assertNotIn("/ignore", verifier)
         self.assertNotIn("/paid", verifier)
 

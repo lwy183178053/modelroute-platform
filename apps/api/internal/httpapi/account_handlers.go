@@ -223,6 +223,48 @@ func (s *server) updateKeyStatus(w http.ResponseWriter, r *http.Request) {
 	writeRawData(w, data)
 }
 
+func (s *server) revealKey(w http.ResponseWriter, r *http.Request) {
+	_, session, ok := s.requireSession(w, r, roleCommon)
+	if !ok || !s.requireSameOrigin(w, r) {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	tokenIDs, err := s.userTokenIDs(r, session)
+	if err != nil {
+		writeUpstreamError(w, err, http.StatusBadGateway)
+		return
+	}
+	if _, owned := tokenIDs[id]; !owned {
+		writeAPIError(w, http.StatusNotFound, "key_not_found", "密钥不存在")
+		return
+	}
+	data, err := s.services.NewAPI.Do(r.Context(), http.MethodPost, "/api/token/"+strconv.Itoa(id)+"/key", nil, upstreamAuth(session))
+	if err != nil {
+		writeUpstreamError(w, err, http.StatusBadGateway)
+		return
+	}
+	var revealed struct {
+		Key string `json:"key"`
+	}
+	if err := json.Unmarshal(data, &revealed); err != nil || strings.TrimSpace(revealed.Key) == "" {
+		writeAPIError(w, http.StatusBadGateway, "key_reveal_failed", "核心服务未返回有效密钥")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]string{"key": publicAPIKey(revealed.Key)}})
+}
+
+func publicAPIKey(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "sk-") {
+		return value
+	}
+	return "sk-" + value
+}
+
 func (s *server) deleteKey(w http.ResponseWriter, r *http.Request) {
 	_, session, ok := s.requireSession(w, r, roleCommon)
 	if !ok || !s.requireSameOrigin(w, r) {

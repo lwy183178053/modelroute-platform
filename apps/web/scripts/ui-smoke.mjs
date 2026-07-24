@@ -46,6 +46,7 @@ async function assertPagination(targetPage) {
 
 const browser = await chromium.launch({ executablePath, headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: baseUrl });
 const pageErrors = [];
 page.on('pageerror', (error) => pageErrors.push(error.message));
 page.setDefaultTimeout(10000);
@@ -94,6 +95,10 @@ async function mockAdminAPI(targetPage, state, account = null) {
     }
     if (url.pathname === '/api/keys' && request.method() === 'GET') {
       return json({ success: true, data: { page: 1, page_size: 20, total: 1, items: [{ id: 9, name: '真实主密钥', key: 'full-secret-key', status: 1, created_time: 1784690000, accessed_time: 1784692000, expired_time: -1, unlimited_quota: true, provider: 'OpenAI', model_count: 1, routing_policies: [{ routing_policy_id: 71, routing_policy_name: '主路由', model_id: 101, model_name: 'gpt-4o-mini', provider: 'OpenAI', priority: 'cache' }] }] } });
+    }
+    if (url.pathname === '/api/keys/9/reveal' && request.method() === 'POST') {
+      state.keyRevealCalls += 1;
+      return json({ success: true, data: { key: 'sk-real-public-key-for-copy-test' } });
     }
     if (url.pathname === '/api/routing-policies' && request.method() === 'GET') {
       return json({ success: true, data: [
@@ -395,7 +400,7 @@ async function mockAdminAPI(targetPage, state, account = null) {
 try {
   const adminMockState = {
     merchantApproveCalls: 0, channelVerifyCalls: 0, modelTestCalls: 0, channelReviewStatus: 'pending', modelTestStatus: 'untested',
-    routeSaveCalls: 0, routeSaveBody: null, routingPreviewCalls: 0, routingPreviewBody: null, keyRouteSaveCalls: 0, keyRouteSaveBody: null,
+    routeSaveCalls: 0, routeSaveBody: null, routingPreviewCalls: 0, routingPreviewBody: null, keyRouteSaveCalls: 0, keyRouteSaveBody: null, keyRevealCalls: 0,
     offerCreateCalls: 0, offerCreateBody: null,
     offerStatusCalls: 0, offerStatusBody: null, offerDeleteCalls: 0, offerEnabled: true,
     reviewDeleteCalls: 0, reviewDeleteIDs: [], userUsageQuery: null, merchantUsageQuery: null, adminUsageQuery: null,
@@ -515,6 +520,10 @@ try {
   await page.getByText('OpenAI', { exact: true }).waitFor();
   await page.getByText('1 个模型', { exact: true }).waitFor();
   assert(await page.getByRole('checkbox', { name: '启用真实主密钥' }).isChecked(), '有效密钥的启用开关未选中');
+  await page.getByRole('row').filter({ hasText: '真实主密钥' }).getByRole('button', { name: '复制', exact: true }).click();
+  await page.getByText('密钥已复制', { exact: true }).waitFor();
+  assert(adminMockState.keyRevealCalls === 1, '复制密钥没有按需读取真实密钥');
+  assert(await page.evaluate(() => navigator.clipboard.readText()) === 'sk-real-public-key-for-copy-test', '复制按钮没有写入真实公开密钥');
   await clickActionInRow(page, '真实主密钥', '配置模型路由');
   const keyRoutesDialog = page.getByRole('dialog', { name: '配置模型路由' });
   await keyRoutesDialog.getByLabel('gpt-4o-mini 路由').selectOption('');

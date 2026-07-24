@@ -161,7 +161,8 @@ export default function ConsoleView({ account, openModal, notify, navigate, onAc
 
   const copyKey = async (key) => {
     try {
-      await navigator.clipboard.writeText(displayKey(key.key));
+      const revealed = await apiRequest(`/api/keys/${key.id}/reveal`, { method: 'POST' });
+      await navigator.clipboard.writeText(revealed.key);
       notify('密钥已复制');
     } catch (error) {
       notify(error.message || '复制密钥失败');

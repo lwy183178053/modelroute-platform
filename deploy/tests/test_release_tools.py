@@ -35,14 +35,23 @@ class ReleaseToolContractTest(unittest.TestCase):
             '"$NEW_API_BASE_URL/api/user/"',
             '-X DELETE "$NEW_API_BASE_URL/api/user/$TEST_USER_ID"',
             "/api/merchant/channel-tests",
-            '"canonical_model_id"',
-            '"test_receipt"',
-            "merchant_channel_tests",
-            "receipt_token_hash",
-            "PLATFORM_ENCRYPTION_KEY",
+            '"display_name"',
+            '"website_url"',
+            '"business_description"',
+            "/api/admin/merchant-applications/$APPLICATION_ID/approve",
+            "/api/merchant/profile",
+            "DELETE FROM merchant_name_reservations",
+            "DELETE FROM merchant_profiles",
         ):
             self.assertIn(marker, verifier)
-        for old_field in ('"channel_type"', '"models"'):
+        for old_field in (
+            '"channel_type"',
+            '"models"',
+            '"canonical_model_id"',
+            '"test_receipt"',
+            '"initial_channel"',
+            "merchant_channel_tests",
+        ):
             self.assertNotIn(old_field, verifier)
         self.assertNotIn("platform_audit_logs", verifier)
 
@@ -61,6 +70,15 @@ class ReleaseToolContractTest(unittest.TestCase):
                 name,
             )
 
+    def test_account_verifier_creates_provider_key_without_routes(self):
+        verifier = read_script("verify-accounts.sh")
+        self.assertIn('"provider":"OpenAI"', verifier)
+        self.assertIn('"routing_policy_ids":[]', verifier)
+        self.assertIn('assert match["provider"] == "OpenAI"', verifier)
+        self.assertIn('assert match.get("routing_policies") == []', verifier)
+        self.assertIn('assert "*" in str(match.get("key", ""))', verifier)
+        self.assertNotIn('"routing_policy_id"', verifier)
+
     def test_routing_verifier_uses_provider_model_routes(self):
         verifier = read_script("verify-routing.sh")
         for marker in (
@@ -70,6 +88,9 @@ class ReleaseToolContractTest(unittest.TestCase):
             'assert int(policy["model_id"]) == int(sys.argv[2])',
             'assert int(data["data"]["affected_key_count"]) >= 1',
             'assert data["error"]["code"] == "model_not_allowed"',
+            'assert "*" in str(match.get("key", ""))',
+            "SELECT key FROM tokens WHERE id = $KEY_ID",
+            "DELETE FROM tokens WHERE id = $KEY_ID AND name = '$KEY_NAME'",
             'assert int(policy["minimum_multiplier_bps"]) == 0',
             'assert int(policy["maximum_multiplier_bps"]) == 50000',
             '"minimum_multiplier_bps": 0',

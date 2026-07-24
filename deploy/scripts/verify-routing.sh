@@ -6,20 +6,41 @@ BASE_URL="${1:-https://aggregate.lwylink.xyz}"
 BASE_URL="${BASE_URL%/}"
 ADMIN_USERNAME="${ADMIN_USERNAME:-3180615598@qq.com}"
 ADMIN_PASSWORD_FILE="${ADMIN_PASSWORD_FILE:-/opt/modelroute-platform/shared/bootstrap-admin.txt}"
+ROOT_DIR=$(CDPATH= cd -P -- "$(dirname -- "$0")/../.." && pwd -P)
+cd "$ROOT_DIR"
 
-if [ ! -r "$ADMIN_PASSWORD_FILE" ]; then
-  echo "管理员密码文件不可读" >&2
+if [ ! -r "$ADMIN_PASSWORD_FILE" ] || [ ! -r .env ]; then
+  echo "管理员密码文件或生产环境文件不可读" >&2
   exit 1
 fi
+set -a
+. ./.env
+set +a
 
 WORK_DIR="$(mktemp -d)"
 COOKIE_JAR="$WORK_DIR/cookies.txt"
 POLICY_ID=""
 KEY_ID=""
+KEY_NAME=""
 
 cleanup() {
   if [ -n "$KEY_ID" ]; then
-    curl -sS -b "$COOKIE_JAR" -H "Origin: $BASE_URL" -X DELETE "$BASE_URL/api/keys/$KEY_ID" >/dev/null 2>&1 || true
+    curl -sS -b "$COOKIE_JAR" -H "Origin: $BASE_URL" -X DELETE "$BASE_URL/api/keys/$KEY_ID" </dev/null >/dev/null 2>&1 || true
+    case "$KEY_ID" in
+      ''|*[!0-9]*) ;;
+      *)
+        case "$KEY_NAME" in
+          provider-key-contract-*)
+            docker compose --env-file .env exec -T postgres psql -v ON_ERROR_STOP=1 \
+              -U "$POSTGRES_SUPERUSER" -d "$PLATFORM_DB_NAME" \
+              -c "DELETE FROM token_bindings WHERE newapi_token_id = $KEY_ID" </dev/null >/dev/null 2>&1 || true
+            docker compose --env-file .env exec -T postgres psql -v ON_ERROR_STOP=1 \
+              -U "$POSTGRES_SUPERUSER" -d "$NEWAPI_DB_NAME" \
+              -c "DELETE FROM tokens WHERE id = $KEY_ID AND name = '$KEY_NAME'" </dev/null >/dev/null 2>&1 || true
+            ;;
+        esac
+        ;;
+    esac
   fi
   if [ -n "$POLICY_ID" ]; then
     curl -sS -b "$COOKIE_JAR" -H "Origin: $BASE_URL" -X DELETE "$BASE_URL/api/routing-policies/$POLICY_ID" >/dev/null 2>&1 || true
@@ -176,26 +197,58 @@ PY
 curl -fsS -b "$COOKIE_JAR" -H "Origin: $BASE_URL" -H 'Content-Type: application/json' --data-binary @- "$BASE_URL/api/keys" >"$WORK_DIR/create-key.json"
 
 curl -fsS -b "$COOKIE_JAR" "$BASE_URL/api/keys?p=1&page_size=200" >"$WORK_DIR/keys.json"
-KEY_VALUES="$(python3 - "$WORK_DIR/keys.json" "$KEY_NAME" "$MODEL_PROVIDER" "$MODEL_ID" "$POLICY_ID" <<'PY'
+KEY_ID="$(python3 - "$WORK_DIR/keys.json" "$KEY_NAME" <<'PY'
 import json
 import sys
 
 data = json.load(open(sys.argv[1], encoding="utf-8"))
 match = next(item for item in data["data"]["items"] if item["name"] == sys.argv[2])
+print(match["id"])
+PY
+)"
+python3 - "$WORK_DIR/keys.json" "$KEY_ID" "$MODEL_PROVIDER" "$MODEL_ID" "$POLICY_ID" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+match = next(item for item in data["data"]["items"] if int(item["id"]) == int(sys.argv[2]))
 assert match["provider"] == sys.argv[3]
 assert int(match["model_count"]) == 1
 routes = match.get("routing_policies") or []
+print(json.dumps({"key_id": match["id"], "provider": match["provider"], "routes": routes}, ensure_ascii=False))
 assert len(routes) == 1
 assert int(routes[0]["model_id"]) == int(sys.argv[4])
 assert int(routes[0]["routing_policy_id"]) == int(sys.argv[5])
-key = str(match.get("key", ""))
-raw_key = key[3:] if key.startswith("sk-") else key
-assert len(raw_key) >= 32 and "*" not in raw_key
-print(f'{match["id"]}|{key if key.startswith("sk-") else "sk-" + key}')
+assert "*" in str(match.get("key", ""))
 PY
-)"
-KEY_ID="${KEY_VALUES%%|*}"
-MODELROUTE_KEY="${KEY_VALUES#*|}"
+RAW_KEY="$(docker compose --env-file .env exec -T postgres \
+  psql -At -U "$POSTGRES_SUPERUSER" -d "$NEWAPI_DB_NAME" \
+  -c "SELECT key FROM tokens WHERE id = $KEY_ID" </dev/null)"
+printf '%s' "$RAW_KEY" | grep -Eq '^[A-Za-z0-9_-]{32,}$'
+STORED_FINGERPRINT="$(docker compose --env-file .env exec -T postgres \
+  psql -At -U "$POSTGRES_SUPERUSER" -d "$PLATFORM_DB_NAME" \
+  -c "SELECT token_fingerprint FROM token_bindings WHERE newapi_token_id = $KEY_ID" </dev/null)"
+python3 - "$RAW_KEY" "$STORED_FINGERPRINT" <<'PY'
+import base64
+import hashlib
+import hmac
+import json
+import os
+import sys
+
+key = base64.b64decode(os.environ["PLATFORM_ENCRYPTION_KEY"], validate=True)
+raw = sys.argv[1]
+stored = sys.argv[2]
+fingerprint = lambda value: hmac.new(key, value.encode(), hashlib.sha256).hexdigest()
+print(json.dumps({
+    "fingerprint_matches_raw": hmac.compare_digest(fingerprint(raw), stored),
+    "fingerprint_matches_prefixed": hmac.compare_digest(fingerprint("sk-" + raw), stored),
+}))
+PY
+case "$RAW_KEY" in
+  sk-*) MODELROUTE_KEY="$RAW_KEY" ;;
+  *) MODELROUTE_KEY="sk-$RAW_KEY" ;;
+esac
 
 curl -fsS -H "Authorization: Bearer $MODELROUTE_KEY" "$BASE_URL/v1/models" >"$WORK_DIR/allowed-models.json"
 python3 - "$WORK_DIR/allowed-models.json" "$MODEL_NAME" "$EXPECT_ROUTABLE" <<'PY'

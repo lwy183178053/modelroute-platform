@@ -13,6 +13,48 @@ import (
 	"github.com/lwy183178053/modelroute-platform/apps/api/internal/platformauth"
 )
 
+func TestRevealKeyReturnsOwnedTokenWithPublicPrefix(t *testing.T) {
+	revealCalls := 0
+	services, store, _ := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("New-Api-User") != "7" || r.Header.Get("Cookie") != "session=user" {
+			t.Fatalf("上游鉴权头不符合预期")
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/token/":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":9,"name":"主密钥"}],"total":1}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/token/9/key":
+			revealCalls++
+			_, _ = w.Write([]byte(`{"success":true,"data":{"key":"raw-key-value-123456789012345678901234"}}`))
+		default:
+			t.Fatalf("未知上游请求：%s %s", r.Method, r.URL.RequestURI())
+		}
+	}))
+	token, err := store.Create(context.Background(), platformauth.Session{
+		UserID: 7, Username: "alice", Role: 1, Status: 1, UpstreamCookie: "session=user",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServerWithServices("test", Dependencies{}, services)
+	request := httptest.NewRequest(http.MethodPost, "/api/keys/9/reveal", nil)
+	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
+	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"key":"sk-raw-key-value-123456789012345678901234"`) || revealCalls != 1 {
+		t.Fatalf("密钥读取响应=%d %s，调用=%d", response.Code, response.Body.String(), revealCalls)
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/keys/10/reveal", nil)
+	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
+	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: token})
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound || revealCalls != 1 {
+		t.Fatalf("跨用户密钥读取响应=%d %s，调用=%d", response.Code, response.Body.String(), revealCalls)
+	}
+}
+
 func TestAPIKeyUpdateStatusAndDeleteUseAuthenticatedCoreEndpoints(t *testing.T) {
 	var calls []string
 	services, store, _ := newHTTPTestServices(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -62,6 +62,7 @@ func NewServerWithServices(version string, dependencies Dependencies, services S
 	mux.HandleFunc("POST /api/keys", s.createKey)
 	mux.HandleFunc("PUT /api/keys/{id}", s.updateKey)
 	mux.HandleFunc("POST /api/keys/{id}/status", s.updateKeyStatus)
+	mux.HandleFunc("POST /api/keys/{id}/reveal", s.revealKey)
 	mux.HandleFunc("DELETE /api/keys/{id}", s.deleteKey)
 	mux.HandleFunc("PUT /api/keys/{id}/routing-policies", s.replaceKeyRoutingPolicies)
 	mux.HandleFunc("GET /api/usage", s.usage)

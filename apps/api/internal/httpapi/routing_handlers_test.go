@@ -478,7 +478,7 @@ func TestCreateKeyBindsOnlyNewTokenToSelectedModelRoutes(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/token/":
 			_, _ = w.Write([]byte(`{"success":true,"data":null}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/token/9/key":
-			_, _ = w.Write([]byte(`{"success":true,"data":{"key":"sk-new-key"}}`))
+			_, _ = w.Write([]byte(`{"success":true,"data":{"key":"new-key-value-without-prefix-123456"}}`))
 		default:
 			t.Fatalf("未知 New API 调用=%s %s", r.Method, r.URL.RequestURI())
 		}
@@ -487,7 +487,7 @@ func TestCreateKeyBindsOnlyNewTokenToSelectedModelRoutes(t *testing.T) {
 	repository := &routingRepositoryStub{}
 	boundToken := 0
 	repository.createTokenBinding = func(_ context.Context, userID int, tokenID int, fingerprint string, provider string, policyIDs []int64) (TokenRoutingBinding, error) {
-		if userID != 7 || provider != "OpenAI" || fmt.Sprint(policyIDs) != "[91 92]" || fingerprint != box.Fingerprint([]byte("sk-new-key")) {
+		if userID != 7 || provider != "OpenAI" || fmt.Sprint(policyIDs) != "[91 92]" || fingerprint != box.Fingerprint([]byte("sk-new-key-value-without-prefix-123456")) {
 			t.Fatalf("绑定参数=%d %d %q %s %v", userID, tokenID, fingerprint, provider, policyIDs)
 		}
 		boundToken = tokenID
@@ -578,15 +578,16 @@ func TestCreateProviderKeyAllowsEmptyRoutes(t *testing.T) {
 			t.Fatalf("未知核心调用=%s %s", r.Method, r.URL.RequestURI())
 		}
 	}))
+	box := testCredentialBox(t)
 	repository := &routingRepositoryStub{}
 	repository.createTokenBinding = func(_ context.Context, userID int, tokenID int, fingerprint string, provider string, policyIDs []int64) (TokenRoutingBinding, error) {
-		if userID != 7 || tokenID != 9 || fingerprint == "" || provider != "OpenAI" || len(policyIDs) != 0 {
+		if userID != 7 || tokenID != 9 || fingerprint != box.Fingerprint([]byte("sk-provider-key")) || provider != "OpenAI" || len(policyIDs) != 0 {
 			t.Fatalf("密钥绑定参数 user=%d token=%d provider=%s routes=%v fingerprint=%q", userID, tokenID, provider, policyIDs, fingerprint)
 		}
 		return TokenRoutingBinding{TokenID: tokenID, Provider: provider, Routes: []TokenModelRoute{}}, nil
 	}
 	services.Routing = repository
-	services.Credentials = testCredentialBox(t)
+	services.Credentials = box
 	token := createPlatformSession(t, services, 7, 1)
 	handler := NewServerWithServices("test", Dependencies{}, services)
 	request := httptest.NewRequest(http.MethodPost, "/api/keys", strings.NewReader(`{"name":"OpenAI 密钥","expired_time":-1,"unlimited_quota":true,"provider":"OpenAI","routing_policy_ids":[]}`))

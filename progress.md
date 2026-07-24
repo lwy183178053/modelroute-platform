@@ -3145,3 +3145,40 @@
 - `data/ui-preview/verify.mjs`：增加路由厂商、模型和密钥模型绑定的本地页面断言；该目录按仓库规则忽略。
 - `progress.md`：追加本地预览问题根因、验证证据和文件清单。
 - 回滚方式：停止本地 57723 预览并删除被忽略的 `data/ui-preview/` 后重新生成旧夹具；正式代码与生产 103 均未变更。
+
+## 2026-07-24 - Task: 修复单厂商密钥真实鉴权并完成发布前验证
+
+### What was done
+
+- 在生产候选环境确认核心服务保存的 Token 正文不带 `sk-`，而客户端请求使用带前缀的公开密钥；平台此前对内部正文生成指纹，导致路由和模型绑定虽已配置，真实 `/v1/models` 与模型请求仍匹配不到密钥。
+- 平台创建密钥绑定时统一对公开密钥形态生成不可逆指纹；已有前缀保持不变，无前缀时只补一次 `sk-`。
+- 增加按需复制接口：先校验 Token 属于当前登录用户，再从核心服务读取真实密钥并以公开形态返回；密钥列表继续只显示掩码，响应禁止缓存。
+- 更新账号、商户和路由生产验收脚本，使其遵循单厂商密钥、三字段商户申请和模型路由契约；路由验收增加真实模型列表、实际调用和指纹匹配检查，并在结束时定点清理临时数据。
+
+### Testing
+
+- 先运行 `go test ./internal/httpapi -run TestRevealKeyReturnsOwnedTokenWithPublicPrefix -count=1`，稳定复现接口 `404` 且上游读取次数为 0；实现后该用例与无前缀/已有前缀指纹用例共同通过。
+- `go test ./... -count=1`、`go vet ./...`、`go build ./cmd/api ./cmd/worker ./cmd/seed-models`：通过。
+- `npm.cmd run test:quota`、`npm.cmd run test:ui`：通过；浏览器实际点击复制后，确认按需读取接口调用一次且剪贴板得到完整公开密钥。
+- `python -m unittest discover -s deploy/tests -p "test_*.py" -v`：28 项通过。
+- 全部 `deploy/scripts/*.sh` 执行 `bash -n`：通过；`docker compose -f compose.yaml config --quiet`：通过；`git diff --check`：通过。
+- 生产发布和真实专项验收将在新提交部署后另行追加，不把候选容器运行等同于正式发布完成。
+
+### Notes
+
+- `apps/api/internal/httpapi/account_handlers.go`：增加归属校验、真实密钥按需读取和公开前缀规范化。
+- `apps/api/internal/httpapi/account_test.go`：覆盖真实密钥返回、前缀补齐和跨用户读取拦截。
+- `apps/api/internal/httpapi/routing_handlers.go`：路由绑定指纹改为使用公开密钥形态。
+- `apps/api/internal/httpapi/routing_handlers_test.go`：覆盖核心密钥无前缀和已有前缀两种契约。
+- `apps/api/internal/httpapi/server.go`：注册真实密钥按需复制接口。
+- `apps/web/src/views/ConsoleView.jsx`：复制按钮改为按需读取真实密钥，不再复制列表掩码。
+- `apps/web/scripts/ui-smoke.mjs`：增加真实密钥接口、剪贴板内容和调用次数回归检查。
+- `deploy/scripts/verify-accounts.sh`：按单厂商空路由契约验证临时密钥。
+- `deploy/scripts/verify-merchants.sh`：按三字段商户申请、直接审批和资料修改契约验收。
+- `deploy/scripts/verify-routing.sh`：增加真实模型列表、模型调用、指纹诊断和精确清理。
+- `deploy/tests/test_release_tools.py`：锁定新版账号、商户和路由验收脚本契约。
+- `docs/账号与管理员接口.md`：记录真实密钥复制接口、归属校验和禁止缓存语义。
+- `docs/模型报价路由与健康.md`：记录公开密钥形态与路由指纹一致性。
+- `docs/部署运行手册.md`：记录路由生产验收与临时数据清理边界。
+- `progress.md`：追加根因、改动、验证证据和回滚点。
+- 回滚点：本轮前一提交为 `4897300`；执行 `git revert <本轮提交哈希>` 可回退代码、页面、验收脚本和文档。本轮没有数据库迁移；已执行的第 11 号迁移和用户重新创建的密钥不受本轮代码回滚影响。

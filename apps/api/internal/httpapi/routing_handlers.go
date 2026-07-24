@@ -526,7 +526,7 @@ func (s *server) bindTokenRoutes(r *http.Request, userID int, cookie string, tok
 	}
 	return s.services.Routing.CreateTokenBinding(
 		r.Context(), userID, tokenID,
-		s.services.Credentials.Fingerprint([]byte(strings.TrimSpace(revealed.Key))), provider, policyIDs,
+		s.services.Credentials.Fingerprint([]byte(publicAPIKey(revealed.Key))), provider, policyIDs,
 	)
 }
 

@@ -64,7 +64,7 @@ assert isinstance(data["data"].get("items"), list)
 PY
 
 KEY_NAME="contract-$(date +%s)"
-printf '{"name":"%s","expired_time":-1,"remain_quota":0,"unlimited_quota":true,"model_limits_enabled":false,"model_limits":"","allow_ips":null,"group":"default","cross_group_retry":false}' "$KEY_NAME" |
+printf '{"name":"%s","provider":"OpenAI","routing_policy_ids":[],"expired_time":-1,"remain_quota":0,"unlimited_quota":true,"model_limits_enabled":false,"model_limits":"","allow_ips":null,"group":"default","cross_group_retry":false}' "$KEY_NAME" |
 curl -fsS -b "$COOKIE_JAR" -H "Origin: $BASE_URL" -H 'Content-Type: application/json' --data-binary @- "$BASE_URL/api/keys" >"$WORK_DIR/create-key.json"
 python3 - "$WORK_DIR/create-key.json" <<'PY'
 import json
@@ -82,13 +82,20 @@ import sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
 matches = [item for item in data["data"].get("items", []) if item.get("name") == sys.argv[2]]
 assert len(matches) == 1
-key = str(matches[0].get("key", ""))
-raw_key = key[3:] if key.startswith("sk-") else key
-assert len(raw_key) >= 32
-assert "*" not in raw_key
 print(matches[0]["id"])
 PY
 )"
+python3 - "$WORK_DIR/keys.json" "$KEY_ID" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+match = next(item for item in data["data"].get("items", []) if int(item["id"]) == int(sys.argv[2]))
+assert match["provider"] == "OpenAI"
+assert int(match["model_count"]) == 0
+assert match.get("routing_policies") == []
+assert "*" in str(match.get("key", ""))
+PY
 
 printf '{"enabled":false}' |
 curl -fsS -b "$COOKIE_JAR" -H "Origin: $BASE_URL" -H 'Content-Type: application/json' --data-binary @- -X POST "$BASE_URL/api/keys/$KEY_ID/status" >"$WORK_DIR/key-status.json"

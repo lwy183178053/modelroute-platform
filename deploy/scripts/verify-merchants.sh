@@ -33,12 +33,12 @@ cleanup_platform_fixture() {
   docker compose --env-file .env exec -T postgres \
     psql -v ON_ERROR_STOP=1 -U "$POSTGRES_SUPERUSER" -d "$PLATFORM_DB_NAME" <<SQL
 BEGIN;
-UPDATE merchant_applications
-SET initial_channel_review_id = NULL
-WHERE newapi_user_id = $TEST_USER_ID;
+DELETE FROM merchant_channels
+WHERE merchant_profile_id IN (SELECT id FROM merchant_profiles WHERE newapi_user_id = $TEST_USER_ID);
 DELETE FROM merchant_channel_reviews WHERE merchant_newapi_user_id = $TEST_USER_ID;
+DELETE FROM merchant_name_reservations WHERE newapi_user_id = $TEST_USER_ID;
+DELETE FROM merchant_profiles WHERE newapi_user_id = $TEST_USER_ID;
 DELETE FROM merchant_applications WHERE newapi_user_id = $TEST_USER_ID;
-DELETE FROM merchant_channel_tests WHERE newapi_user_id = $TEST_USER_ID;
 COMMIT;
 SQL
 }
@@ -188,88 +188,34 @@ assert me.get("is_merchant") is False
 assert me.get("is_platform_merchant") is False
 PY
 
-curl -fsS "$BASE_URL/api/models" >"$WORK_DIR/models.json"
-python3 - \
-  "$WORK_DIR/models.json" "$TEST_USER_ID" \
-  "$WORK_DIR/channel-test.json" "$WORK_DIR/application.json" "$WORK_DIR/channel-test.sql" <<'PY'
-import base64
-import hashlib
-import hmac
+python3 - "$WORK_DIR/application.json" <<'PY'
 import json
-import os
 import secrets
 import sys
-import time
 
-models = json.load(open(sys.argv[1], encoding="utf-8"))
-assert models.get("success") is True
-model = next(
-    item
-    for item in models["data"]
-    if item.get("status") == "active"
-    and item.get("price", {}).get("price_kind") == "text"
-)
-user_id = int(sys.argv[2])
-stamp = int(time.time())
-base_url = "https://api.example.com/v1"
-api_key = "sk-contract-" + secrets.token_hex(24)
-receipt = secrets.token_urlsafe(32)
-master_key = base64.b64decode(os.environ["PLATFORM_ENCRYPTION_KEY"], validate=True)
-assert len(master_key) == 32
-credential_fingerprint = hmac.new(master_key, api_key.encode(), hashlib.sha256).hexdigest()
-receipt_token_hash = hashlib.sha256(receipt.encode()).hexdigest()
-channel_test = {
-    "canonical_model_id": int(model["id"]),
-    "base_url": base_url,
-    "api_key": api_key,
-}
 payload = {
-    "display_name": f"ModelRoute 契约测试 {stamp}",
+    "display_name": "T" + secrets.token_hex(7),
     "website_url": "https://example.com",
     "business_description": "用于验证商户申请、权限与密钥生命周期的自动契约测试。",
-    "channel_name": f"契约测试线路 {stamp}",
-    "canonical_model_id": int(model["id"]),
-    "test_receipt": receipt,
-    "base_url": base_url,
-    "api_key": api_key,
 }
-with open(sys.argv[3], "w", encoding="utf-8") as output:
-    json.dump(channel_test, output)
-with open(sys.argv[4], "w", encoding="utf-8") as output:
+with open(sys.argv[1], "w", encoding="utf-8") as output:
     json.dump(payload, output, ensure_ascii=False)
-sql = f"""
-INSERT INTO merchant_channel_tests
-    (newapi_user_id, canonical_model_id, base_url, credential_fingerprint,
-     adapter_type, capabilities, latency_ms, receipt_token_hash, expires_at)
-VALUES
-    ({user_id}, {int(model['id'])}, '{base_url}', '{credential_fingerprint}',
-     'openai_compatible', '["text"]'::jsonb, 1, '{receipt_token_hash}',
-     now() + interval '15 minutes');
-"""
-with open(sys.argv[5], "w", encoding="utf-8") as output:
-    output.write(sql)
 PY
 
 status="$(curl -sS -o "$WORK_DIR/channel-test-failed.json" -w '%{http_code}' \
   -b "$USER_COOKIE_JAR" -H "Origin: $BASE_URL" -H 'Content-Type: application/json' \
-  --data-binary @"$WORK_DIR/channel-test.json" "$BASE_URL/api/merchant/channel-tests")"
-if [ "$status" != "422" ]; then
-  echo "无效上游渠道检测状态码为 $status，预期 422" >&2
+  --data '{}' "$BASE_URL/api/merchant/channel-tests")"
+if [ "$status" != "403" ]; then
+  echo "普通用户渠道检测状态码为 $status，预期 403" >&2
   exit 1
 fi
-python3 - "$WORK_DIR/channel-test-failed.json" "$WORK_DIR/channel-test.json" <<'PY'
+python3 - "$WORK_DIR/channel-test-failed.json" <<'PY'
 import json
 import sys
 
 failed = json.load(open(sys.argv[1], encoding="utf-8"))
-request = json.load(open(sys.argv[2], encoding="utf-8"))
-assert failed["error"]["code"] == "channel_test_failed"
-assert request["api_key"] not in json.dumps(failed, ensure_ascii=False)
+assert failed["error"]["code"] == "merchant_required"
 PY
-
-docker compose --env-file .env exec -T postgres \
-  psql -v ON_ERROR_STOP=1 -U "$POSTGRES_SUPERUSER" -d "$PLATFORM_DB_NAME" \
-  <"$WORK_DIR/channel-test.sql" >"$WORK_DIR/channel-test-insert.log"
 
 curl -fsS -b "$USER_COOKIE_JAR" -H "Origin: $BASE_URL" -H 'Content-Type: application/json' \
   --data-binary @"$WORK_DIR/application.json" "$BASE_URL/api/merchant/application" >"$WORK_DIR/create-application.json"
@@ -281,11 +227,12 @@ data = json.load(open(sys.argv[1], encoding="utf-8"))
 request = json.load(open(sys.argv[2], encoding="utf-8"))
 assert data.get("success") is True
 encoded = json.dumps(data, ensure_ascii=False)
-assert "api_key" not in encoded
-assert "encrypted_credential" not in encoded
+assert "credential" not in encoded
+assert "channel" not in encoded
 assert data["data"]["status"] == "pending"
-assert data["data"]["initial_channel"]["credential_configured"] is True
-assert int(data["data"]["initial_channel"]["canonical_model_id"]) == int(request["canonical_model_id"])
+assert data["data"]["display_name"] == request["display_name"]
+assert data["data"]["website_url"] == request["website_url"]
+assert data["data"]["business_description"] == request["business_description"]
 print(data["data"]["id"])
 PY
 )"
@@ -304,7 +251,7 @@ PY
 curl -fsS -b "$ADMIN_COOKIE_JAR" "$BASE_URL/api/admin/merchant-applications?p=1&page_size=100" >"$WORK_DIR/applications.json"
 curl -fsS -b "$ADMIN_COOKIE_JAR" "$BASE_URL/api/admin/channel-reviews?p=1&page_size=100" >"$WORK_DIR/reviews.json"
 curl -fsS -b "$ADMIN_COOKIE_JAR" "$BASE_URL/api/admin/channels?p=1&page_size=100" >"$WORK_DIR/channels.json"
-python3 - "$WORK_DIR/applications.json" "$WORK_DIR/reviews.json" "$WORK_DIR/channels.json" "$APPLICATION_ID" <<'PY'
+python3 - "$WORK_DIR/applications.json" "$WORK_DIR/reviews.json" "$WORK_DIR/channels.json" "$APPLICATION_ID" "$TEST_USER_ID" <<'PY'
 import json
 import sys
 
@@ -312,10 +259,12 @@ applications = json.load(open(sys.argv[1], encoding="utf-8"))
 reviews = json.load(open(sys.argv[2], encoding="utf-8"))
 channels = json.load(open(sys.argv[3], encoding="utf-8"))
 application_id = int(sys.argv[4])
+user_id = int(sys.argv[5])
 assert applications.get("success") is True
 match = next(item for item in applications["data"]["items"] if int(item["id"]) == application_id)
-review_id = int(match["initial_channel"]["id"])
-assert any(int(item["id"]) == review_id for item in reviews["data"]["items"])
+assert match["status"] == "pending"
+assert "channel" not in json.dumps(match, ensure_ascii=False)
+assert all(int(item.get("user_id", 0)) != user_id for item in reviews["data"]["items"])
 assert channels.get("success") is True
 assert isinstance(channels["data"].get("items"), list)
 encoded = json.dumps([applications, reviews, channels], ensure_ascii=False)
@@ -323,26 +272,47 @@ assert "encrypted_credential" not in encoded
 assert "api_key" not in encoded
 PY
 
-printf '{"reason":"自动契约测试完成"}' |
 curl -fsS -b "$ADMIN_COOKIE_JAR" -H "Origin: $BASE_URL" -H 'Content-Type: application/json' \
-  --data-binary @- -X POST "$BASE_URL/api/admin/merchant-applications/$APPLICATION_ID/reject" >"$WORK_DIR/reject.json"
-
-curl -fsS -b "$USER_COOKIE_JAR" "$BASE_URL/api/merchant/application" >"$WORK_DIR/rejected-state.json"
-python3 - "$WORK_DIR/reject.json" "$WORK_DIR/rejected-state.json" "$APPLICATION_ID" <<'PY'
+  -X POST "$BASE_URL/api/admin/merchant-applications/$APPLICATION_ID/approve" >"$WORK_DIR/approve.json"
+python3 - "$WORK_DIR/approve.json" "$WORK_DIR/application.json" "$TEST_USER_ID" <<'PY'
 import json
 import sys
 
-rejected = json.load(open(sys.argv[1], encoding="utf-8"))
-state = json.load(open(sys.argv[2], encoding="utf-8"))
-assert rejected.get("success") is True
-assert int(rejected["data"]["review_id"]) > 0
-assert int(state["data"]["id"]) == int(sys.argv[3])
-assert state["data"]["status"] == "rejected"
-assert state["data"]["initial_channel"]["credential_configured"] is False
+approved = json.load(open(sys.argv[1], encoding="utf-8"))
+request = json.load(open(sys.argv[2], encoding="utf-8"))
+assert approved.get("success") is True
+profile = approved["data"]
+assert int(profile["user_id"]) == int(sys.argv[3])
+assert profile["display_name"] == request["display_name"]
+assert profile["website_url"] == request["website_url"]
+assert profile["business_description"] == request["business_description"]
+assert profile["status"] == "active"
 PY
-APPLICATION_ID=""
+
+curl -fsS -b "$USER_COOKIE_JAR" "$BASE_URL/api/me" >"$WORK_DIR/merchant-me.json"
+curl -fsS -b "$USER_COOKIE_JAR" "$BASE_URL/api/merchant/profile" >"$WORK_DIR/profile.json"
+printf '{"business_description":"更新后的商户介绍用于部署契约测试"}' |
+curl -fsS -b "$USER_COOKIE_JAR" -H "Origin: $BASE_URL" -H 'Content-Type: application/json' \
+  --data-binary @- -X PUT "$BASE_URL/api/merchant/profile" >"$WORK_DIR/profile-updated.json"
+python3 - "$WORK_DIR/merchant-me.json" "$WORK_DIR/profile.json" "$WORK_DIR/profile-updated.json" "$WORK_DIR/application.json" <<'PY'
+import json
+import sys
+
+me = json.load(open(sys.argv[1], encoding="utf-8"))
+profile = json.load(open(sys.argv[2], encoding="utf-8"))["data"]
+updated = json.load(open(sys.argv[3], encoding="utf-8"))["data"]
+request = json.load(open(sys.argv[4], encoding="utf-8"))
+assert me["data"]["is_merchant"] is True
+assert me["data"]["is_platform_merchant"] is False
+assert profile["display_name"] == request["display_name"]
+assert profile["website_url"] == request["website_url"]
+assert updated["display_name"] == profile["display_name"]
+assert updated["website_url"] == profile["website_url"]
+assert updated["business_description"] == "更新后的商户介绍用于部署契约测试"
+PY
 
 cleanup_platform_fixture >"$WORK_DIR/platform-cleanup.log"
+APPLICATION_ID=""
 curl -fsS -b "$USER_COOKIE_JAR" -H "Origin: $BASE_URL" -X POST "$BASE_URL/api/auth/logout" >/dev/null
 curl -fsS -b "$NEW_API_COOKIE_JAR" -H "New-Api-User: $NEW_API_ADMIN_ID" \
   -X DELETE "$NEW_API_BASE_URL/api/user/$TEST_USER_ID" >"$WORK_DIR/delete-user.json"
@@ -355,4 +325,4 @@ assert data.get("success") is True
 PY
 TEST_USER_ID=""
 
-echo "商户与渠道契约验证通过"
+echo "商户申请与资料契约验证通过"

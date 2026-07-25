@@ -545,6 +545,11 @@ try {
   const merchantModelsDialog = page.getByRole('dialog', { name: '渠道模型' });
   await merchantModelsDialog.getByText('gpt-4o-mini', { exact: true }).waitFor();
   await merchantModelsDialog.getByText('冷却', { exact: true }).waitFor();
+  const merchantModelHeaders = await merchantModelsDialog.getByRole('columnheader').allTextContents();
+  assert(merchantModelHeaders[0] === '检查' && !merchantModelHeaders.includes('ID'), `渠道模型列顺序错误：${merchantModelHeaders.join(',')}`);
+  const merchantCheckBox = await merchantModelsDialog.getByRole('button', { name: '检查', exact: true }).boundingBox();
+  const merchantDialogBox = await merchantModelsDialog.boundingBox();
+  assert(merchantCheckBox && merchantDialogBox && merchantCheckBox.x >= merchantDialogBox.x && merchantCheckBox.x + merchantCheckBox.width <= merchantDialogBox.x + merchantDialogBox.width, '渠道模型检查按钮被弹窗裁切');
   await merchantModelsDialog.getByRole('button', { name: '检查', exact: true }).click();
   await merchantModelsDialog.getByText('正常', { exact: true }).waitFor();
   assert(adminMockState.merchantModelCheckCalls === 1, '商户逐模型检查没有调用真实接口');
@@ -723,6 +728,8 @@ try {
   const adminModelsDialog = page.getByRole('dialog', { name: '渠道模型' });
   await adminModelsDialog.getByText('claude-sonnet-4-5', { exact: true }).waitFor();
   await adminModelsDialog.getByText('冷却', { exact: true }).waitFor();
+  const adminModelHeaders = await adminModelsDialog.getByRole('columnheader').allTextContents();
+  assert(adminModelHeaders[0] === '具体模型' && !adminModelHeaders.includes('ID'), `管理员渠道模型列顺序错误：${adminModelHeaders.join(',')}`);
   assert(await adminModelsDialog.getByRole('button', { name: '检查', exact: true }).count() === 0, '管理员模型弹窗仍提供检查操作');
   await adminModelsDialog.getByRole('button', { name: '关闭', exact: true }).click();
   assert(await page.getByRole('button', { name: '验证', exact: true }).count() === 0, '管理员渠道页仍保留审核验证');

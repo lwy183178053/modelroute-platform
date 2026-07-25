@@ -283,12 +283,17 @@ main { min-height: calc(100vh - 66px); }
 .modal-layer { position: fixed; inset: 0; z-index: 100; padding: 24px; background: rgba(17, 28, 25, 0.46); display: grid; place-items: center; overflow-y: auto; }
 .modal { width: min(520px, 100%); max-height: calc(100vh - 48px); border: 1px solid var(--line-strong); border-radius: 8px; background: white; box-shadow: 0 18px 60px rgba(23, 33, 31, 0.2); overflow: hidden; display: flex; flex-direction: column; }
 .modal-wide { width: min(760px, 100%); }
+.channel-models-modal { width: min(1120px, 100%); }
 .modal-header { min-height: 72px; padding: 15px 18px; border-bottom: 1px solid var(--line); display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .modal-header h2 { margin: 0; font-size: 17px; line-height: 25px; }.modal-header p { margin: 3px 0 0; color: var(--muted); font-size: 11px; line-height: 18px; }
 .modal-body { min-height: 0; padding: 18px; overflow-y: auto; }
 .channel-models-wrap { max-height: min(60vh, 520px); overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
-.channel-models-table { min-width: 1160px; }
+.channel-models-table { min-width: 1040px; }
 .channel-models-table td { height: 58px; }
+.channel-model-action-column { position: sticky; left: 0; z-index: 2; width: 92px; min-width: 92px; background: white; }
+.channel-models-table th.channel-model-action-column { z-index: 3; background: #f7f9f9; }
+.channel-models-table tbody tr:hover .channel-model-action-column { background: #fbfdfc; }
+.channel-model-action-column .button { min-width: 70px; }
 .channel-model-error { max-width: 260px; white-space: normal; overflow-wrap: anywhere; color: var(--muted); }
 .modal-footer { min-height: 62px; padding: 12px 18px; border-top: 1px solid var(--line); background: #fafcfc; display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
 .form-section { margin-bottom: 18px; }.form-section h3 { margin: 0 0 9px; font-size: 12px; }

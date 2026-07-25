@@ -34,13 +34,13 @@ export function ChannelModelsButton({ item, manage = false, onClick }) {
 export default function ChannelModelsModal({ item, busyID = '', onClose, onTest }) {
   const models = channelModelItems(item);
   return (
-    <Modal title="渠道模型" description={`渠道 ID ${item.id} · ${item.channel_name}`} onClose={onClose} wide>
+    <Modal title="渠道模型" description={`渠道 ID ${item.id} · ${item.channel_name}`} onClose={onClose} wide className="channel-models-modal">
       <div className="table-wrap channel-models-wrap">
         <table className="data-table channel-models-table">
-          <thead><tr><th>ID</th><th>具体模型</th><th>状态</th><th>真实失败</th><th>自动检查失败</th><th>下次检查</th><th>最后检查</th><th>耗时</th><th>错误</th>{onTest && <th>操作</th>}</tr></thead>
+          <thead><tr>{onTest && <th className="channel-model-action-column">检查</th>}<th>具体模型</th><th>状态</th><th>真实失败</th><th>自动检查失败</th><th>下次检查</th><th>最后检查</th><th>耗时</th><th>错误</th></tr></thead>
           <tbody>
             {models.map((model) => <tr key={model.id}>
-              <td><code>{model.id}</code></td>
+              {onTest && <td className="channel-model-action-column"><Button disabled={Boolean(busyID)} icon={RefreshCw} variant="ghost" onClick={() => onTest(item, model)}>{busyID === `model-${model.id}` ? '检查中' : '检查'}</Button></td>}
               <td><code>{model.model || model.upstream_model_name}</code><small>{model.model && model.model !== model.upstream_model_name ? model.upstream_model_name : ''}</small></td>
               <td><Status>{healthNames[model.health_state] || model.health_state || '待检查'}</Status></td>
               <td>{Number(model.consecutive_request_failures || 0)}</td>
@@ -49,9 +49,8 @@ export default function ChannelModelsModal({ item, busyID = '', onClose, onTest 
               <td>{formatTime(model.last_checked_at)}</td>
               <td>{model.last_check_latency_ms ? `${model.last_check_latency_ms}ms` : '-'}</td>
               <td className="channel-model-error">{model.last_check_error || '-'}</td>
-              {onTest && <td><Button disabled={Boolean(busyID)} icon={RefreshCw} variant="ghost" onClick={() => onTest(item, model)}>{busyID === `model-${model.id}` ? '检查中' : '检查'}</Button></td>}
             </tr>)}
-            {models.length === 0 && <tr><td className="table-message" colSpan={onTest ? 10 : 9}>暂无已匹配模型，请先同步模型</td></tr>}
+            {models.length === 0 && <tr><td className="table-message" colSpan={onTest ? 9 : 8}>暂无已匹配模型，请先同步模型</td></tr>}
           </tbody>
         </table>
       </div>

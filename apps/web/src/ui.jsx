@@ -246,10 +246,10 @@ export function Pagination({ page = 1, pageSize = 20, total = 0, onPageChange, o
   );
 }
 
-export function Modal({ title, description, children, footer, onClose, wide = false }) {
+export function Modal({ title, description, children, footer, onClose, wide = false, className = '' }) {
   return (
     <div className="modal-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className={`modal ${wide ? 'modal-wide' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
+      <div className={['modal', wide && 'modal-wide', className].filter(Boolean).join(' ')} role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal-header">
           <div>
             <h2>{title}</h2>

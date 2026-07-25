@@ -4016,3 +4016,23 @@
 - `apps/web/src/styles.css`：调整 `.rank-2` 前景色和背景色。
 - `progress.md`：追加本轮改动、验证和回滚说明。
 - 回滚点：执行 `git revert <本轮提交哈希>` 可恢复第二名原银灰色样式，不影响排行数据和排序逻辑。
+
+## 2026-07-25 - Task: 发布全站界面与运营收尾版本到 103
+
+### What was done
+
+- 将 `codex/full-platform` 的 `f27482cfa790` 发布到 103，并将生产 `current` 原子切换到该版本。
+- 发布包含全站现代化界面、管理列表分页、管理员逐模型探活、错误码精简显示及调用记录布局收紧。
+- 使用不可变镜像摘要部署平台 API、Worker 和网关，保留上一生产版本 `45f6781e985b` 作为回滚点；未重置数据库，未操作 101、102。
+
+### Testing
+
+- 发布流水线中的 Go 全量测试、`go vet`、Go 构建、前端测试、UI 冒烟、前端生产构建、Compose 与发布脚本测试：通过。
+- 103 发布后账号、商户、单厂商密钥路由、支付、提现和运营只读契约：通过。
+- 103 发布后只读压力测试：请求 200、并发 10、成功 200；公网首页、`/api/health/live` 和 `/api/health/ready` 均返回 HTTP 200。
+- 远端 `current` 指向 `/opt/modelroute-platform/releases/f27482cfa790`；ModelRoute 的 6 个容器均处于运行状态，Gateway、API、New API、PostgreSQL 和 Redis 健康检查通过。
+
+### Notes
+
+- `progress.md`：追加本次 103 生产发布版本、验收证据和回滚点。
+- 回滚方式：在 103 执行 `CONFIRM_ROLLBACK=MODELROUTE_ROLLBACK /opt/modelroute-platform/current/deploy/scripts/rollback-release.sh 45f6781e985b`，脚本会先部署并验收目标版本，再原子切换 `current`。

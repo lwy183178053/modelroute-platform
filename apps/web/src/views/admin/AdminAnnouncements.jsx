@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Megaphone, Pencil, Pin, Plus } from 'lucide-react';
 import { apiRequest } from '../../api';
-import { ActionMenu, Button, Field, InlineNotice, Modal, Section, Status, TextInput } from '../../ui';
+import { ActionMenu, Button, Field, InlineNotice, Modal, Pagination, Section, Status, TextInput } from '../../ui';
 
 const audienceLabels = { user: '普通用户', merchant: '商户', admin: '管理员' };
 const statusLabels = { draft: '草稿', scheduled: '定时发布', published: '已发布', withdrawn: '已下架' };
@@ -83,18 +83,24 @@ export default function AdminAnnouncements({ notify }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [dialog, setDialog] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      setItems(await apiRequest('/api/admin/announcements') || []);
+      const data = await apiRequest(`/api/admin/announcements?p=${page}&page_size=${pageSize}`);
+      setItems(Array.isArray(data) ? data : data?.items || []);
+      setTotal(Array.isArray(data) ? data.length : Number(data?.total || 0));
     } catch (requestError) {
       setError(requestError.message || '读取公告失败');
+      setTotal(0);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, pageSize]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -128,6 +134,7 @@ export default function AdminAnnouncements({ notify }) {
         {!loading && items.length === 0 && <tr><td className="table-message" colSpan="7">暂无公告</td></tr>}
         {loading && <tr><td className="table-message" colSpan="7">正在读取公告</td></tr>}
       </tbody></table></div>
+      <Pagination page={page} pageSize={pageSize} total={total} onPageChange={setPage} onPageSizeChange={(nextPageSize) => { setPageSize(nextPageSize); setPage(1); }} disabled={loading} />
     </Section>
     {dialog && <AnnouncementDialog close={() => setDialog(null)} config={{ ...dialog, onSaved: load }} notify={notify} />}
   </>;

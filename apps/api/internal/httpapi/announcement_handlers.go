@@ -68,7 +68,19 @@ func (s *server) adminAnnouncements(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "announcement_store_error", "读取公告管理列表失败")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": items})
+	page, pageSize := pagination(r)
+	total := len(items)
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{
+		"page": page, "page_size": pageSize, "total": total, "items": items[start:end],
+	}})
 }
 
 func (s *server) createAdminAnnouncement(w http.ResponseWriter, r *http.Request) {

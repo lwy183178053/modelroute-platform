@@ -41,6 +41,7 @@ type ChannelModelBinding struct {
 	NextCheckAt                *time.Time `json:"next_check_at,omitempty"`
 	LastCheckedAt              *time.Time `json:"last_checked_at,omitempty"`
 	LastCheckLatencyMS         int        `json:"last_check_latency_ms,omitempty"`
+	LastStatusCode             int        `json:"last_status_code,omitempty"`
 	LastCheckError             string     `json:"last_check_error,omitempty"`
 	LastSyncedAt               time.Time  `json:"last_synced_at"`
 }
@@ -161,7 +162,7 @@ type MerchantRepository interface {
 type MultiModelMerchantRepository interface {
 	SyncChannelModels(context.Context, int64, []SyncedChannelModel) error
 	ChannelModels(context.Context, int64) ([]ChannelModelBinding, error)
-	SaveManualModelCheck(context.Context, int64, int64, int64, ModelHealthState, healthFailureClass, int, string) (ChannelModelBinding, error)
+	SaveManualModelCheck(context.Context, int64, int64, int64, ModelHealthState, healthFailureClass, int, int, string) (ChannelModelBinding, error)
 }
 
 type MerchantChannelManagement interface {

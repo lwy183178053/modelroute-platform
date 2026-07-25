@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BadgeDollarSign, Plus, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
 import { apiRequest, formatImagePrice, formatPriceMicros } from '../../api';
-import { ActionMenu, Button, Field, InlineNotice, Modal, ProviderLogo, Section, Select, Status, TextInput } from '../../ui';
+import { ActionMenu, Button, Field, InlineNotice, Modal, Pagination, ProviderLogo, Section, Select, Status, TextInput } from '../../ui';
 
 const providers = ['OpenAI', 'Anthropic', 'Gemini', 'DeepSeek', 'Qwen', 'Moonshot'];
 const imageQualities = ['low', 'medium', 'high', 'standard'];
@@ -209,15 +209,25 @@ export default function AdminModels({ notify }) {
   const [models, setModels] = useState([]);
   const [dialog, setDialog] = useState(null);
   const [error, setError] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setError('');
+    setLoading(true);
     try {
-      setModels(await apiRequest('/api/admin/models') || []);
+      const data = await apiRequest(`/api/admin/models?p=${page}&page_size=${pageSize}`);
+      setModels(Array.isArray(data) ? data : data?.items || []);
+      setTotal(Array.isArray(data) ? data.length : Number(data?.total || 0));
     } catch (requestError) {
       setError(requestError.message || '读取标准模型失败');
+      setTotal(0);
+    } finally {
+      setLoading(false);
     }
-  }, []);
+  }, [page, pageSize]);
   useEffect(() => { load(); }, [load]);
 
   const remove = async (model) => {
@@ -237,8 +247,10 @@ export default function AdminModels({ notify }) {
       <Section title="标准模型与基础价格" actions={<><Button icon={RefreshCw} onClick={load}>刷新</Button><Button icon={Plus} variant="primary" onClick={() => setDialog({ onSaved: load })}>新增标准模型</Button></>}>
         <div className="table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>模型与厂商</th><th>首档价格</th><th>价格结构</th><th>价格版本</th><th>状态</th><th>操作</th></tr></thead><tbody>
           {models.map((model) => <tr key={model.id}><td><code>{model.id}</code></td><td><div className="model-cell"><ProviderLogo provider={model.provider} size={22} /><div><strong>{model.public_name}</strong><span>{model.provider}</span></div></div></td><td><strong>{formatOfficialPrice(model)}</strong></td><td>{model.price?.price_kind === 'image' ? `${model.price.image_prices?.length || 0} 个组合` : `${model.price.tiers?.length || 0} 档`}</td><td><strong>v{model.price.version}</strong></td><td><Status>{model.status === 'active' ? '已启用' : model.status === 'archived' ? '已归档' : model.status}</Status></td><td><ActionMenu items={[{ label: '发布价格', icon: BadgeDollarSign, onClick: () => setDialog({ model, onSaved: load }) }, { label: '删除', icon: Trash2, danger: true, onClick: () => remove(model) }]} /></td></tr>)}
-          {models.length === 0 && <tr><td className="table-message" colSpan="7">暂无标准模型</td></tr>}
+          {!loading && models.length === 0 && <tr><td className="table-message" colSpan="7">暂无标准模型</td></tr>}
+          {loading && <tr><td className="table-message" colSpan="7">正在读取标准模型</td></tr>}
         </tbody></table></div>
+        <Pagination page={page} pageSize={pageSize} total={total} onPageChange={setPage} onPageSizeChange={(nextPageSize) => { setPageSize(nextPageSize); setPage(1); }} disabled={loading} />
       </Section>
       {dialog && <ModelDialog close={() => setDialog(null)} config={dialog} notify={notify} />}
     </div>

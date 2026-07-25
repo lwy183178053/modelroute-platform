@@ -121,7 +121,7 @@ SELECT binding.id, binding.merchant_channel_id, binding.upstream_model_name,
        COALESCE(binding.canonical_model_id, 0), COALESCE(model.public_name, ''), binding.match_status,
        binding.health_state, binding.consecutive_request_failures, binding.automatic_check_failures,
        binding.next_check_at, binding.last_checked_at, COALESCE(binding.last_check_latency_ms, 0),
-       COALESCE(binding.last_check_error, ''), binding.last_synced_at
+       COALESCE(binding.last_status_code, 0), COALESCE(binding.last_check_error, ''), binding.last_synced_at
 FROM merchant_channel_model_bindings binding
 LEFT JOIN canonical_models model ON model.id = binding.canonical_model_id
 WHERE binding.merchant_channel_id = $1
@@ -140,7 +140,7 @@ ORDER BY binding.id
 			&item.Model, &item.MatchStatus, &item.HealthState,
 			&item.ConsecutiveRequestFailures, &item.AutomaticCheckFailures,
 			&nextCheckAt, &lastCheckedAt, &item.LastCheckLatencyMS,
-			&item.LastCheckError, &item.LastSyncedAt,
+			&item.LastStatusCode, &item.LastCheckError, &item.LastSyncedAt,
 		); err != nil {
 			return nil, fmt.Errorf("解析渠道模型：%w", err)
 		}
@@ -160,6 +160,7 @@ func (s *SQLMerchantStore) SaveManualModelCheck(
 	state ModelHealthState,
 	class healthFailureClass,
 	latencyMS int,
+	statusCode int,
 	summary string,
 ) (ChannelModelBinding, error) {
 	tx, err := s.database.BeginTx(ctx, nil)
@@ -186,7 +187,8 @@ FOR UPDATE OF binding
 UPDATE merchant_channel_model_bindings binding
 SET health_state = $3, consecutive_request_failures = $4, automatic_check_failures = $5,
     next_check_at = $6, check_lease_until = NULL, last_checked_at = now(),
-    last_check_latency_ms = NULLIF($7, 0), last_check_error = NULLIF($8, ''), updated_at = now()
+    last_check_latency_ms = NULLIF($7, 0), last_status_code = NULLIF($8, 0),
+    last_check_error = NULLIF($9, ''), updated_at = now()
 FROM canonical_models model
 WHERE binding.id = $1 AND binding.merchant_channel_id = $2
   AND model.id = binding.canonical_model_id
@@ -194,24 +196,25 @@ RETURNING binding.id, binding.merchant_channel_id, binding.upstream_model_name,
           binding.canonical_model_id, model.public_name, binding.match_status,
           binding.health_state, binding.consecutive_request_failures, binding.automatic_check_failures,
           binding.next_check_at, binding.last_checked_at,
-          COALESCE(binding.last_check_latency_ms, 0), COALESCE(binding.last_check_error, ''),
+          COALESCE(binding.last_check_latency_ms, 0), COALESCE(binding.last_status_code, 0),
+          COALESCE(binding.last_check_error, ''),
           binding.last_synced_at
 `, bindingID, channelID, state.State, state.ConsecutiveRequestFailures,
-		state.AutomaticCheckFailures, timeOrNil(state.NextCheckAt), latencyMS, summary).Scan(
+		state.AutomaticCheckFailures, timeOrNil(state.NextCheckAt), latencyMS, statusCode, summary).Scan(
 		&item.ID, &item.ChannelID, &item.UpstreamModelName, &item.CanonicalModelID,
 		&item.Model, &item.MatchStatus, &item.HealthState,
 		&item.ConsecutiveRequestFailures, &item.AutomaticCheckFailures,
 		&nextCheckAt, &lastCheckedAt, &item.LastCheckLatencyMS,
-		&item.LastCheckError, &item.LastSyncedAt,
+		&item.LastStatusCode, &item.LastCheckError, &item.LastSyncedAt,
 	)
 	if err != nil {
 		return ChannelModelBinding{}, merchantStoreError(err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO channel_model_health_events
-    (channel_model_binding_id, source, outcome, first_byte_ms, failure_summary)
-VALUES ($1, 'manual_check', $2, NULLIF($3, 0), NULLIF($4, ''))
-`, bindingID, healthEventOutcome(class), latencyMS, summary); err != nil {
+    (channel_model_binding_id, source, outcome, status_code, first_byte_ms, failure_summary)
+VALUES ($1, 'manual_check', $2, NULLIF($3, 0), NULLIF($4, 0), NULLIF($5, ''))
+`, bindingID, healthEventOutcome(class), statusCode, latencyMS, summary); err != nil {
 		return ChannelModelBinding{}, fmt.Errorf("记录模型检查事件：%w", err)
 	}
 	if err := tx.Commit(); err != nil {

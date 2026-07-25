@@ -48,7 +48,7 @@ func TestUserUsageFiltersSettledConsumptionByModelAndMerchant(t *testing.T) {
 	reader := &usageRecordReaderStub{page: UsageRecordPage{
 		Page: 2, PageSize: 200, Total: 1,
 		Items: []UsageRecord{{
-			ID: 901, CreatedAt: time.Unix(1784649600, 0).UTC(), ModelName: "gpt-5.6",
+			ID: 901, CreatedAt: time.Unix(1784649600, 0).UTC(), FirstTokenMS: 286, ModelName: "gpt-5.6",
 			TokenID: 12, PromptTokens: 120, CompletionTokens: 80, CacheTokens: 40,
 			GrossQuota: 1000000, MerchantUserID: 17, MerchantName: "北辰云智", RequestID: "req-user-1",
 		}},
@@ -70,7 +70,7 @@ func TestUserUsageFiltersSettledConsumptionByModelAndMerchant(t *testing.T) {
 	if reader.query.ConsumerUserID != 7 || reader.query.MerchantUserID != 0 || reader.query.FilterMerchantUserID != 17 || reader.query.ModelName != "gpt-5.6" || reader.query.Page != 2 || reader.query.PageSize != 200 {
 		t.Fatalf("用户调用记录查询=%+v", reader.query)
 	}
-	for _, expected := range []string{`"merchant_user_id":17`, `"merchant_name":"北辰云智"`, `"prompt_tokens":120`, `"completion_tokens":80`, `"filters"`} {
+	for _, expected := range []string{`"merchant_user_id":17`, `"merchant_name":"北辰云智"`, `"first_token_ms":286`, `"prompt_tokens":120`, `"completion_tokens":80`, `"filters"`} {
 		if !strings.Contains(response.Body.String(), expected) {
 			t.Fatalf("响应缺少 %s：%s", expected, response.Body.String())
 		}
@@ -95,7 +95,7 @@ func TestMerchantUsageUsesSessionMerchantAndReturnsNetIncome(t *testing.T) {
 	reader := &usageRecordReaderStub{page: UsageRecordPage{
 		Page: 1, PageSize: 20, Total: 1,
 		Items: []UsageRecord{{
-			ID: 902, CreatedAt: time.Unix(1784649700, 0).UTC(), ModelName: "gpt-5.6",
+			ID: 902, CreatedAt: time.Unix(1784649700, 0).UTC(), FirstTokenMS: 1340, ModelName: "gpt-5.6",
 			ChannelID: 51, ChannelName: "主线路", PromptTokens: 50, CompletionTokens: 25,
 			MerchantIncomeQuota: 900000, RequestID: "req-merchant-1",
 		}},
@@ -114,7 +114,7 @@ func TestMerchantUsageUsesSessionMerchantAndReturnsNetIncome(t *testing.T) {
 	if reader.query.MerchantUserID != 17 || reader.query.ConsumerUserID != 0 || reader.query.FilterMerchantUserID != 0 {
 		t.Fatalf("商户调用记录查询=%+v", reader.query)
 	}
-	for _, expected := range []string{`"channel_id":51`, `"channel_name":"主线路"`, `"merchant_income_quota":900000`} {
+	for _, expected := range []string{`"channel_id":51`, `"channel_name":"主线路"`, `"first_token_ms":1340`, `"merchant_income_quota":900000`} {
 		if !strings.Contains(response.Body.String(), expected) {
 			t.Fatalf("商户响应缺少 %s：%s", expected, response.Body.String())
 		}

@@ -100,6 +100,7 @@ func NewServerWithServices(version string, dependencies Dependencies, services S
 	mux.HandleFunc("POST /api/admin/merchant-applications/{id}/reject", s.adminRejectApplication)
 	mux.HandleFunc("POST /api/admin/users/{id}/merchant-status", s.adminUserMerchantStatus)
 	mux.HandleFunc("GET /api/admin/channels", s.adminMerchantChannels)
+	mux.HandleFunc("POST /api/admin/channels/{id}/models/{binding_id}/check", s.checkAdminChannelModel)
 	mux.HandleFunc("DELETE /api/admin/channels/{id}", s.adminDeleteChannel)
 	mux.HandleFunc("POST /api/admin/models", s.createCanonicalModel)
 	mux.HandleFunc("POST /api/admin/models/detect", s.detectCanonicalModel)

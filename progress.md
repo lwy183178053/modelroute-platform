@@ -3738,3 +3738,281 @@
 - `docs/UI视觉规范.md`：新增颜色、组件、移动端和动效验收规范。
 - `progress.md`：追加本轮实现与测试证据。
 - 回滚点：本轮提交前的 `45f6781e985b`；可执行 `git revert <本轮提交哈希>` 回退 UI、截图脚本和文档，不修改接口、数据库和业务数据。
+
+## 2026-07-25 - Task: 调用记录增加首 Token 时间
+
+### What was done
+
+- 统一调用记录接口增加 `first_token_ms`，从对应路由决策的首字节耗时读取，不改变结算、计费或数据库结构。
+- 用户、商户和管理员共用调用记录表增加“首 Token 时间”列，毫秒值在达到 1 秒时以秒显示；没有历史测量值时显示 `-`。
+- 补齐后端响应测试、三类前端冒烟数据与字段断言，并同步统一调用记录文档。
+
+### Testing
+
+- `go test ./... -count=1`、`go vet ./...`、`go build ./...`：通过。
+- `npm.cmd test`、`npm.cmd run build`、`npm.cmd run test:ui`：通过；三类调用记录均验证首 Token 时间列和毫秒/秒格式。
+- `npm.cmd run capture`：通过；桌面与移动端截图生成，根页面无横向溢出。
+- `git diff --check`：通过。
+
+### Notes
+
+- `apps/api/internal/httpapi/usage_records.go`：关联路由决策并返回首 Token 毫秒数。
+- `apps/api/internal/httpapi/usage_records_test.go`：增加首 Token 字段响应断言。
+- `apps/web/src/views/UsagePanels.jsx`：增加首 Token 时间格式化与共享表格列。
+- `apps/web/scripts/ui-smoke.mjs`、`apps/web/scripts/capture.mjs`：补充三类调用记录首 Token 测试数据和断言。
+- `docs/统一调用记录.md`：记录首 Token 时间来源和历史空值口径。
+- 回滚点：本轮施工前提交为 `e0ae6dc`；可执行 `git revert <本轮提交哈希>` 回退字段展示和查询关联，不修改账务数据或数据库结构。
+
+## 2026-07-25 - Task: 管理后台长列表统一分页
+
+### What was done
+
+- 商户申请审核、标准模型与价格、渠道管理、兑换码管理和公告管理统一接入 `20/50/200` 分页、首页/尾页和加载状态。
+- 商户审核、渠道和兑换码筛选请求使用服务端页码；筛选条件变化自动回到第一页。
+- 管理员模型和公告接口增加 `page`、`page_size`、`total`、`items` 响应结构，保留原有操作和公开模型接口不变。
+- 继续沿用已分页的用户、充值、提现和渠道调用日志页面，后台列表分页入口保持一致。
+
+### Testing
+
+- `go test ./internal/httpapi -count=1`：通过，管理员接口和现有业务测试通过。
+- `npm.cmd test`、`npm.cmd run build`、`npm.cmd run test:ui`：通过；UI 冒烟覆盖模型、商户审核、渠道、公告和兑换码分页控件。
+- `npm.cmd run capture`：通过，桌面与移动端截图生成，页面无横向溢出。
+- `git diff --check`：通过。
+
+### Notes
+
+- `apps/api/internal/httpapi/routing_handlers.go`：管理员标准模型列表增加分页响应。
+- `apps/api/internal/httpapi/announcement_handlers.go`：管理员公告列表增加分页响应。
+- `apps/web/src/views/admin/AdminModels.jsx`：接入标准模型分页。
+- `apps/web/src/views/admin/AdminMerchants.jsx`：接入商户审核分页和筛选回第一页。
+- `apps/web/src/views/admin/AdminChannels.jsx`：接入渠道分页、搜索和商户筛选的服务端参数。
+- `apps/web/src/views/admin/AdminRedemptions.jsx`：接入兑换码分页和搜索回第一页。
+- `apps/web/src/views/admin/AdminAnnouncements.jsx`：接入公告分页。
+- `apps/web/scripts/ui-smoke.mjs`：增加五个后台列表的分页断言。
+- `docs/账号与管理员接口.md`：同步后台长列表分页范围和统一参数口径。
+- `progress.md`：追加本轮改动、测试和回滚说明。
+- 回滚点：本轮施工前提交为 `e0ae6dc`；可执行 `git revert <本轮提交哈希>` 回退后台分页，不改变业务数据和数据库结构。
+
+## 2026-07-25 - Task: 云端数据导入本地开发环境
+
+### What was done
+
+- 从 103 导出并导入平台库和 New API 库，恢复本地用户、余额、模型、渠道、路由、API 密钥和调用数据；Redis 保持本地空数据，不导入云端临时会话。
+- 补齐恢复库的本地数据库用户、表和序列权限，确保 New API 与平台服务可正常迁移和读取。
+- 将云端唯一管理员运行凭据和平台加密密钥同步到被 Git 忽略的本地 `.env.dev`，保留本地访问地址和 Cookie 配置。
+- 修复结算同步跳过失败消费日志（`type=2` 且额度为零），避免云端历史失败请求阻塞本地 Worker；正常消费仍进入结算。
+
+### Testing
+
+- 云端两个 PostgreSQL dump 成功导出、下载和恢复；临时云端/本地 dump 文件均已清理。
+- 本地平台 API、Worker、New API 容器健康启动；`/api/health/ready` 返回 `200`。
+- 使用云端管理员凭据登录本地 `/api/auth/login`、读取 `/api/me` 和 `/api/keys` 均返回 `200`，导入密钥和路由数据可见。
+- `go test ./internal/httpapi -run TestSettlementSyncSkipsFailedConsumptionLog -count=1`、`go test ./... -count=1`、`go vet ./...`、`go build ./...`：通过。
+- `npm.cmd test`、`npm.cmd run build`：通过；本地 `/api/health/ready` 返回 `200`，Worker 在跳过历史失败消费日志后不再重复报错。
+
+### Notes
+
+- `apps/api/internal/httpapi/settlement_sync.go`：跳过失败消费零额度日志，避免同步水位卡死。
+- `apps/api/internal/httpapi/settlement_sync_test.go`：增加失败消费日志回归测试。
+- `.env.dev`：更新本地运行时管理员身份和平台加密密钥；文件已被 Git 忽略。
+- `progress.md`：追加数据同步、权限修复、验证和回滚说明。
+- 回滚点：本轮数据导入前的本地开发卷没有保留数据级副本；可重新执行 `deploy/scripts/dev.ps1 reset` 清空并初始化本地卷，代码修复可执行 `git revert <本轮提交哈希>` 回退。
+
+## 2026-07-25 - Task: 补齐渠道模型详情分页
+
+### What was done
+
+- 渠道模型详情弹窗增加统一的 `20/50/200` 分页、首页/尾页和当前页统计。
+- 切换渠道时自动回到第一页，逐模型检查进行中时暂时锁定分页操作，避免检查状态与列表切换产生误操作。
+
+### Testing
+
+- `go test ./... -count=1`：通过。
+- `go vet ./...`、`go build ./...`：通过。
+- `npm.cmd test`、`npm.cmd run build`、`npm.cmd run test:ui`、`npm.cmd run capture`：通过。
+- `git diff --check`：通过；本地预览 `http://127.0.0.1:57723/` 返回 `HTTP 200`。
+
+### Notes
+
+- `apps/web/src/ChannelModelsModal.jsx`：为渠道逐模型详情列表接入分页。
+- `docs/账号与管理员接口.md`：补充渠道模型详情弹窗分页口径。
+- `progress.md`：追加本轮改动、验证和回滚说明。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可回退渠道模型详情分页，不影响渠道、模型和检查数据。
+
+## 2026-07-25 - Task: 放大用量趋势空状态提示
+
+### What was done
+
+- 将无用量提示改为图标与文字组的垂直信息层级，标题和说明分行显示。
+- 增加空状态面板高度、图标尺寸、文字间距和上下留白，使内容在趋势区域内上下居中且不再挤在一行。
+
+### Testing
+
+- `npm.cmd run test:ui`：通过，三套工作区 UI 冒烟正常。
+- `npm.cmd run capture`：通过，桌面与移动端截图生成，页面无横向溢出。
+
+### Notes
+
+- `apps/web/src/ui.jsx`：为通用空状态增加文字容器。
+- `apps/web/src/styles.css`：放大并居中空状态提示布局。
+- `progress.md`：追加本轮改动和回滚说明。
+- 回滚点：本轮施工前提交为 `e0ae6dc`；恢复空状态原有横向布局和尺寸即可回滚。
+
+## 2026-07-25 - Task: 修复模型市场分类筛选布局跳动
+
+### What was done
+
+- 增加厂商和具体模型筛选区域的上下内边距，让白色内容区与分类按钮保持清晰间距。
+- 固定分类按钮的字体粗细，移除按压位移和选中加粗，避免点击后同排按钮被重新挤动。
+
+### Testing
+
+- `npm.cmd run build`：通过，Vite 生产构建完成。
+- `npm.cmd run test:ui`：通过，模型市场分类筛选及三套工作区 UI 冒烟正常。
+- `npm.cmd run capture`：通过，桌面与移动端截图生成，页面无横向溢出。
+
+### Notes
+
+- `apps/web/src/styles.css`：调整分类筛选区间距、按钮字体和交互反馈。
+- `progress.md`：追加本轮改动和回滚说明。
+- 回滚点：本轮施工前提交为 `e0ae6dc`；恢复分类筛选区原内边距与按钮过渡规则即可回滚。
+
+## 2026-07-25 - Task: 重做用量趋势空状态与柱状图布局
+
+### What was done
+
+- 将无用量状态改为紧凑的仪表盘提示行，包含图标、加粗标题和说明文字，避免空状态内容挤在一起。
+- 趋势图固定为最近 7 个日期槽位，缺少数据的日期显示空轨道，避免少量柱状数据被拉到两端；零额度不再显示异常的最小柱。
+- 加入趋势加载状态样式，保持面板高度稳定。
+
+### Testing
+
+- `npm.cmd run build`：通过，Vite 生产构建完成。
+- `npm.cmd run test:ui`：通过，三套工作区和用量趋势页面冒烟正常。
+- `npm.cmd run capture`：通过，桌面与移动端截图生成，趋势柱状图布局和页面横向溢出检查正常。
+
+### Notes
+
+- `apps/web/src/views/UsagePanels.jsx`：补齐 7 日趋势槽位、空值显示和加载状态。
+- `apps/web/src/styles.css`：新增空状态、加载状态和趋势柱状图布局样式。
+- `progress.md`：追加本轮改动和回滚说明。
+- 回滚点：本轮施工前提交为 `e0ae6dc`；可执行 `git revert <本轮提交哈希>` 回退趋势展示，不修改接口、统计和账务数据。
+
+## 2026-07-25 - Task: 统一模型市场第二名排行背景色
+
+### What was done
+
+- 将模型市场第 2 名排行数字的背景色统一为第 4、5、6 名使用的中性背景色，保留第 1、3 名的强调色和第 2 名文字色。
+
+### Testing
+
+- `npm.cmd run build`：通过，Vite 生产构建完成。
+- `npm.cmd run test:ui`：通过，模型市场及三套工作区 UI 冒烟正常。
+
+### Notes
+
+- `apps/web/src/styles.css`：调整 `.rank-2` 背景色。
+- `progress.md`：追加本轮改动、测试和回滚说明。
+- 回滚点：本轮施工前提交为 `e0ae6dc`；恢复 `.rank-2` 原背景色 `#e9eef0` 即可回滚。
+
+## 2026-07-25 - Task: 恢复前三名排行强调色并补筛选区间距
+
+### What was done
+
+- 恢复第 1、2、3 名各自的金色、银色、铜色排行背景，第 4 名及之后继续使用中性背景。
+- 增加模型市场厂商筛选区域的顶部内边距，移动端同步保持紧凑间距。
+
+### Testing
+
+- `npm.cmd run build`：通过，Vite 生产构建完成。
+- `npm.cmd run test:ui`：通过，模型市场及三套工作区 UI 冒烟正常。
+
+### Notes
+
+- `apps/web/src/styles.css`：恢复 `.rank-2` 银色背景并调整 `.provider-pills` 内边距。
+- `progress.md`：追加本轮改动和回滚说明。
+- 回滚点：本轮施工前提交为 `e0ae6dc`；恢复 `.rank-2` 的当前样式和厂商筛选区原内边距即可回滚。
+
+## 2026-07-25 - Task: 统一全站下拉框视觉
+
+### What was done
+
+- 统一筛选、分页和表单下拉框的背景、边框、箭头、焦点、悬停和禁用状态。
+- 增加浅色原生选项样式与紧凑分页尺寸，保持桌面和移动端控件宽度稳定。
+
+### Testing
+
+- `npm.cmd test`、`npm.cmd run build`、`npm.cmd run test:ui`、`npm.cmd run capture`：通过。
+- `git diff --check`：通过；本地预览 `http://127.0.0.1:57723/` 保持可访问。
+
+### Notes
+
+- `apps/web/src/styles.css`：调整公共 `.select-wrap` 和 `.select` 样式。
+- `docs/UI视觉规范.md`：补充下拉框组件规范。
+- `progress.md`：追加本轮改动、验证和回滚说明。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可恢复下拉框原有边框、背景和箭头样式，不影响业务数据与接口。
+
+## 2026-07-25 - Task: 管理员逐模型探活与错误码显示
+
+### What was done
+
+- 移除管理员“渠道与探活”侧栏的冷却/错误提醒数字，保留运营总览中的模型状态关注入口。
+- 管理员渠道模型弹窗复用商户逐模型检查能力，新增管理员鉴权接口；检查成功或失败后即时刷新模型状态。
+- 渠道模型错误列改为显示 HTTP 数字错误码，原始错误仅保留为悬停提示，避免长文本撑开弹窗。
+
+### Testing
+
+- `go test ./... -count=1`、`go vet ./...`、`go build ./...`：通过。
+- `npm.cmd test`、`npm.cmd run build`、`npm.cmd run test:ui`、`npm.cmd run capture`：通过；UI 冒烟覆盖管理员逐模型检查和状态刷新。
+- `git diff --check`：通过。
+
+### Notes
+
+- `apps/api/internal/httpapi/server.go`、`channel_models_handlers.go`：注册管理员逐模型检查接口并复用检查流程。
+- `apps/api/internal/httpapi/merchant_channel_store.go`、`merchant_types.go`：返回和保存模型最后 HTTP 状态码。
+- `apps/api/internal/httpapi/self_service_channels_test.go`：增加管理员检查与状态码回归测试。
+- `apps/web/src/views/AdminView.jsx`、`AdminChannels.jsx`、`ChannelModelsModal.jsx`：移除侧栏提醒数字并增加管理员检查操作、错误码显示。
+- `apps/web/scripts/ui-smoke.mjs`：更新管理员渠道检查夹具和断言。
+- `docs/商户与渠道审核接口.md`、`docs/多模型渠道运营升级.md`、`docs/模型报价路由与健康.md`、`docs/运营管理与升级验收.md`：同步管理员逐模型检查口径。
+- `progress.md`：追加本轮改动、验证和回滚说明。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可回退管理员逐模型检查和错误码展示，不影响渠道数据及健康历史记录。
+
+## 2026-07-25 - Task: 收紧调用记录布局与首 Token 时间
+
+### What was done
+
+- 首 Token 时间统一显示为秒并保留两位小数，避免毫秒和秒两种格式造成列宽变化。
+- 调用记录表增加固定列宽和文本省略，收紧首 Token、时间、模型、商户、渠道等列，降低页面横向占用。
+- 页面预留稳定纵向滚动条槽位，切换侧栏时避免因滚动条出现或消失产生整体位移。
+
+### Testing
+
+- `npm.cmd run build`、`npm.cmd run test:ui`、`npm.cmd run capture`：通过；UI 冒烟已更新为 `0.29s` 首 Token 展示。
+- `git diff --check`：通过。
+
+### Notes
+
+- `apps/web/src/views/UsagePanels.jsx`：统一首 Token 时间格式并增加调用记录列标记。
+- `apps/web/src/styles.css`：收紧调用记录列宽、启用固定布局和稳定滚动条槽位。
+- `apps/web/scripts/ui-smoke.mjs`：更新首 Token 时间回归断言。
+- `docs/统一调用记录.md`：补充前端秒数展示口径。
+- `progress.md`：追加本轮改动、验证和回滚说明。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可恢复调用记录原列宽和毫秒/秒混合显示，不影响调用数据。
+
+## 2026-07-25 - Task: 区分模型市场第二名排行颜色
+
+### What was done
+
+- 将模型市场第二名从接近后续排名的银灰色改为浅蓝色，提升与第 4 名及之后中性灰的区分度。
+- 保留第一名金色、第三名铜色和后续排名中性色的层级关系。
+
+### Testing
+
+- `npm.cmd run build`、`npm.cmd run test:ui`、`npm.cmd run capture`：通过。
+- `git diff --check`：通过。
+
+### Notes
+
+- `apps/web/src/styles.css`：调整 `.rank-2` 前景色和背景色。
+- `progress.md`：追加本轮改动、验证和回滚说明。
+- 回滚点：执行 `git revert <本轮提交哈希>` 可恢复第二名原银灰色样式，不影响排行数据和排序逻辑。

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lwy183178053/modelroute-platform/apps/api/internal/newapi"
 	"github.com/lwy183178053/modelroute-platform/apps/api/internal/platformauth"
 )
 
@@ -217,6 +218,17 @@ func (s *server) checkMerchantChannelModel(w http.ResponseWriter, r *http.Reques
 	if !ok || !s.requireSameOrigin(w, r) {
 		return
 	}
+	s.checkChannelModel(w, r, identity.MerchantID)
+}
+
+func (s *server) checkAdminChannelModel(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := s.requireSession(w, r, roleAdmin); !ok || !s.requireSameOrigin(w, r) {
+		return
+	}
+	s.checkChannelModel(w, r, 0)
+}
+
+func (s *server) checkChannelModel(w http.ResponseWriter, r *http.Request, merchantID int64) {
 	repository, ok := s.services.Merchants.(MultiModelMerchantRepository)
 	lookup, lookupReady := s.services.Merchants.(MerchantChannelLookup)
 	tester, testerReady := s.services.ChannelTests.(ExistingChannelTester)
@@ -233,7 +245,7 @@ func (s *server) checkMerchantChannelModel(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	channel, err := lookup.Channel(r.Context(), channelID)
-	if err != nil || channel.MerchantID != identity.MerchantID {
+	if err != nil || (merchantID > 0 && channel.MerchantID != merchantID) {
 		writeAPIError(w, http.StatusNotFound, "channel_not_found", "渠道不存在")
 		return
 	}
@@ -271,9 +283,11 @@ func (s *server) checkMerchantChannelModel(w http.ResponseWriter, r *http.Reques
 	}
 	outcome, testErr := tester.TestExisting(r.Context(), channel.NewAPIChannelID, model)
 	class, summary := healthFailureNone, ""
+	statusCode := 0
 	if testErr != nil {
 		class = healthFailureTemporary
 		summary = sanitizedChannelError(testErr, "")
+		statusCode = channelTestStatusCode(testErr)
 	}
 	current := ModelHealthState{
 		State: binding.HealthState, ConsecutiveRequestFailures: binding.ConsecutiveRequestFailures,
@@ -283,8 +297,8 @@ func (s *server) checkMerchantChannelModel(w http.ResponseWriter, r *http.Reques
 		current.NextCheckAt = *binding.NextCheckAt
 	}
 	updated, err := repository.SaveManualModelCheck(
-		r.Context(), channelID, bindingID, identity.MerchantID,
-		nextModelHealthAfterManualCheck(current, class, time.Now().UTC()), class, outcome.LatencyMS, summary,
+		r.Context(), channelID, bindingID, merchantID,
+		nextModelHealthAfterManualCheck(current, class, time.Now().UTC()), class, outcome.LatencyMS, statusCode, summary,
 	)
 	if err != nil {
 		s.writeMerchantStoreError(w, err)
@@ -295,6 +309,14 @@ func (s *server) checkMerchantChannelModel(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": updated})
+}
+
+func channelTestStatusCode(err error) int {
+	var apiErr *newapi.APIError
+	if errors.As(err, &apiErr) && apiErr != nil && apiErr.StatusCode >= 400 {
+		return apiErr.StatusCode
+	}
+	return 0
 }
 
 func (s *server) deleteMerchantChannel(w http.ResponseWriter, r *http.Request) {

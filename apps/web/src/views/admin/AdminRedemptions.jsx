@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { apiRequest, formatQuota, getQuotaPerUnit } from '../../api';
-import { ActionMenu, Button, CopyValue, Field, InlineNotice, Modal, Section, Status, TextInput } from '../../ui';
+import { ActionMenu, Button, CopyValue, Field, InlineNotice, Modal, Pagination, Section, Status, TextInput } from '../../ui';
 
 function localDateTime(timestamp) {
   if (!timestamp || Number(timestamp) <= 0) return '';
@@ -66,27 +66,33 @@ function RedemptionDialog({ close, config, notify }) {
 export default function AdminRedemptions({ notify }) {
   const [items, setItems] = useState([]);
   const [keyword, setKeyword] = useState('');
+  const [submittedKeyword, setSubmittedKeyword] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [dialog, setDialog] = useState(null);
   const [createdCodes, setCreatedCodes] = useState([]);
 
-  const load = useCallback(async (search = keyword) => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const query = new URLSearchParams({ p: '1', page_size: '50' });
-      if (search.trim()) query.set('keyword', search.trim());
+      const query = new URLSearchParams({ p: String(page), page_size: String(pageSize) });
+      if (submittedKeyword) query.set('keyword', submittedKeyword);
       const data = await apiRequest(`/api/admin/redemptions?${query}`);
       setItems(data?.items || []);
+      setTotal(Number(data?.total || 0));
     } catch (requestError) {
       setError(requestError.message || '读取兑换码失败');
+      setTotal(0);
     } finally {
       setLoading(false);
     }
-  }, [keyword]);
+  }, [page, pageSize, submittedKeyword]);
 
-  useEffect(() => { load(''); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [load]);
 
   const setStatus = async (item) => {
     const enabled = Number(item.status) !== 1;
@@ -136,7 +142,7 @@ export default function AdminRedemptions({ notify }) {
       description="兑换额度使用平台统一整数额度口径"
       actions={<><Button icon={Trash2} onClick={cleanup} variant="danger">清理失效</Button><Button icon={Plus} onClick={() => setDialog({ mode: 'create' })} variant="primary">新建兑换码</Button></>}
     >
-      <form className="toolbar-form" onSubmit={(event) => { event.preventDefault(); load(keyword); }}>
+      <form className="toolbar-form" onSubmit={(event) => { event.preventDefault(); setSubmittedKeyword(keyword.trim()); setPage(1); }}>
         <TextInput aria-label="搜索兑换码" onChange={(event) => setKeyword(event.target.value)} placeholder="名称或兑换码" value={keyword} />
         <Button icon={Search} type="submit">搜索</Button>
       </form>
@@ -155,6 +161,7 @@ export default function AdminRedemptions({ notify }) {
         {!loading && items.length === 0 && <tr><td className="table-message" colSpan="8">暂无兑换码</td></tr>}
         {loading && <tr><td className="table-message" colSpan="8">正在读取兑换码</td></tr>}
       </tbody></table></div>
+      <Pagination page={page} pageSize={pageSize} total={total} onPageChange={setPage} onPageSizeChange={(nextPageSize) => { setPageSize(nextPageSize); setPage(1); }} disabled={loading} />
     </Section>
     {dialog && <RedemptionDialog close={() => setDialog(null)} config={{ ...dialog, onSaved: (codes) => { setCreatedCodes(codes); load(); } }} notify={notify} />}
   </>;

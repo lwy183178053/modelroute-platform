@@ -110,7 +110,24 @@ func (s *server) adminModels(w http.ResponseWriter, r *http.Request) {
 	if _, _, ok := s.requireSession(w, r, roleAdmin); !ok || !s.routingReady(w, false) {
 		return
 	}
-	s.writeModels(w, r)
+	models, err := s.services.Routing.ListCanonicalModels(r.Context())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "models_query_failed", "查询标准模型失败")
+		return
+	}
+	page, pageSize := pagination(r)
+	total := len(models)
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{
+		"page": page, "page_size": pageSize, "total": total, "items": models[start:end],
+	}})
 }
 
 func (s *server) writeModels(w http.ResponseWriter, r *http.Request) {

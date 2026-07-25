@@ -128,7 +128,6 @@ export default function AdminView({ section, setSection, openModal, notify }) {
     const summary = overview?.summary || {};
     const counts = {
       merchants: Number(summary.pending_merchant_applications || 0),
-      channels: Number(summary.cooling_models || 0) + Number(summary.error_models || 0),
       withdrawals: Number(summary.pending_withdrawals || 0),
     };
     return baseSections.map((item) => ({ ...item, count: counts[item.id] || 0 }));

@@ -24,6 +24,7 @@ type UsageRecordQuery struct {
 type UsageRecord struct {
 	ID                  int64     `json:"id"`
 	CreatedAt           time.Time `json:"created_at"`
+	FirstTokenMS        int       `json:"first_token_ms"`
 	ConsumerUserID      int       `json:"user_id"`
 	ModelName           string    `json:"model_name"`
 	TokenID             int       `json:"token_id"`
@@ -86,6 +87,7 @@ JOIN offer_versions offer ON offer.id = source.offer_version_id
 JOIN canonical_models model ON model.id = offer.canonical_model_id
 JOIN offer_channel_aliases alias ON alias.id = source.offer_channel_alias_id
 JOIN merchant_channels channel ON channel.id = alias.merchant_channel_id
+LEFT JOIN routing_decisions decision ON decision.request_id = source.request_id
 WHERE source.source_type = 2 AND source.status = 'settled'
   AND ($1 = 0 OR source.newapi_user_id = $1)
   AND ($2 = 0 OR merchant.newapi_user_id = $2)
@@ -99,7 +101,7 @@ WHERE source.source_type = 2 AND source.status = 'settled'
 		return UsageRecordPage{}, fmt.Errorf("统计调用记录：%w", err)
 	}
 	rows, err := s.database.QueryContext(ctx, `
-SELECT source.newapi_log_id, source.source_created_at, source.newapi_user_id, model.public_name,
+SELECT source.newapi_log_id, source.source_created_at, COALESCE(decision.first_byte_ms, 0), source.newapi_user_id, model.public_name,
        source.newapi_token_id,
        CASE WHEN source.other->>'prompt_tokens' ~ '^[0-9]+$' THEN (source.other->>'prompt_tokens')::bigint ELSE 0 END,
        CASE WHEN source.other->>'completion_tokens' ~ '^[0-9]+$' THEN (source.other->>'completion_tokens')::bigint ELSE 0 END,
@@ -119,7 +121,7 @@ LIMIT $7 OFFSET $8
 	for rows.Next() {
 		var item UsageRecord
 		if err := rows.Scan(
-			&item.ID, &item.CreatedAt, &item.ConsumerUserID, &item.ModelName, &item.TokenID,
+			&item.ID, &item.CreatedAt, &item.FirstTokenMS, &item.ConsumerUserID, &item.ModelName, &item.TokenID,
 			&item.PromptTokens, &item.CompletionTokens, &item.CacheTokens,
 			&item.GrossQuota, &item.MerchantIncomeQuota,
 			&item.MerchantUserID, &item.MerchantName,

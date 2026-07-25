@@ -273,9 +273,11 @@ export function Modal({ title, description, children, footer, onClose, wide = fa
 export function EmptyNotice({ title, description }) {
   return (
     <div className="empty-notice">
-      <ShieldCheck size={24} />
-      <strong>{title}</strong>
-      <span>{description}</span>
+      <ShieldCheck size={30} />
+      <div className="empty-notice-copy">
+        <strong>{title}</strong>
+        <span>{description}</span>
+      </div>
     </div>
   );
 }

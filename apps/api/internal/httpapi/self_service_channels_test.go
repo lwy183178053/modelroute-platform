@@ -3,12 +3,13 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/lwy183178053/modelroute-platform/apps/api/internal/newapi"
 )
 
 type selfServiceChannelRepositoryStub struct {
@@ -18,12 +19,13 @@ type selfServiceChannelRepositoryStub struct {
 
 type manualModelCheckRepositoryStub struct {
 	*merchantRepositoryStub
-	channel     MerchantChannel
-	models      []ChannelModelBinding
-	savedState  ModelHealthState
-	savedClass  healthFailureClass
-	savedError  string
-	saveInvoked bool
+	channel         MerchantChannel
+	models          []ChannelModelBinding
+	savedState      ModelHealthState
+	savedClass      healthFailureClass
+	savedStatusCode int
+	savedError      string
+	saveInvoked     bool
 }
 
 func (s *manualModelCheckRepositoryStub) Channel(context.Context, int64) (MerchantChannel, error) {
@@ -38,12 +40,13 @@ func (s *manualModelCheckRepositoryStub) ChannelModels(context.Context, int64) (
 	return s.models, nil
 }
 
-func (s *manualModelCheckRepositoryStub) SaveManualModelCheck(_ context.Context, _, bindingID, _ int64, state ModelHealthState, class healthFailureClass, latencyMS int, summary string) (ChannelModelBinding, error) {
+func (s *manualModelCheckRepositoryStub) SaveManualModelCheck(_ context.Context, _, bindingID, _ int64, state ModelHealthState, class healthFailureClass, latencyMS, statusCode int, summary string) (ChannelModelBinding, error) {
 	s.savedState = state
 	s.savedClass = class
+	s.savedStatusCode = statusCode
 	s.savedError = summary
 	s.saveInvoked = true
-	return ChannelModelBinding{ID: bindingID, ChannelID: s.channel.ID, CanonicalModelID: 61, Model: "gpt-5.5", UpstreamModelName: "gpt-5.5", MatchStatus: "matched", HealthState: state.State, ConsecutiveRequestFailures: state.ConsecutiveRequestFailures, AutomaticCheckFailures: state.AutomaticCheckFailures, LastCheckLatencyMS: latencyMS, LastCheckError: summary}, nil
+	return ChannelModelBinding{ID: bindingID, ChannelID: s.channel.ID, CanonicalModelID: 61, Model: "gpt-5.5", UpstreamModelName: "gpt-5.5", MatchStatus: "matched", HealthState: state.State, ConsecutiveRequestFailures: state.ConsecutiveRequestFailures, AutomaticCheckFailures: state.AutomaticCheckFailures, LastCheckLatencyMS: latencyMS, LastStatusCode: statusCode, LastCheckError: summary}, nil
 }
 
 type manualModelTesterStub struct {
@@ -148,7 +151,7 @@ func TestMerchantManualModelCheckRestoresHealthyState(t *testing.T) {
 			return MerchantIdentity{MerchantID: 31, UserID: 7, Status: "active", IsMerchant: true}, nil
 		}},
 		channel: MerchantChannel{ID: 51, MerchantID: 31, NewAPIChannelID: 41},
-		models: []ChannelModelBinding{{ID: 71, ChannelID: 51, CanonicalModelID: 61, HealthState: "error", ConsecutiveRequestFailures: 3, AutomaticCheckFailures: 10}},
+		models:  []ChannelModelBinding{{ID: 71, ChannelID: 51, CanonicalModelID: 61, HealthState: "error", ConsecutiveRequestFailures: 3, AutomaticCheckFailures: 10}},
 	}
 	tester := &manualModelTesterStub{outcome: ChannelTestOutcome{LatencyMS: 38}}
 	services.Merchants = repository
@@ -168,6 +171,30 @@ func TestMerchantManualModelCheckRestoresHealthyState(t *testing.T) {
 	}
 }
 
+func TestAdminManualModelCheckUsesTheSameModelProbe(t *testing.T) {
+	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	repository := &manualModelCheckRepositoryStub{
+		merchantRepositoryStub: &merchantRepositoryStub{},
+		channel:                MerchantChannel{ID: 51, MerchantID: 31, NewAPIChannelID: 41},
+		models:                 []ChannelModelBinding{{ID: 71, ChannelID: 51, CanonicalModelID: 61, HealthState: "cooling", ConsecutiveRequestFailures: 3, AutomaticCheckFailures: 2}},
+	}
+	tester := &manualModelTesterStub{outcome: ChannelTestOutcome{LatencyMS: 42}}
+	services.Merchants = repository
+	services.Credentials = testCredentialBox(t)
+	services.ChannelTests = tester
+	services.Routing = &routingRepositoryStub{listModels: func(context.Context) ([]CanonicalModel, error) {
+		return []CanonicalModel{{ID: 61, PublicName: "gpt-5.5", Provider: "OpenAI", Status: "active", Price: OfficialPrice{PriceKind: "text"}}}, nil
+	}}
+	request := httptest.NewRequest(http.MethodPost, "/api/admin/channels/51/models/71/check", nil)
+	request.Header.Set("Origin", "https://aggregate.lwylink.xyz")
+	request.AddCookie(&http.Cookie{Name: "modelroute_session", Value: createPlatformSession(t, services, 1, roleAdmin)})
+	response := httptest.NewRecorder()
+	NewServerWithServices("test", Dependencies{}, services).ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !tester.called || !repository.saveInvoked {
+		t.Fatalf("管理员手动检查响应=%d %s tester=%t save=%t", response.Code, response.Body.String(), tester.called, repository.saveInvoked)
+	}
+}
+
 func TestMerchantManualModelCheckFailureMovesModelToError(t *testing.T) {
 	services, _, _ := newHTTPTestServices(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	repository := &manualModelCheckRepositoryStub{
@@ -179,14 +206,14 @@ func TestMerchantManualModelCheckFailureMovesModelToError(t *testing.T) {
 	}
 	services.Merchants = repository
 	services.Credentials = testCredentialBox(t)
-	services.ChannelTests = &manualModelTesterStub{err: errors.New("upstream timeout")}
+	services.ChannelTests = &manualModelTesterStub{err: &newapi.APIError{StatusCode: 504, Message: "upstream timeout"}}
 	services.Routing = &routingRepositoryStub{listModels: func(context.Context) ([]CanonicalModel, error) {
 		return []CanonicalModel{{ID: 61, PublicName: "gpt-5.5", Provider: "OpenAI", Status: "active", Price: OfficialPrice{PriceKind: "text"}}}, nil
 	}}
 	response := httptest.NewRecorder()
 	NewServerWithServices("test", Dependencies{}, services).ServeHTTP(response, merchantModelCheckRequest(t, services, 7, 51, 71))
-	if response.Code != http.StatusUnprocessableEntity || repository.savedState.State != "error" || repository.savedClass != healthFailureTemporary || repository.savedError == "" {
-		t.Fatalf("失败检查响应=%d %s state=%+v class=%q error=%q", response.Code, response.Body.String(), repository.savedState, repository.savedClass, repository.savedError)
+	if response.Code != http.StatusUnprocessableEntity || repository.savedState.State != "error" || repository.savedClass != healthFailureTemporary || repository.savedStatusCode != 504 || repository.savedError == "" {
+		t.Fatalf("失败检查响应=%d %s state=%+v class=%q status=%d error=%q", response.Code, response.Body.String(), repository.savedState, repository.savedClass, repository.savedStatusCode, repository.savedError)
 	}
 }
 

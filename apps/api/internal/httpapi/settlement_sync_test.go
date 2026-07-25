@@ -126,3 +126,23 @@ func TestSettlementSyncDoesNotAdvanceWatermarkAfterFetchFailure(t *testing.T) {
 		t.Fatalf("失败后水位=%d，错误=%q", repository.completedAt, repository.failure)
 	}
 }
+
+func TestSettlementSyncSkipsFailedConsumptionLog(t *testing.T) {
+	repository := &settlementLogRepositoryStub{lastSynced: 1_784_692_800}
+	runner := NewSettlementSyncRunner(repository, settlementAdminStub{do: func(_ context.Context, _ string, path string, _ any) ([]byte, error) {
+		query, _ := url.Parse(path)
+		if query.Query().Get("type") == "2" {
+			return json.Marshal(map[string]any{"page": 1, "page_size": 100, "total": 2, "items": []map[string]any{
+				{"id": 262, "user_id": 7, "created_at": 1_784_693_000, "type": 2, "model_name": "gpt-5.6", "quota": 0, "channel": 41},
+				{"id": 263, "user_id": 7, "created_at": 1_784_693_001, "type": 2, "model_name": "gpt-5.6", "quota": 37, "channel": 41},
+			}})
+		}
+		return json.Marshal(map[string]any{"page": 1, "page_size": 100, "total": 0, "items": []any{}})
+	}})
+	if err := runner.RunCycle(context.Background(), time.Unix(1_784_696_400, 0)); err != nil {
+		t.Fatalf("失败消费日志不应阻塞同步：%v", err)
+	}
+	if len(repository.applied) != 1 || repository.applied[0].ID != 263 || repository.failure != "" {
+		t.Fatalf("跳过失败日志后的同步结果=%+v 错误=%q", repository.applied, repository.failure)
+	}
+}

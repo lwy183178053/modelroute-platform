@@ -19,20 +19,26 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
-import Anthropic from '@lobehub/icons/es/Anthropic/components/Mono';
-import DeepSeek from '@lobehub/icons/es/DeepSeek/components/Mono';
-import Gemini from '@lobehub/icons/es/Gemini/components/Mono';
-import Moonshot from '@lobehub/icons/es/Moonshot/components/Mono';
-import OpenAI from '@lobehub/icons/es/OpenAI/components/Mono';
-import Qwen from '@lobehub/icons/es/Qwen/components/Mono';
+import Anthropic from '@lobehub/icons/es/Anthropic/components/Avatar';
+import DeepSeek from '@lobehub/icons/es/DeepSeek/components/Color';
+import Gemini from '@lobehub/icons/es/Gemini/components/Color';
+import Moonshot from '@lobehub/icons/es/Moonshot/components/Avatar';
+import OpenAI from '@lobehub/icons/es/OpenAI/components/Avatar';
+import Qwen from '@lobehub/icons/es/Qwen/components/Color';
 
 const providerIcons = { OpenAI, Anthropic, Gemini, DeepSeek, Qwen, Moonshot };
+const providerIconProps = {
+  OpenAI: { background: '#10a37f', color: '#fff' },
+  Anthropic: { background: '#d97757', color: '#fff' },
+  Moonshot: { background: '#5367e8', color: '#fff' },
+};
 
 export function ProviderLogo({ provider, size = 20 }) {
   const Icon = providerIcons[provider] || Database;
+  const iconProps = providerIconProps[provider] || {};
   return (
-    <span className="provider-logo" aria-hidden="true">
-      <Icon size={size} />
+    <span className={`provider-logo provider-logo-${String(provider || 'unknown').toLowerCase()}`} aria-hidden="true">
+      <Icon size={size} {...iconProps} />
     </span>
   );
 }

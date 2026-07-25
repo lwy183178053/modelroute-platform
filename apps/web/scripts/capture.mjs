@@ -10,6 +10,7 @@ const outputDir = fileURLToPath(new URL('../artifacts/', import.meta.url));
 await mkdir(outputDir, { recursive: true });
 
 const browser = await chromium.launch({ executablePath, headless: true });
+const settleMotion = (page) => page.waitForTimeout(260);
 
 async function openNavigation(page, label) {
   const target = page.getByRole('button', { name: label, exact: true });
@@ -158,6 +159,7 @@ async function captureSet(viewport, suffix) {
 
   await page.getByRole('button', { name: '支付与充值' }).click();
   await page.getByRole('button', { name: '编辑配置' }).click();
+  await settleMotion(page);
   path = `${outputDir}payment-config-${suffix}.png`;
   await page.screenshot({ path, fullPage: false });
   if ((await stat(path)).size < 20_000) throw new Error(`payment-config-${suffix} 截图文件过小`);
@@ -171,6 +173,7 @@ async function captureSet(viewport, suffix) {
   if ((await stat(path)).size < 20_000) throw new Error(`admin-channels-${suffix} 截图文件过小`);
   await page.getByRole('row').filter({ hasText: 'OpenAI 主线路' }).getByRole('button', { name: '查看模型（1）', exact: true }).click();
   await page.getByRole('dialog', { name: '渠道模型' }).waitFor();
+  await settleMotion(page);
   await verifyLayout(page, `admin-channel-models-${suffix}`);
   path = `${outputDir}admin-channel-models-${suffix}.png`;
   await page.screenshot({ path, fullPage: false });
@@ -185,6 +188,7 @@ async function captureSet(viewport, suffix) {
   if ((await stat(path)).size < 20_000) throw new Error(`admin-models-${suffix} 截图文件过小`);
    await clickRowAction(page, '发布价格');
   await page.getByLabel('第 1 档输入价格').waitFor();
+  await settleMotion(page);
   await verifyLayout(page, `admin-model-price-${suffix}`);
   path = `${outputDir}admin-model-price-${suffix}.png`;
   await page.screenshot({ path, fullPage: false });
@@ -192,6 +196,7 @@ async function captureSet(viewport, suffix) {
   await page.getByRole('button', { name: '关闭', exact: true }).click();
    await clickRowAction(page, '发布价格', 1);
   await page.getByRole('heading', { name: '图片单张价格矩阵' }).waitFor();
+  await settleMotion(page);
   await verifyLayout(page, `admin-image-price-${suffix}`);
   path = `${outputDir}admin-image-price-${suffix}.png`;
   await page.screenshot({ path, fullPage: false });
@@ -210,6 +215,7 @@ async function captureSet(viewport, suffix) {
   await merchantSidebar.getByRole('button', { name: '渠道管理', exact: true }).click();
   await page.getByRole('row').filter({ hasText: 'OpenAI 测试渠道' }).getByRole('button', { name: '管理模型（1）', exact: true }).click();
   await page.getByRole('dialog', { name: '渠道模型' }).waitFor();
+  await settleMotion(page);
   await verifyLayout(page, `merchant-channel-models-${suffix}`);
   path = `${outputDir}merchant-channel-models-${suffix}.png`;
   await page.screenshot({ path, fullPage: false });
@@ -238,6 +244,7 @@ async function captureSet(viewport, suffix) {
   if ((await stat(path)).size < 20_000) throw new Error(`merchant-usage-${suffix} 截图文件过小`);
   await merchantSidebar.getByRole('button', { name: '提现记录', exact: true }).click();
   await page.getByRole('button', { name: '申请提现' }).click();
+  await settleMotion(page);
   await page.getByLabel('提现金额（人民币）').fill('100');
   await page.getByLabel('支付宝账户').fill('13800132621');
   path = `${outputDir}withdrawal-modal-${suffix}.png`;
@@ -263,6 +270,7 @@ async function captureSet(viewport, suffix) {
   await page.getByText('缓存优先主路由').waitFor();
   await clickRowAction(page, '编辑');
   await page.getByRole('dialog', { name: '编辑路由策略' }).waitFor();
+  await settleMotion(page);
   path = `${outputDir}route-modal-${suffix}.png`;
   await page.screenshot({ path, fullPage: false });
   if ((await stat(path)).size < 20_000) throw new Error(`route-modal-${suffix} 截图文件过小`);

@@ -17,10 +17,23 @@ import (
 var migrationFS embed.FS
 
 type File struct {
-	Version  int
-	Name     string
-	Checksum string
-	SQL      string
+	Version            int
+	Name               string
+	Checksum           string
+	SQL                string
+	historicalChecksum string
+}
+
+func migrationChecksums(body []byte) (string, string) {
+	canonicalBody := []byte(strings.ReplaceAll(string(body), "\r\n", "\n"))
+	canonicalHash := sha256.Sum256(canonicalBody)
+	historicalBody := []byte(strings.ReplaceAll(string(canonicalBody), "\n", "\r\n"))
+	historicalHash := sha256.Sum256(historicalBody)
+	return hex.EncodeToString(canonicalHash[:]), hex.EncodeToString(historicalHash[:])
+}
+
+func (file File) acceptsChecksum(checksum string) bool {
+	return checksum == file.Checksum || checksum == file.historicalChecksum
 }
 
 func Files() ([]File, error) {
@@ -44,12 +57,13 @@ func Files() ([]File, error) {
 		if err != nil {
 			return nil, fmt.Errorf("读取迁移文件 %s：%w", name, err)
 		}
-		hash := sha256.Sum256(body)
+		checksum, historicalChecksum := migrationChecksums(body)
 		files = append(files, File{
-			Version:  version,
-			Name:     name,
-			Checksum: hex.EncodeToString(hash[:]),
-			SQL:      string(body),
+			Version:            version,
+			Name:               name,
+			Checksum:           checksum,
+			SQL:                string(body),
+			historicalChecksum: historicalChecksum,
 		})
 	}
 	return files, nil
@@ -87,7 +101,7 @@ func Up(ctx context.Context, db *sql.DB) error {
 			file.Version,
 		).Scan(&checksum)
 		switch {
-		case err == nil && checksum != file.Checksum:
+		case err == nil && !file.acceptsChecksum(checksum):
 			return fmt.Errorf("已执行迁移 %s 的校验和发生变化", file.Name)
 		case err == nil:
 			continue

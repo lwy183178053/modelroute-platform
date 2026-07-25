@@ -2,7 +2,9 @@ package migrations
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"os"
@@ -12,6 +14,35 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
+
+func TestMigrationChecksumIgnoresLineEndings(t *testing.T) {
+	lf := []byte("CREATE TABLE example (\n    id bigint PRIMARY KEY\n);\n")
+	crlf := []byte(strings.ReplaceAll(string(lf), "\n", "\r\n"))
+
+	lfChecksum, _ := migrationChecksums(lf)
+	crlfChecksum, _ := migrationChecksums(crlf)
+	if lfChecksum != crlfChecksum {
+		t.Fatalf("LF 与 CRLF 的规范摘要不同：LF=%s CRLF=%s", lfChecksum, crlfChecksum)
+	}
+}
+
+func TestMigrationChecksumAcceptsHistoricalCRLFHash(t *testing.T) {
+	files, err := Files()
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := files[0]
+	crlfBody := []byte(strings.ReplaceAll(file.SQL, "\n", "\r\n"))
+	crlfHash := sha256.Sum256(crlfBody)
+	historicalChecksum := hex.EncodeToString(crlfHash[:])
+
+	if historicalChecksum != "ffbfa03ebe5019c28eb6d248519f2390d9799a7b4e94c0d5eec2aeb0185f94dc" {
+		t.Fatalf("生产历史 CRLF 摘要发生意外变化：%s", historicalChecksum)
+	}
+	if !file.acceptsChecksum(historicalChecksum) {
+		t.Fatalf("迁移 %s 未接受生产历史 CRLF 摘要", file.Name)
+	}
+}
 
 func TestEmbeddedMigrationIsV2Baseline(t *testing.T) {
 	files, err := Files()

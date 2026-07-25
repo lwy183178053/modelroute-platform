@@ -3602,3 +3602,31 @@
 - `docs/部署运行手册.md`：更新平台加密密钥和核心管理员凭据的当前用途。
 - `progress.md`：追加本轮实现、验证证据、改动清单和回滚点。
 - 回滚点：生产部署前为提交 `81a6a82afdfb`，可执行 `git revert <本轮提交哈希>` 回退代码和文档。第 12 号迁移会物理删除旧渠道审核及渠道级健康表，部署后属于前向结构变更；切回旧程序前必须先恢复迁移前的平台数据库，不能只切换旧镜像。
+
+## 2026-07-25 - Task: 迁移摘要兼容与失败发布清理
+
+### What was done
+
+- 将数据库迁移摘要统一为 LF 规范内容，继续接受生产库已保存的 CRLF 历史摘要；SQL 实际内容变化仍会阻止迁移，后续新迁移只记录规范摘要。
+- 收紧不可变发布失败清理：安装器恢复并确认旧发布指针、重新启动旧服务后，删除本次失败候选目录，同时保留共享配置、数据和备份。
+- 部署手册补充跨平台迁移摘要规则与失败候选清理边界。
+
+### Testing
+
+- 回归用例先分别复现迁移器拒绝 CRLF 历史摘要、失败发布残留候选目录；最小修复后两项聚焦测试通过。
+- `go test ./... -count=1`、`go vet ./...`、`go build ./...`：通过。
+- PostgreSQL 集成测试 `go test ./internal/httpapi ./internal/migrations -count=1`：通过，覆盖真实迁移、逐模型状态和路由仓储。
+- `npm.cmd test`、`npm.cmd run test:ui`、`npm.cmd run build`：通过，生产构建完成 1612 个模块转换。
+- 部署 Python 测试：35 项通过；生产与开发 Compose 配置校验通过。
+- `deploy/scripts/dev.ps1 verify`：通过，本地开发环境在 `http://127.0.0.1:57723/` 返回版本 `dev`。
+- `deploy/scripts/dev.ps1 preflight`：通过，生产 Dockerfile、Nginx、API、Worker、核心服务及迁移在 `http://127.0.0.1:28100/` 验收通过，随后恢复热更新环境。
+
+### Notes
+
+- `apps/api/internal/migrations/migrate.go`：规范化迁移换行摘要并兼容 CRLF 历史摘要。
+- `apps/api/internal/migrations/migrate_test.go`：增加换行稳定性和生产历史摘要回归测试。
+- `deploy/scripts/install-release.sh`：失败回滚确认旧指针后清理本次候选目录。
+- `deploy/tests/test_deploy.py`：增加失败候选目录已清理、共享数据仍保留的断言。
+- `docs/部署运行手册.md`：记录迁移摘要与失败清理规则。
+- `progress.md`：追加本轮改动、验证证据、文件清单和回滚方式。
+- 回滚点：本轮施工前提交为 `13ccb05e8872`；可执行 `git revert <本轮提交哈希>` 回退本轮代码和文档。该回滚只移除跨平台摘要兼容和失败候选清理，不修改迁移 SQL 或业务数据。

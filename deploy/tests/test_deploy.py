@@ -208,6 +208,7 @@ class DeployScriptTest(unittest.TestCase):
                 (base / "restore.log").is_file(), result.stdout + result.stderr
             )
             self.assertEqual((base / "restore.log").read_text(encoding="ascii"), "restored\n")
+            self.assertFalse((releases / "bbbbbbbbbbbb").exists())
             self.assertTrue((shared / "data").is_dir())
             self.assertTrue((shared / "backups").is_dir())
 

@@ -61,6 +61,11 @@ cleanup() {
     if [ -x "$PREVIOUS/deploy/scripts/deploy.sh" ]; then
       (cd "$PREVIOUS" && ./deploy/scripts/deploy.sh) || true
     fi
+    if [ "$(readlink -f "$CURRENT" 2>/dev/null || true)" = "$PREVIOUS" ]; then
+      rm -rf -- "$TARGET"
+    else
+      echo "旧发布指针未恢复，保留候选目录供人工核查：$TARGET" >&2
+    fi
   fi
   exit "$status"
 }

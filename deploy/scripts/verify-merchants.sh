@@ -35,7 +35,6 @@ cleanup_platform_fixture() {
 BEGIN;
 DELETE FROM merchant_channels
 WHERE merchant_profile_id IN (SELECT id FROM merchant_profiles WHERE newapi_user_id = $TEST_USER_ID);
-DELETE FROM merchant_channel_reviews WHERE merchant_newapi_user_id = $TEST_USER_ID;
 DELETE FROM merchant_name_reservations WHERE newapi_user_id = $TEST_USER_ID;
 DELETE FROM merchant_profiles WHERE newapi_user_id = $TEST_USER_ID;
 DELETE FROM merchant_applications WHERE newapi_user_id = $TEST_USER_ID;
@@ -202,14 +201,14 @@ with open(sys.argv[1], "w", encoding="utf-8") as output:
     json.dump(payload, output, ensure_ascii=False)
 PY
 
-status="$(curl -sS -o "$WORK_DIR/channel-test-failed.json" -w '%{http_code}' \
+status="$(curl -sS -o "$WORK_DIR/channel-sync-failed.json" -w '%{http_code}' \
   -b "$USER_COOKIE_JAR" -H "Origin: $BASE_URL" -H 'Content-Type: application/json' \
-  --data '{}' "$BASE_URL/api/merchant/channel-tests")"
+  --data '{}' "$BASE_URL/api/merchant/channel-models/sync")"
 if [ "$status" != "403" ]; then
-  echo "普通用户渠道检测状态码为 $status，预期 403" >&2
+  echo "普通用户模型同步状态码为 $status，预期 403" >&2
   exit 1
 fi
-python3 - "$WORK_DIR/channel-test-failed.json" <<'PY'
+python3 - "$WORK_DIR/channel-sync-failed.json" <<'PY'
 import json
 import sys
 
@@ -249,25 +248,21 @@ assert data["data"]["status"] == "pending"
 PY
 
 curl -fsS -b "$ADMIN_COOKIE_JAR" "$BASE_URL/api/admin/merchant-applications?p=1&page_size=100" >"$WORK_DIR/applications.json"
-curl -fsS -b "$ADMIN_COOKIE_JAR" "$BASE_URL/api/admin/channel-reviews?p=1&page_size=100" >"$WORK_DIR/reviews.json"
 curl -fsS -b "$ADMIN_COOKIE_JAR" "$BASE_URL/api/admin/channels?p=1&page_size=100" >"$WORK_DIR/channels.json"
-python3 - "$WORK_DIR/applications.json" "$WORK_DIR/reviews.json" "$WORK_DIR/channels.json" "$APPLICATION_ID" "$TEST_USER_ID" <<'PY'
+python3 - "$WORK_DIR/applications.json" "$WORK_DIR/channels.json" "$APPLICATION_ID" <<'PY'
 import json
 import sys
 
 applications = json.load(open(sys.argv[1], encoding="utf-8"))
-reviews = json.load(open(sys.argv[2], encoding="utf-8"))
-channels = json.load(open(sys.argv[3], encoding="utf-8"))
-application_id = int(sys.argv[4])
-user_id = int(sys.argv[5])
+channels = json.load(open(sys.argv[2], encoding="utf-8"))
+application_id = int(sys.argv[3])
 assert applications.get("success") is True
 match = next(item for item in applications["data"]["items"] if int(item["id"]) == application_id)
 assert match["status"] == "pending"
 assert "channel" not in json.dumps(match, ensure_ascii=False)
-assert all(int(item.get("user_id", 0)) != user_id for item in reviews["data"]["items"])
 assert channels.get("success") is True
 assert isinstance(channels["data"].get("items"), list)
-encoded = json.dumps([applications, reviews, channels], ensure_ascii=False)
+encoded = json.dumps([applications, channels], ensure_ascii=False)
 assert "encrypted_credential" not in encoded
 assert "api_key" not in encoded
 PY

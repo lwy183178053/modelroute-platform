@@ -34,7 +34,7 @@ class ReleaseToolContractTest(unittest.TestCase):
             '-b "$USER_COOKIE_JAR"',
             '"$NEW_API_BASE_URL/api/user/"',
             '-X DELETE "$NEW_API_BASE_URL/api/user/$TEST_USER_ID"',
-            "/api/merchant/channel-tests",
+            "/api/merchant/channel-models/sync",
             '"display_name"',
             '"website_url"',
             '"business_description"',
@@ -51,6 +51,9 @@ class ReleaseToolContractTest(unittest.TestCase):
             '"test_receipt"',
             '"initial_channel"',
             "merchant_channel_tests",
+            "/api/merchant/channel-tests",
+            "/api/admin/channel-reviews",
+            "merchant_channel_reviews",
         ):
             self.assertNotIn(old_field, verifier)
         self.assertNotIn("platform_audit_logs", verifier)

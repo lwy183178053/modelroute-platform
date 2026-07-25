@@ -3654,3 +3654,32 @@
 - `docs/部署运行手册.md`：更新商户生产验收边界。
 - `progress.md`：追加失败回滚证据、修复内容和验证记录。
 - 回滚点：本轮施工前提交为 `6383f9ef231b`；可执行 `git revert <本轮提交哈希>` 回退验收脚本与文档。本轮不修改平台业务代码、数据库结构或业务数据。
+
+## 2026-07-25 - Task: 修复 CC Switch Responses 端点并兼容无版本路径
+
+### What was done
+
+- 线上网关日志确认 CC Switch、Codex++ 和 Codex Desktop 使用域名根目录后请求 `POST /responses`，由静态站点返回 `405`；同期标准 `POST /v1/responses` 正常返回 `200`。
+- 新版 CC Switch 深链将 `endpoint` 固定为公开域名加 `/v1`，额度脚本相对该端点访问 `/usage`，避免正常调用缺少版本前缀或额度查询重复 `/v1`。
+- 网关为旧配置增加 `/responses`、`/chat/completions`、`/images/generations`、`/models` 和 `/usage` 精确兼容映射，统一转入对应 `/v1/*`，继续复用原鉴权、路由、计费和流式链路。
+- 发布验收增加无版本 `/responses` 检查，必须返回平台 `401 invalid_api_key`，防止再次退化为 Nginx HTML `405`。
+
+### Testing
+
+- CC Switch 回归测试先复现深链 `endpoint` 缺少 `/v1`，修复后通过，并确认 Usage Script 不会生成 `/v1/v1/usage`。
+- 网关契约测试先复现无版本路径未代理，修复后通过。
+- `npm.cmd test`、`npm.cmd run test:ui`、`npm.cmd run build`：通过，生产构建完成 1612 个模块转换。
+- `go test ./... -count=1`、`go vet ./...`、`go build ./...`：通过。
+- 部署 Python 测试：36 项通过；生产 Compose 配置校验通过。
+- `deploy/scripts/dev.ps1 verify` 与 `deploy/scripts/dev.ps1 preflight`：通过；生产同构网关已实际验证 `/responses` 进入平台鉴权，结束后恢复 `http://127.0.0.1:57723/`。
+
+### Notes
+
+- `apps/web/src/ccswitch.js`：将导入端点调整为 `/v1` 并修正额度脚本相对路径。
+- `apps/web/scripts/ccswitch-import-test.mjs`：锁定深链端点和额度查询路径。
+- `deploy/gateway/default.conf`：增加五个无版本公开入口的精确兼容映射。
+- `deploy/scripts/verify.sh`：增加根路径 Responses 鉴权验收。
+- `deploy/tests/test_compose.py`：增加网关兼容配置与验收脚本契约。
+- `docs/CC Switch接入.md`：说明标准端点和旧配置兼容范围。
+- `progress.md`：追加问题证据、实现、验证和回滚说明。
+- 回滚点：本轮施工前提交为 `e0e428e63f93`；可执行 `git revert <本轮提交哈希>` 回退导入端点和网关兼容。本轮不修改数据库结构或业务数据。

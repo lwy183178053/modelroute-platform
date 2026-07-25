@@ -1,6 +1,6 @@
 export const ccSwitchUsageScript = `({
   request: {
-    url: "{{baseUrl}}/v1/usage",
+    url: "{{baseUrl}}/usage",
     method: "GET",
     headers: { "Authorization": "Bearer {{apiKey}}" }
   },
@@ -17,13 +17,14 @@ export const ccSwitchUsageScript = `({
 
 export function buildCCSwitchImportURL({ baseUrl, apiKey, model, provider, keyName }) {
   const origin = new URL(baseUrl).origin;
+  const endpoint = `${origin}/v1`;
   const query = new URLSearchParams([
     ['resource', 'provider'],
     ['app', 'codex'],
     ['model', model],
     ['name', `${keyName} · ${provider}`],
     ['homepage', origin],
-    ['endpoint', origin],
+    ['endpoint', endpoint],
     ['apiKey', apiKey],
     ['configFormat', 'json'],
     ['usageEnabled', 'true'],

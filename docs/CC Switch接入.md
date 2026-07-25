@@ -8,7 +8,7 @@
 
 - `resource=provider`
 - `app=codex`
-- 当前站点公开地址作为 `homepage` 和 `endpoint`
+- 当前站点公开域名作为 `homepage`，公开域名加 `/v1` 作为 `endpoint`
 - 用户选择的已授权模型
 - `usageEnabled=true`
 - `usageAutoInterval=30`
@@ -16,7 +16,7 @@
 
 六种密钥厂商都使用 Codex/Responses 客户端入口。厂商只限制该密钥可绑定的模型，不改变公开请求协议。完整密钥只交给浏览器的 CC Switch 协议处理器，不写入平台日志、文档或业务数据库。
 
-此前手工导入或旧版本一键导入的配置不包含新版 Usage Script，需要重新执行一键导入。
+新版一键导入使用标准调用端点 `https://aggregate.lwylink.xyz/v1`。网关同时兼容旧配置使用的根路径 `/responses`、`/chat/completions`、`/images/generations`、`/models` 和 `/usage`，这些入口统一映射到对应 `/v1/*`，仍经过相同鉴权、路由和计费链路。
 
 ## 额度查询
 

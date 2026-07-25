@@ -20,4 +20,12 @@ test "$status" = "401"
 grep -q '"code":"invalid_api_key"' /tmp/modelroute-v1-check.json
 rm -f /tmp/modelroute-v1-check.json
 
+status=$(curl -sS -o /tmp/modelroute-versionless-check.json -w '%{http_code}' \
+  -X POST "$BASE_URL/responses" \
+  -H 'Content-Type: application/json' \
+  --data '{"model":"foundation-check","input":"hi"}')
+test "$status" = "401"
+grep -q '"code":"invalid_api_key"' /tmp/modelroute-versionless-check.json
+rm -f /tmp/modelroute-versionless-check.json
+
 echo "ModelRoute 部署验收通过：页面、存活、就绪和模型入口鉴权状态正常。"

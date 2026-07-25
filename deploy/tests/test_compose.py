@@ -70,6 +70,14 @@ class ComposeIsolationTest(unittest.TestCase):
         healthcheck = self.config["services"]["gateway"]["healthcheck"]["test"]
         self.assertIn("http://127.0.0.1:8080/healthz", healthcheck[1])
 
+    def test_gateway_supports_versionless_openai_paths(self):
+        gateway = (ROOT / "deploy" / "gateway" / "default.conf").read_text(encoding="utf-8")
+        verifier = (ROOT / "deploy" / "scripts" / "verify.sh").read_text(encoding="utf-8")
+        self.assertIn("responses|chat/completions|images/generations|models|usage", gateway)
+        self.assertIn("rewrite ^ /v1$uri break;", gateway)
+        self.assertIn('"$BASE_URL/responses"', verifier)
+        self.assertIn('"code":"invalid_api_key"', verifier)
+
     def test_platform_services_receive_credential_encryption_key(self):
         for service_name in ("platform-api", "platform-worker"):
             environment = self.config["services"][service_name]["environment"]
